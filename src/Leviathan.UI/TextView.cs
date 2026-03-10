@@ -111,8 +111,6 @@ public sealed class TextView
 
     // Gutter sizing: 8 digit positions + 1 space separator = 9 chars
     float gutterWidth = 9 * charWidth;
-    float textAreaWidth = outerAvail.X - gutterWidth;
-    int maxColumns = Math.Max(1, (int)(textAreaWidth / charWidth));
 
     // ── Estimated total visual lines for scrollbar ──
     long totalLines = _estimatedTotalLines;
@@ -125,7 +123,10 @@ public sealed class TextView
     ImGui.BeginChild("##TextScroll"u8, outerAvail, ImGuiChildFlags.None,
         ImGuiWindowFlags.NoMove);
 
+    // Compute maxColumns *inside* the child window so the scrollbar width is excluded
     var innerAvail = ImGui.GetContentRegionAvail();
+    float textAreaWidth = innerAvail.X - gutterWidth;
+    int maxColumns = Math.Max(1, (int)(textAreaWidth / charWidth));
     _visibleRows = Math.Max(1, (int)(innerAvail.Y / lineHeight));
     long maxFirstLine = Math.Max(0, totalLines - _visibleRows);
     float maxScrollY = virtualHeight - _visibleRows * lineHeight;
