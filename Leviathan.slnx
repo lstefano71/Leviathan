@@ -1,9 +1,19 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Leviathan.Core/Leviathan.Core.csproj" />
-    <Project Path="src/Leviathan.UI/Leviathan.UI.csproj" />
+    <Project Path="src/Leviathan.Core/Leviathan.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/Leviathan.UI/Leviathan.UI.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Leviathan.Core.Tests/Leviathan.Core.Tests.csproj" />
+    <Project Path="tests/Leviathan.Core.Tests/Leviathan.Core.Tests.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
 </Solution>

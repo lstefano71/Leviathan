@@ -54,6 +54,9 @@ public sealed class TextView
   private float _lastScrollY = float.NaN;
   private int _suppressScrollUnlockFrames;
 
+  // Byte offset just past the last visible content (set during Render)
+  private long _visibleEndOffset;
+
   /// <summary>Current first visible byte offset.</summary>
   public long TopDocOffset => _topDocOffset;
 
@@ -164,12 +167,13 @@ public sealed class TextView
 
     // ── Derive top offset from scroll position ──
     float scrollY = ImGui.GetScrollY();
-    if (_suppressScrollUnlockFrames > 0)
-      _suppressScrollUnlockFrames--;
 
     bool scrollMoved = !float.IsNaN(_lastScrollY) && MathF.Abs(scrollY - _lastScrollY) > 0.5f;
     if (scrollMoved && !appliedProgrammaticScroll && _suppressScrollUnlockFrames == 0)
       _gotoOffset = -1;
+
+    if (_suppressScrollUnlockFrames > 0)
+      _suppressScrollUnlockFrames--;
 
     long currentLine = ScrollYToLine(scrollY, totalLines, maxFirstLine, idealHeight, maxScrollY, lineHeight);
     currentLine = Math.Clamp(currentLine, 0, maxFirstLine);
@@ -309,6 +313,14 @@ public sealed class TextView
       }
 
       linesRendered++;
+    }
+
+    // ── Track visible byte range for cursor visibility checks ──
+    if (linesRendered > 0) {
+      ref readonly VisualLine lastVl = ref _visualLines[linesRendered - 1];
+      _visibleEndOffset = lastVl.DocOffset + lastVl.ByteLength;
+    } else {
+      _visibleEndOffset = _topDocOffset;
     }
 
     // ── Set virtual content height for scrollbar ──
@@ -457,7 +469,6 @@ public sealed class TextView
     if (moved) {
       if (!io.KeyShift)
         _selectionAnchor = _cursorOffset;
-      _gotoOffset = -1;
       EnsureCursorVisible();
     }
 
@@ -894,13 +905,18 @@ public sealed class TextView
   private void EnsureCursorVisible()
   {
     if (_cursorOffset < 0) return;
-    if (_cursorOffset < _topDocOffset || _cursorOffset > _topDocOffset + _visibleRows * 200) {
+
+    // Check if cursor is outside the currently visible byte range
+    if (_cursorOffset < _topDocOffset || _cursorOffset >= _visibleEndOffset) {
       _topDocOffset = LineWrapEngine.FindLineStart(
           _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
-      _gotoOffset = _topDocOffset;
       long approxLine = GetLineNumberAtOffset(_topDocOffset) - 1;
       _scrollTargetLine = Math.Max(0, approxLine);
     }
+
+    // Always pin the offset so the heuristic doesn't fight with us
+    _gotoOffset = _topDocOffset;
+    _suppressScrollUnlockFrames = 2;
   }
 
   private unsafe void CopySelectionToClipboard()
