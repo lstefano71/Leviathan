@@ -22,6 +22,15 @@ public sealed class PieceTree
   }
 
   /// <summary>
+  /// Removes all pieces from the tree, leaving it empty.
+  /// </summary>
+  public void Clear()
+  {
+    Root = null;
+    PieceCount = 0;
+  }
+
+  /// <summary>
   /// Finds the piece containing the given logical offset.
   /// Returns the node and the local offset within that piece.
   /// </summary>

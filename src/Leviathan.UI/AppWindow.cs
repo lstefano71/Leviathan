@@ -23,6 +23,14 @@ public sealed class AppWindow : IDisposable
   private ImGuiContextPtr _imguiContext;
   private readonly Action<float> _renderCallback;
   private bool _disposed;
+  private bool _closeConfirmed;
+
+  /// <summary>
+  /// Callback invoked when the user requests closing the window (X button, Alt+F4).
+  /// Set <see cref="IWindow.IsClosing"/> to <c>false</c> inside the handler to cancel the close.
+  /// If null, the window closes immediately.
+  /// </summary>
+  public Action? OnCloseRequested { get; set; }
 
   public AppWindow(Action<float> renderCallback)
   {
@@ -113,7 +121,27 @@ public sealed class AppWindow : IDisposable
 
   private void OnClosing()
   {
-    Dispose();
+    if (_closeConfirmed)
+      return;
+
+    if (OnCloseRequested is not null) {
+      _window.IsClosing = false;
+      OnCloseRequested();
+    }
+  }
+
+  /// <summary>
+  /// Sets the window title bar text.
+  /// </summary>
+  public void SetTitle(string title) => _window.Title = title;
+
+  /// <summary>
+  /// Confirms and performs the close, bypassing the <see cref="OnCloseRequested"/> callback.
+  /// </summary>
+  public void ConfirmClose()
+  {
+    _closeConfirmed = true;
+    _window.Close();
   }
 
   // ─── Input Bridging ──────────────────────────────────────────────

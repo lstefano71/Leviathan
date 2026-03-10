@@ -71,6 +71,17 @@ public sealed class AppendBuffer : IDisposable
     _buffer = newBuffer;
   }
 
+  /// <summary>
+  /// Returns the current buffer to the pool, rents a fresh one, and resets the position.
+  /// Used after a successful save to discard append data that is now baked into the file.
+  /// </summary>
+  public void Reset()
+  {
+    ArrayPool<byte>.Shared.Return(_buffer);
+    _buffer = ArrayPool<byte>.Shared.Rent(InitialCapacity);
+    _position = 0;
+  }
+
   public void Dispose()
   {
     if (_disposed) return;

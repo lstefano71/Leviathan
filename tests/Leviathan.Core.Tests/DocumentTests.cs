@@ -177,4 +177,136 @@ public class DocumentTests
       File.Delete(dstPath);
     }
   }
+
+  [Fact]
+  public void IsModified_FalseByDefault()
+  {
+    var data = new byte[] { 1, 2, 3 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      Assert.False(doc.IsModified);
+    } finally {
+      File.Delete(path);
+    }
+  }
+
+  [Fact]
+  public void IsModified_TrueAfterInsert()
+  {
+    var data = new byte[] { 1, 2, 3 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      doc.Insert(0, new byte[] { 0xFF });
+      Assert.True(doc.IsModified);
+    } finally {
+      File.Delete(path);
+    }
+  }
+
+  [Fact]
+  public void IsModified_TrueAfterDelete()
+  {
+    var data = new byte[] { 1, 2, 3 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      doc.Delete(0, 1);
+      Assert.True(doc.IsModified);
+    } finally {
+      File.Delete(path);
+    }
+  }
+
+  [Fact]
+  public void IsModified_FalseAfterSave()
+  {
+    var data = new byte[] { 1, 2, 3 };
+    var path = CreateTempFile(data);
+    var savePath = Path.GetTempFileName();
+
+    try {
+      using var doc = new Document(path);
+      doc.Insert(0, new byte[] { 0xFF });
+      Assert.True(doc.IsModified);
+
+      doc.SaveTo(savePath);
+      Assert.False(doc.IsModified);
+    } finally {
+      File.Delete(path);
+      File.Delete(savePath);
+    }
+  }
+
+  [Fact]
+  public void SaveTo_SameFile_Succeeds()
+  {
+    var data = new byte[] { 1, 2, 3, 4, 5 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      doc.Insert(2, new byte[] { 0xAA });
+      doc.SaveTo(path);
+
+      var saved = File.ReadAllBytes(path);
+      Assert.Equal(new byte[] { 1, 2, 0xAA, 3, 4, 5 }, saved);
+    } finally {
+      File.Delete(path);
+    }
+  }
+
+  [Fact]
+  public void SaveTo_SameFile_ResetsModifiedFlag()
+  {
+    var data = new byte[] { 1, 2, 3 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      doc.Insert(0, new byte[] { 0xFF });
+      Assert.True(doc.IsModified);
+
+      doc.SaveTo(path);
+      Assert.False(doc.IsModified);
+    } finally {
+      File.Delete(path);
+    }
+  }
+
+  [Fact]
+  public void SaveTo_SameFile_DocumentStillReadable()
+  {
+    var data = new byte[] { 1, 2, 3, 4, 5 };
+    var path = CreateTempFile(data);
+
+    try {
+      using var doc = new Document(path);
+      doc.Insert(2, new byte[] { 0xAA });
+      doc.SaveTo(path);
+
+      // Document should reflect the saved content
+      Assert.Equal(6, doc.Length);
+      Span<byte> buf = stackalloc byte[6];
+      int read = doc.Read(0, buf);
+      Assert.Equal(6, read);
+      Assert.True(buf.SequenceEqual(new byte[] { 1, 2, 0xAA, 3, 4, 5 }));
+
+      // Further edits should still work
+      doc.Insert(0, new byte[] { 0xBB });
+      Assert.Equal(7, doc.Length);
+      Assert.True(doc.IsModified);
+
+      Span<byte> buf2 = stackalloc byte[7];
+      doc.Read(0, buf2);
+      Assert.Equal(0xBB, buf2[0]);
+      Assert.Equal(1, buf2[1]);
+    } finally {
+      File.Delete(path);
+    }
+  }
 }

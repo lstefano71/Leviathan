@@ -5,6 +5,7 @@ using Leviathan.Core.Text;
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Leviathan.UI;
 
@@ -56,6 +57,10 @@ public sealed class TextView
 
   // Byte offset just past the last visible content (set during Render)
   private long _visibleEndOffset;
+
+  // Caret blink state
+  private double _caretBlinkTimer;
+  private const double CaretBlinkPeriod = 1.06; // full cycle: 0.53s on + 0.53s off
 
   /// <summary>Current first visible byte offset.</summary>
   public long TopDocOffset => _topDocOffset;
@@ -137,8 +142,10 @@ public sealed class TextView
   /// <summary>
   /// Renders the text view. Must be called between ImGui.Begin/End.
   /// </summary>
-  public unsafe void Render()
+  /// <param name="deltaTime">Frame delta time in seconds, used for caret blink.</param>
+  public unsafe void Render(float deltaTime)
   {
+    _caretBlinkTimer += deltaTime;
     float lineHeight = ImGui.GetTextLineHeightWithSpacing();
     float charWidth = ImGui.CalcTextSize("M"u8).X;
     var outerAvail = ImGui.GetContentRegionAvail();
@@ -329,6 +336,24 @@ public sealed class TextView
       linesRendered++;
     }
 
+    // ── Blinking caret ──
+    if (_cursorOffset >= 0 && _caretBlinkTimer % CaretBlinkPeriod < CaretBlinkPeriod * 0.5) {
+      for (int ci = 0; ci < lineCount && ci < _visibleRows; ci++) {
+        ref readonly VisualLine cvl = ref _visualLines[ci];
+        long lineEnd = cvl.DocOffset + cvl.ByteLength;
+        if (_cursorOffset >= cvl.DocOffset && _cursorOffset <= lineEnd) {
+          float caretX = textStartX + ByteOffsetToPixelX(cvl, _cursorOffset, charWidth);
+          float caretY = cursorStart.Y + ci * lineHeight;
+          uint colCaret = ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 1.0f, 0.9f));
+          drawList.AddRectFilled(
+              new Vector2(caretX, caretY),
+              new Vector2(caretX + 2f, caretY + lineHeight),
+              colCaret);
+          break;
+        }
+      }
+    }
+
     // ── Track visible byte range for cursor visibility checks ──
     if (linesRendered > 0) {
       ref readonly VisualLine lastVl = ref _visualLines[linesRendered - 1];
@@ -484,6 +509,7 @@ public sealed class TextView
       if (!io.KeyShift)
         _selectionAnchor = _cursorOffset;
       EnsureCursorVisible();
+      _caretBlinkTimer = 0;
     }
 
     // Ctrl+G = Goto line
@@ -865,6 +891,7 @@ public sealed class TextView
           _selectionAnchor = hit;
         }
         _isDragging = true;
+        _caretBlinkTimer = 0;
       }
     }
 

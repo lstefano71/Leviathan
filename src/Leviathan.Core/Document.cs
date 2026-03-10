@@ -9,10 +9,16 @@ namespace Leviathan.Core;
 /// </summary>
 public sealed class Document : IDisposable
 {
-  private readonly MappedFileSource? _fileSource;
+  private MappedFileSource? _fileSource;
   private readonly AppendBuffer _appendBuffer;
   private readonly PieceTree _tree;
   private bool _disposed;
+  private bool _isModified;
+
+  /// <summary>
+  /// Indicates whether the document has been modified since it was opened or last saved.
+  /// </summary>
+  public bool IsModified => _isModified;
 
   /// <summary>
   /// Logical length of the document including all edits.
@@ -70,6 +76,7 @@ public sealed class Document : IDisposable
     int appendOffset = _appendBuffer.Append(data);
     var piece = new Piece(PieceSource.Append, appendOffset, data.Length);
     _tree.Insert(offset, piece);
+    _isModified = true;
   }
 
   /// <summary>
@@ -79,10 +86,13 @@ public sealed class Document : IDisposable
   {
     ObjectDisposedException.ThrowIf(_disposed, this);
     _tree.Delete(offset, length);
+    _isModified = true;
   }
 
   /// <summary>
   /// Saves all edits atomically: streams pieces to a temp file, then swaps.
+  /// When saving back to the source file, the memory-mapped handle is released
+  /// before the swap and reopened afterwards so the OS file lock is not held.
   /// </summary>
   public void SaveTo(string destinationPath)
   {
@@ -91,9 +101,11 @@ public sealed class Document : IDisposable
     destinationPath = Path.GetFullPath(destinationPath);
     string tempPath = destinationPath + ".tmp";
 
+    bool isSameFile = _fileSource is not null &&
+        string.Equals(destinationPath, _fileSource.FilePath, StringComparison.OrdinalIgnoreCase);
+
     try {
       using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 64 * 1024)) {
-        Span<byte> copyBuffer = stackalloc byte[0]; // will use heap for large chunks
         byte[] heapBuffer = new byte[64 * 1024];
 
         foreach (var piece in _tree.InOrder()) {
@@ -113,9 +125,40 @@ public sealed class Document : IDisposable
         fs.Flush(flushToDisk: true);
       }
 
+      // Release the memory-mapped lock before swapping when overwriting the source file.
+      if (isSameFile) {
+        _fileSource!.Dispose();
+        _fileSource = null;
+      }
+
       // Atomic swap
       File.Move(tempPath, destinationPath, overwrite: true);
+
+      // Release the old file source when saving to a different path.
+      if (!isSameFile && _fileSource is not null) {
+        _fileSource.Dispose();
+        _fileSource = null;
+      }
+
+      // Reopen the file and rebuild the piece tree so the document reflects the saved state.
+      var newSource = new MappedFileSource(destinationPath);
+      _fileSource = newSource;
+      _appendBuffer.Reset();
+
+      if (newSource.Length > 0) {
+        _tree.Init(new Piece(PieceSource.Original, 0, newSource.Length));
+      } else {
+        _tree.Clear();
+      }
+
+      _isModified = false;
     } catch {
+      // If the mmap was released but something went wrong, try to reopen it
+      // so the document remains usable (best effort).
+      if (isSameFile && _fileSource is null && File.Exists(destinationPath)) {
+        try { _fileSource = new MappedFileSource(destinationPath); } catch { /* best effort */ }
+      }
+
       // Clean up temp file on failure — original is untouched
       try { File.Delete(tempPath); } catch { /* best effort */ }
       throw;
