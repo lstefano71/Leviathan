@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Leviathan.UI": {
+      "commandName": "Project",
+      "commandLineArgs": "\"D:\\_Utenti\\stf.APLITA\\Source\\Repos\\Lumina\\Lumina\\data-dev\\storage\\l2\\test-stream\\test-stream_20260306.parquet\""
+    }
+  }
+}

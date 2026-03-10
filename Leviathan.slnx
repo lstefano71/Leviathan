@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Leviathan.Core/Leviathan.Core.csproj" />
+    <Project Path="src/Leviathan.UI/Leviathan.UI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Leviathan.Core.Tests/Leviathan.Core.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,241 @@
+using Hexa.NET.ImGui;
+using Hexa.NET.ImGui.Backends.OpenGL3;
+
+using Silk.NET.Input;
+using Silk.NET.Maths;
+using Silk.NET.OpenGL;
+using Silk.NET.Windowing;
+using Silk.NET.Windowing.Glfw;
+
+using System.Numerics;
+
+namespace Leviathan.UI;
+
+/// <summary>
+/// Manages the application window, OpenGL context, and ImGui lifecycle.
+/// Bridges Silk.NET input events into ImGui IO.
+/// </summary>
+public sealed class AppWindow : IDisposable
+{
+  private IWindow _window = null!;
+  private GL _gl = null!;
+  private IInputContext _input = null!;
+  private ImGuiContextPtr _imguiContext;
+  private readonly Action<float> _renderCallback;
+  private bool _disposed;
+
+  public AppWindow(Action<float> renderCallback)
+  {
+    _renderCallback = renderCallback;
+  }
+
+  public void Run()
+  {
+    GlfwWindowing.RegisterPlatform();
+
+    var opts = WindowOptions.Default with {
+      Size = new Vector2D<int>(1280, 800),
+      Title = "Leviathan — Large File Editor",
+      API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
+      VSync = true,
+    };
+
+    _window = Window.Create(opts);
+    _window.Load += OnLoad;
+    _window.Render += OnRender;
+    _window.FramebufferResize += OnResize;
+    _window.Closing += OnClosing;
+    _window.Run();
+  }
+
+  private unsafe void OnLoad()
+  {
+    _gl = _window.CreateOpenGL();
+    _input = _window.CreateInput();
+
+    // Create ImGui context
+    _imguiContext = ImGui.CreateContext();
+    ImGui.SetCurrentContext(_imguiContext);
+
+    var io = ImGui.GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
+
+    // Initialize OpenGL3 backend
+    ImGuiImplOpenGL3.SetCurrentContext(_imguiContext);
+    ImGuiImplOpenGL3.Init("#version 330");
+
+    // Setup display size
+    var fbSize = _window.FramebufferSize;
+    io.DisplaySize = new Vector2(fbSize.X, fbSize.Y);
+
+    // Wire up input
+    foreach (var keyboard in _input.Keyboards) {
+      keyboard.KeyDown += OnKeyDown;
+      keyboard.KeyUp += OnKeyUp;
+      keyboard.KeyChar += OnKeyChar;
+    }
+    foreach (var mouse in _input.Mice) {
+      mouse.MouseDown += OnMouseDown;
+      mouse.MouseUp += OnMouseUp;
+      mouse.MouseMove += OnMouseMove;
+      mouse.Scroll += OnScroll;
+    }
+  }
+
+  private unsafe void OnRender(double deltaTime)
+  {
+    var fbSize = _window.FramebufferSize;
+    _gl.Viewport(0, 0, (uint)fbSize.X, (uint)fbSize.Y);
+    _gl.ClearColor(0.1f, 0.1f, 0.12f, 1.0f);
+    _gl.Clear(ClearBufferMask.ColorBufferBit);
+
+    // Update ImGui display size
+    var io = ImGui.GetIO();
+    io.DisplaySize = new Vector2(fbSize.X, fbSize.Y);
+    io.DeltaTime = (float)deltaTime;
+
+    ImGuiImplOpenGL3.NewFrame();
+    ImGui.NewFrame();
+
+    // Invoke the application's UI rendering
+    _renderCallback((float)deltaTime);
+
+    ImGui.Render();
+    ImGuiImplOpenGL3.RenderDrawData(ImGui.GetDrawData());
+  }
+
+  private void OnResize(Vector2D<int> size)
+  {
+    _gl.Viewport(0, 0, (uint)size.X, (uint)size.Y);
+  }
+
+  private void OnClosing()
+  {
+    Dispose();
+  }
+
+  // ─── Input Bridging ──────────────────────────────────────────────
+
+  private void OnKeyDown(IKeyboard keyboard, Key key, int scancode)
+  {
+    var io = ImGui.GetIO();
+    var imKey = MapKey(key);
+    if (imKey != ImGuiKey.None)
+      io.AddKeyEvent(imKey, true);
+  }
+
+  private void OnKeyUp(IKeyboard keyboard, Key key, int scancode)
+  {
+    var io = ImGui.GetIO();
+    var imKey = MapKey(key);
+    if (imKey != ImGuiKey.None)
+      io.AddKeyEvent(imKey, false);
+  }
+
+  private void OnKeyChar(IKeyboard keyboard, char character)
+  {
+    var io = ImGui.GetIO();
+    io.AddInputCharacter(character);
+  }
+
+  private void OnMouseDown(IMouse mouse, MouseButton button)
+  {
+    var io = ImGui.GetIO();
+    int btn = button switch {
+      MouseButton.Left => 0,
+      MouseButton.Right => 1,
+      MouseButton.Middle => 2,
+      _ => -1
+    };
+    if (btn >= 0)
+      io.AddMouseButtonEvent(btn, true);
+  }
+
+  private void OnMouseUp(IMouse mouse, MouseButton button)
+  {
+    var io = ImGui.GetIO();
+    int btn = button switch {
+      MouseButton.Left => 0,
+      MouseButton.Right => 1,
+      MouseButton.Middle => 2,
+      _ => -1
+    };
+    if (btn >= 0)
+      io.AddMouseButtonEvent(btn, false);
+  }
+
+  private void OnMouseMove(IMouse mouse, Vector2 position)
+  {
+    var io = ImGui.GetIO();
+    io.AddMousePosEvent(position.X, position.Y);
+  }
+
+  private void OnScroll(IMouse mouse, ScrollWheel scroll)
+  {
+    var io = ImGui.GetIO();
+    io.AddMouseWheelEvent(scroll.X, scroll.Y);
+  }
+
+  private static ImGuiKey MapKey(Key key) => key switch {
+    Key.Tab => ImGuiKey.Tab,
+    Key.Left => ImGuiKey.LeftArrow,
+    Key.Right => ImGuiKey.RightArrow,
+    Key.Up => ImGuiKey.UpArrow,
+    Key.Down => ImGuiKey.DownArrow,
+    Key.PageUp => ImGuiKey.PageUp,
+    Key.PageDown => ImGuiKey.PageDown,
+    Key.Home => ImGuiKey.Home,
+    Key.End => ImGuiKey.End,
+    Key.Insert => ImGuiKey.Insert,
+    Key.Delete => ImGuiKey.Delete,
+    Key.Backspace => ImGuiKey.Backspace,
+    Key.Space => ImGuiKey.Space,
+    Key.Enter => ImGuiKey.Enter,
+    Key.Escape => ImGuiKey.Escape,
+    Key.A => ImGuiKey.A,
+    Key.C => ImGuiKey.C,
+    Key.V => ImGuiKey.V,
+    Key.X => ImGuiKey.X,
+    Key.Y => ImGuiKey.Y,
+    Key.Z => ImGuiKey.Z,
+    Key.Number0 => ImGuiKey.Key0,
+    Key.Number1 => ImGuiKey.Key1,
+    Key.Number2 => ImGuiKey.Key2,
+    Key.Number3 => ImGuiKey.Key3,
+    Key.Number4 => ImGuiKey.Key4,
+    Key.Number5 => ImGuiKey.Key5,
+    Key.Number6 => ImGuiKey.Key6,
+    Key.Number7 => ImGuiKey.Key7,
+    Key.Number8 => ImGuiKey.Key8,
+    Key.Number9 => ImGuiKey.Key9,
+    Key.B => ImGuiKey.B,
+    Key.D => ImGuiKey.D,
+    Key.E => ImGuiKey.E,
+    Key.F => ImGuiKey.F,
+    Key.G => ImGuiKey.G,
+    Key.F1 => ImGuiKey.F1,
+    Key.F2 => ImGuiKey.F2,
+    Key.F3 => ImGuiKey.F3,
+    Key.F5 => ImGuiKey.F5,
+    Key.F12 => ImGuiKey.F12,
+    Key.ControlLeft => ImGuiKey.LeftCtrl,
+    Key.ControlRight => ImGuiKey.RightCtrl,
+    Key.ShiftLeft => ImGuiKey.LeftShift,
+    Key.ShiftRight => ImGuiKey.RightShift,
+    Key.AltLeft => ImGuiKey.LeftAlt,
+    Key.AltRight => ImGuiKey.RightAlt,
+    _ => ImGuiKey.None
+  };
+
+  public unsafe void Dispose()
+  {
+    if (_disposed) return;
+    _disposed = true;
+
+    ImGuiImplOpenGL3.Shutdown();
+    ImGui.DestroyContext(_imguiContext);
+
+    _input?.Dispose();
+    _gl?.Dispose();
+  }
+}
