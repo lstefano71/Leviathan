@@ -19,7 +19,9 @@ public sealed class HexView
   private long _baseOffset;       // first visible byte offset
   private int _bytesPerRow = 16;
   private int _visibleRows;
-  private long _selectedOffset = -1; // -1 = no selection
+  private long _selectedOffset = -1; // cursor byte offset; -1 = no selection
+  private long _selectionAnchor = -1; // anchor for range selection; -1 = no range
+  private bool _nibbleLow;            // false = editing high nibble, true = low nibble
 
   // Scrollbar state: target row set by keyboard/goto, applied next frame
   private long _scrollTargetRow = -1;
@@ -52,6 +54,20 @@ public sealed class HexView
   /// Positive value = fixed (must be a multiple of 8, minimum 8).
   /// </summary>
   public int BytesPerRowSetting { get; set; }
+
+  /// <summary>Current cursor byte offset (for Find dialog positioning).</summary>
+  public long SelectedOffset => _selectedOffset;
+
+  /// <summary>
+  /// Jumps to the given offset and highlights it. Used by the Find dialog.
+  /// </summary>
+  public void JumpToMatch(long offset)
+  {
+    _selectedOffset = Math.Clamp(offset, 0, Math.Max(0, _document.Length - 1));
+    _selectionAnchor = _selectedOffset;
+    _nibbleLow = false;
+    ScrollTo(offset);
+  }
 
   public HexView(Document document)
   {
@@ -162,6 +178,13 @@ public sealed class HexView
     uint colAscii = ImGui.GetColorU32(new Vector4(0.6f, 0.9f, 0.6f, 1.0f));
     uint colSeparator = ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1.0f));
     uint colHighlight = ImGui.GetColorU32(new Vector4(0.3f, 0.5f, 0.8f, 0.5f));
+    uint colSelection = ImGui.GetColorU32(new Vector4(0.2f, 0.4f, 0.8f, 0.4f));
+    uint colNibbleCursor = ImGui.GetColorU32(new Vector4(0.9f, 0.6f, 0.1f, 0.7f));
+
+    long selStart = _selectionAnchor >= 0 && _selectedOffset >= 0
+        ? Math.Min(_selectionAnchor, _selectedOffset) : _selectedOffset;
+    long selEnd = _selectionAnchor >= 0 && _selectedOffset >= 0
+        ? Math.Max(_selectionAnchor, _selectedOffset) : _selectedOffset;
 
     // ── Layout columns ──
     float offsetColWidth = 19 * charWidth;
@@ -212,9 +235,24 @@ public sealed class HexView
 
       if (clickRow >= 0 && clickRow < _visibleRows && clickCol >= 0 && clickCol < _bytesPerRow) {
         long clickedOffset = _baseOffset + clickRow * _bytesPerRow + clickCol;
-        _selectedOffset = clickedOffset < _document.Length ? clickedOffset : -1;
+        if (clickedOffset < _document.Length) {
+          var io2 = ImGui.GetIO();
+          if (io2.KeyShift && _selectedOffset >= 0) {
+            // Shift+click: extend selection
+            if (_selectionAnchor < 0) _selectionAnchor = _selectedOffset;
+            _selectedOffset = clickedOffset;
+          } else {
+            _selectedOffset = clickedOffset;
+            _selectionAnchor = clickedOffset;
+            _nibbleLow = false;
+          }
+        } else {
+          _selectedOffset = -1;
+          _selectionAnchor = -1;
+        }
       } else {
         _selectedOffset = -1;
+        _selectionAnchor = -1;
       }
     }
 
@@ -243,12 +281,22 @@ public sealed class HexView
           byte b = _readBuffer[rowStart + col];
           long byteOffset = rowOffset + col;
 
-          // Highlight selected byte in hex column
-          if (byteOffset == _selectedOffset) {
+          // Selection range highlight in hex column
+          if (byteOffset >= selStart && byteOffset <= selEnd && selStart >= 0) {
+            uint hlColor = byteOffset == _selectedOffset ? colHighlight : colSelection;
             drawList.AddRectFilled(
                 new Vector2(xBase, y),
                 new Vector2(xBase + 2 * charWidth, y + lineHeight),
-                colHighlight);
+                hlColor);
+          }
+
+          // Nibble cursor: underline the active nibble position
+          if (byteOffset == _selectedOffset && _selectedOffset >= 0) {
+            float nibbleX = xBase + (_nibbleLow ? charWidth : 0);
+            drawList.AddLine(
+                new Vector2(nibbleX, y + lineHeight - 2),
+                new Vector2(nibbleX + charWidth, y + lineHeight - 2),
+                colNibbleCursor, 2f);
           }
 
           FormatHexByte(b, hexByteBuf);
@@ -264,13 +312,14 @@ public sealed class HexView
         byte b = _readBuffer[rowStart + col];
         long byteOffset = rowOffset + col;
 
-        // Highlight selected byte in ASCII column
-        if (byteOffset == _selectedOffset) {
+        // Selection range highlight in ASCII column
+        if (byteOffset >= selStart && byteOffset <= selEnd && selStart >= 0) {
           float asciiX = cursorStart.X + asciiColStart + col * charWidth;
+          uint hlColor = byteOffset == _selectedOffset ? colHighlight : colSelection;
           drawList.AddRectFilled(
               new Vector2(asciiX, y),
               new Vector2(asciiX + charWidth, y + lineHeight),
-              colHighlight);
+              hlColor);
         }
 
         asciiBuf[col] = (b >= 0x20 && b < 0x7F) ? b : (byte)'.';
@@ -336,10 +385,87 @@ public sealed class HexView
     if (ImGui.IsKeyPressed(ImGuiKey.G) && io.KeyCtrl)
       OpenGotoDialog();
 
+    // ── Hex byte editing ──────────────────────────────────────────
+
+    // Backspace: delete byte before cursor
+    if (ImGui.IsKeyPressed(ImGuiKey.Backspace, true) && _selectedOffset > 0) {
+      long target = _selectedOffset - 1;
+      _document.Delete(target, 1);
+      _selectedOffset = target;
+      _selectionAnchor = target;
+      _nibbleLow = false;
+      EnsureSelectedVisible(maxFirstRow);
+    }
+
+    // Delete: delete byte at cursor
+    if (ImGui.IsKeyPressed(ImGuiKey.Delete, true) && _selectedOffset >= 0
+        && _selectedOffset < _document.Length) {
+      _document.Delete(_selectedOffset, 1);
+      _selectedOffset = Math.Clamp(_selectedOffset, 0, Math.Max(0, _document.Length - 1));
+      _selectionAnchor = _selectedOffset;
+      _nibbleLow = false;
+      EnsureSelectedVisible(maxFirstRow);
+    }
+
+    // Hex digit entry (overwrite mode): 0–9 and A–F
+    // Only when not holding Ctrl (to avoid hijacking Ctrl+G etc.)
+    if (!io.KeyCtrl && !io.KeyAlt && _selectedOffset >= 0 && _selectedOffset < _document.Length) {
+      int hexDigit = -1;
+      if (ImGui.IsKeyPressed(ImGuiKey.Key0, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad0, true)) hexDigit = 0;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key1, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) hexDigit = 1;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key2, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true)) hexDigit = 2;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key3, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true)) hexDigit = 3;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key4, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true)) hexDigit = 4;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key5, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad5, true)) hexDigit = 5;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key6, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true)) hexDigit = 6;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key7, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) hexDigit = 7;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key8, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true)) hexDigit = 8;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key9, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true)) hexDigit = 9;
+      else if (ImGui.IsKeyPressed(ImGuiKey.A, true)) hexDigit = 10;
+      else if (ImGui.IsKeyPressed(ImGuiKey.B, true)) hexDigit = 11;
+      else if (ImGui.IsKeyPressed(ImGuiKey.C, true)) hexDigit = 12;
+      else if (ImGui.IsKeyPressed(ImGuiKey.D, true)) hexDigit = 13;
+      else if (ImGui.IsKeyPressed(ImGuiKey.E, true)) hexDigit = 14;
+      else if (ImGui.IsKeyPressed(ImGuiKey.F, true)) hexDigit = 15;
+
+      if (hexDigit >= 0) {
+        // Read current byte, modify the active nibble, overwrite
+        Span<byte> oneByte = stackalloc byte[1];
+        if (_document.Read(_selectedOffset, oneByte) == 1) {
+          byte current = oneByte[0];
+          byte newByte = _nibbleLow
+              ? (byte)((current & 0xF0) | (hexDigit & 0x0F))
+              : (byte)((current & 0x0F) | ((hexDigit & 0x0F) << 4));
+
+          _document.Delete(_selectedOffset, 1);
+          oneByte[0] = newByte;
+          _document.Insert(_selectedOffset, oneByte);
+
+          // Advance nibble or byte
+          if (_nibbleLow) {
+            _nibbleLow = false;
+            _selectedOffset = Math.Clamp(_selectedOffset + 1, 0, Math.Max(0, _document.Length - 1));
+            _selectionAnchor = _selectedOffset;
+            EnsureSelectedVisible(maxFirstRow);
+          } else {
+            _nibbleLow = true;
+          }
+        }
+      }
+    }
+
     _selectedOffset = Math.Clamp(_selectedOffset, 0, Math.Max(0, _document.Length - 1));
 
-    if (_selectedOffset != prev)
+    if (_selectedOffset != prev) {
+      // Shift extends selection anchor; plain movement resets it and nibble cursor
+      if (io.KeyShift) {
+        if (_selectionAnchor < 0) _selectionAnchor = prev;
+      } else {
+        _selectionAnchor = _selectedOffset;
+        _nibbleLow = false;
+      }
       EnsureSelectedVisible(maxFirstRow);
+    }
   }
 
   private void EnsureSelectedVisible(long maxFirstRow)

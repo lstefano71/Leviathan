@@ -1,0 +1,8 @@
+<linker>
+  <!-- Preserve the source-generated JSON context and settings type so they
+       are not trimmed away by the ILC linker during Native AOT publish. -->
+  <assembly fullname="Leviathan.UI">
+    <type fullname="Leviathan.UI.Settings" preserve="all" />
+    <type fullname="Leviathan.UI.SettingsJsonContext" preserve="all" />
+  </assembly>
+</linker>

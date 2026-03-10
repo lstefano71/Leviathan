@@ -9,6 +9,10 @@
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <Platforms>AnyCPU;x64</Platforms>
+    <!-- Surfaces trim warnings at build time; fix before shipping AOT binary -->
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <!-- Optimise AOT-compiled code for throughput (render loop, SIMD paths) -->
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +26,11 @@
     <PackageReference Include="Silk.NET.Windowing.Glfw" Version="2.23.0" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Preserve types used through source-gen JSON context from linker trimming -->
+    <TrimmerRootDescriptor Include="rd.xml" />
   </ItemGroup>
 
 </Project>

@@ -9,10 +9,12 @@ namespace Leviathan.UI;
 public sealed class Settings
 {
   private const int MaxRecentFiles = 10;
+  private const int MaxFindHistory = 20;
 
   public List<string> RecentFiles { get; set; } = [];
   public int BytesPerRow { get; set; } // 0 = auto
   public bool WordWrap { get; set; } = true;
+  public List<string> FindHistory { get; set; } = [];
 
   /// <summary>
   /// Adds a file to the top of the MRU list (deduplicates, trims to max).
@@ -24,6 +26,19 @@ public sealed class Settings
     RecentFiles.Insert(0, filePath);
     if (RecentFiles.Count > MaxRecentFiles)
       RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);
+    Save();
+  }
+
+  /// <summary>
+  /// Adds a search query to the top of the find history (deduplicates, trims to max).
+  /// </summary>
+  public void AddFindHistory(string query)
+  {
+    if (string.IsNullOrEmpty(query)) return;
+    FindHistory.RemoveAll(q => string.Equals(q, query, StringComparison.Ordinal));
+    FindHistory.Insert(0, query);
+    if (FindHistory.Count > MaxFindHistory)
+      FindHistory.RemoveRange(MaxFindHistory, FindHistory.Count - MaxFindHistory);
     Save();
   }
 

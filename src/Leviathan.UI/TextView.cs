@@ -121,6 +121,20 @@ public sealed class TextView
   private long SelectionEnd => Math.Max(_cursorOffset, _selectionAnchor);
 
   /// <summary>
+  /// Jumps to the given offset and sets the selection to [start, end).
+  /// Used by the Find dialog to highlight search matches.
+  /// </summary>
+  public void SetSelection(long start, long end)
+  {
+    _selectionAnchor = start;
+    _cursorOffset = end;
+    EnsureCursorVisible();
+  }
+
+  /// <summary>Current cursor byte offset (for Find dialog positioning).</summary>
+  public long CursorOffset => _cursorOffset;
+
+  /// <summary>
   /// Renders the text view. Must be called between ImGui.Begin/End.
   /// </summary>
   public unsafe void Render()
@@ -479,6 +493,121 @@ public sealed class TextView
     // Ctrl+C = Copy selection
     if (ImGui.IsKeyPressed(ImGuiKey.C) && io.KeyCtrl && HasSelection)
       CopySelectionToClipboard();
+
+    // ── Editing ──────────────────────────────────────────────────
+
+    // Ctrl+X = Cut selection
+    if (ImGui.IsKeyPressed(ImGuiKey.X) && io.KeyCtrl && HasSelection) {
+      CopySelectionToClipboard();
+      _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+      _cursorOffset = SelectionStart;
+      _selectionAnchor = _cursorOffset;
+      InvalidateLineCache();
+      moved = true;
+    }
+
+    // Ctrl+V = Paste clipboard
+    if (ImGui.IsKeyPressed(ImGuiKey.V) && io.KeyCtrl) {
+      unsafe {
+        byte* clipText = ImGui.GetClipboardText();
+        if (clipText != null) {
+          int len = 0;
+          while (clipText[len] != 0) len++;
+          if (len > 0) {
+            if (HasSelection) {
+              _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+              _cursorOffset = SelectionStart;
+              _selectionAnchor = _cursorOffset;
+            }
+            _document.Insert(_cursorOffset, new ReadOnlySpan<byte>(clipText, len));
+            _cursorOffset += len;
+            _selectionAnchor = _cursorOffset;
+            InvalidateLineCache();
+            moved = true;
+          }
+        }
+      }
+    }
+
+    // Enter = insert newline
+    if (ImGui.IsKeyPressed(ImGuiKey.Enter, true) && !io.KeyCtrl) {
+      if (HasSelection) {
+        _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+        _cursorOffset = SelectionStart;
+        _selectionAnchor = _cursorOffset;
+      }
+      _document.Insert(_cursorOffset, "\n"u8);
+      _cursorOffset += 1;
+      _selectionAnchor = _cursorOffset;
+      InvalidateLineCache();
+      moved = true;
+    }
+
+    // Backspace = delete rune before cursor
+    if (ImGui.IsKeyPressed(ImGuiKey.Backspace, true)) {
+      if (HasSelection) {
+        _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+        _cursorOffset = SelectionStart;
+        _selectionAnchor = _cursorOffset;
+      } else if (_cursorOffset > 0) {
+        long newCursor = MoveCursorLeft(_cursorOffset);
+        int deleteLen = (int)(_cursorOffset - newCursor);
+        _document.Delete(newCursor, deleteLen);
+        _cursorOffset = newCursor;
+        _selectionAnchor = _cursorOffset;
+      }
+      InvalidateLineCache();
+      moved = true;
+    }
+
+    // Delete = delete rune at cursor
+    if (ImGui.IsKeyPressed(ImGuiKey.Delete, true)) {
+      if (HasSelection) {
+        _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+        _cursorOffset = SelectionStart;
+        _selectionAnchor = _cursorOffset;
+      } else if (_cursorOffset < _document.Length) {
+        long newNext = MoveCursorRight(_cursorOffset);
+        int deleteLen = (int)(newNext - _cursorOffset);
+        _document.Delete(_cursorOffset, deleteLen);
+        _selectionAnchor = _cursorOffset;
+      }
+      InvalidateLineCache();
+      moved = true;
+    }
+
+    // Printable character input (sourced from AppWindow.OnKeyChar → io.AddInputCharacter)
+    if (!io.KeyCtrl && !io.KeyAlt) {
+      unsafe {
+        var charQueue = io.InputQueueCharacters;
+        for (int ci = 0; ci < charQueue.Size; ci++) {
+          char ch = (char)charQueue.Data[ci];
+          if (ch < 0x20 && ch != '\t') continue; // skip control chars (Enter handled above)
+
+          if (HasSelection) {
+            _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
+            _cursorOffset = SelectionStart;
+            _selectionAnchor = _cursorOffset;
+          }
+
+          Span<byte> utf8 = stackalloc byte[4];
+          if (Rune.TryCreate(ch, out Rune rune) && rune.TryEncodeToUtf8(utf8, out int written)) {
+            _document.Insert(_cursorOffset, utf8.Slice(0, written));
+            _cursorOffset += written;
+            _selectionAnchor = _cursorOffset;
+            InvalidateLineCache();
+            moved = true;
+          }
+        }
+      }
+    }
+  }
+
+  /// <summary>Invalidates cached line number state after a document edit.</summary>
+  private void InvalidateLineCache()
+  {
+    _cachedTopOffset = -1;
+    _estimatedTotalLines = Math.Max(1, _document.Length / 80);
   }
 
   /// <summary>

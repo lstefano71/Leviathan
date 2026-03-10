@@ -2,6 +2,7 @@ using Hexa.NET.ImGui;
 
 using Leviathan.Core;
 using Leviathan.UI;
+using Leviathan.UI.Windows;
 
 using NativeFileDialogSharp;
 
@@ -12,6 +13,7 @@ string? filePath = args.Length > 0 ? args[0] : null;
 Document? document = null;
 HexView? hexView = null;
 TextView? textView = null;
+FindWindow findWindow = new();
 
 // Active view mode: 0 = Hex, 1 = Text
 int activeView = 0; // 0=Hex, 1=Text
@@ -39,8 +41,21 @@ var appWindow = new AppWindow(deltaTime => {
         if (result.IsOk && result.Path is not null)
           OpenFile(result.Path);
       }
-      if (document is not null && ImGui.MenuItem("Save"u8)) {
-        document.SaveTo(document.FilePath!);
+      if (document is not null && ImGui.MenuItem("Save"u8, "Ctrl+S"u8)) {
+        string? savePath = document.FilePath;
+        if (savePath is null) {
+          // No backing file — fall through to Save As
+          var saveResult = Dialog.FileSave();
+          if (saveResult.IsOk && saveResult.Path is not null)
+            TrySave(saveResult.Path);
+        } else {
+          TrySave(savePath);
+        }
+      }
+      if (document is not null && ImGui.MenuItem("Save As..."u8)) {
+        var saveResult = Dialog.FileSave();
+        if (saveResult.IsOk && saveResult.Path is not null)
+          TrySave(saveResult.Path);
       }
       ImGui.Separator();
 
@@ -105,13 +120,38 @@ var appWindow = new AppWindow(deltaTime => {
       }
       ImGui.EndMenu();
     }
+    if (document is not null && ImGui.BeginMenu("Search"u8)) {
+      if (ImGui.MenuItem("Find..."u8, "Ctrl+F"u8))
+        findWindow.Open();
+      if (ImGui.MenuItem("Find Next"u8, "F3"u8) && findWindow.IsOpen)
+        findWindow.FindNext(GetCurrentOffset(), hexView, textView, activeView);
+      if (ImGui.MenuItem("Find Previous"u8, "Shift+F3"u8) && findWindow.IsOpen)
+        findWindow.FindPrevious(GetCurrentOffset(), hexView, textView, activeView);
+      ImGui.EndMenu();
+    }
     ImGui.EndMainMenuBar();
 
-    // ── Global keyboard shortcuts for view switching ──
-    if (ImGui.IsKeyPressed(ImGuiKey.F5) && !ImGui.GetIO().WantTextInput)
-      activeView = 0;
-    if (ImGui.IsKeyPressed(ImGuiKey.F6) && !ImGui.GetIO().WantTextInput)
-      activeView = 1;
+    // ── Global keyboard shortcuts ──
+    var kbIo = ImGui.GetIO();
+    if (!kbIo.WantTextInput) {
+      if (ImGui.IsKeyPressed(ImGuiKey.F5)) activeView = 0;
+      if (ImGui.IsKeyPressed(ImGuiKey.F6)) activeView = 1;
+      if (ImGui.IsKeyPressed(ImGuiKey.S) && kbIo.KeyCtrl && document is not null) {
+        string? savePath = document.FilePath;
+        if (savePath is null) {
+          var r = Dialog.FileSave();
+          if (r.IsOk && r.Path is not null) TrySave(r.Path);
+        } else {
+          TrySave(savePath);
+        }
+      }
+      if (ImGui.IsKeyPressed(ImGuiKey.F) && kbIo.KeyCtrl && document is not null)
+        findWindow.Open();
+      if (ImGui.IsKeyPressed(ImGuiKey.F3) && findWindow.IsOpen)
+        findWindow.FindNext(GetCurrentOffset(), hexView, textView, activeView);
+      if (ImGui.IsKeyPressed(ImGuiKey.F4) && kbIo.KeyShift && findWindow.IsOpen)
+        findWindow.FindPrevious(GetCurrentOffset(), hexView, textView, activeView);
+    }
   }
 
   // Status bar
@@ -161,7 +201,26 @@ var appWindow = new AppWindow(deltaTime => {
     }
   }
   ImGui.End();
+
+  // ── Find bar (floating, rendered on top of everything else) ──
+  findWindow.Render(document, hexView, textView, activeView, settings);
 });
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+long GetCurrentOffset() => activeView == 0
+    ? (hexView?.SelectedOffset ?? 0)
+    : (textView?.CursorOffset ?? 0);
+
+void TrySave(string path)
+{
+  try {
+    document!.SaveTo(path);
+  } catch (Exception ex) {
+    Console.Error.WriteLine($"Save failed: {ex.Message}");
+    // TODO: show ImGui error popup in a future pass
+  }
+}
 
 try {
   appWindow.Run();

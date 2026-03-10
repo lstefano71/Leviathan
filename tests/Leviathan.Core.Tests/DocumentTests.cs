@@ -140,4 +140,41 @@ public class DocumentTests
     Assert.Equal(0x42, buf[1]);
     Assert.Equal(0x43, buf[2]);
   }
+
+  [Fact]
+  public void SaveTo_OverwritesExistingDestination()
+  {
+    var data = new byte[] { 0x01, 0x02, 0x03 };
+    var srcPath = Path.GetTempFileName();
+    var dstPath = Path.GetTempFileName(); // already exists
+
+    try {
+      File.WriteAllBytes(srcPath, data);
+      File.WriteAllBytes(dstPath, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
+
+      using var doc = new Document(srcPath);
+      doc.SaveTo(dstPath);
+
+      var saved = File.ReadAllBytes(dstPath);
+      Assert.Equal(data, saved);
+    } finally {
+      File.Delete(srcPath);
+      File.Delete(dstPath);
+    }
+  }
+
+  [Fact]
+  public void SaveTo_EmptyDocument_WritesEmptyFile()
+  {
+    var dstPath = Path.GetTempFileName();
+    try {
+      using var doc = new Document(); // empty, no backing file
+      doc.SaveTo(dstPath);
+
+      long length = new FileInfo(dstPath).Length;
+      Assert.Equal(0, length);
+    } finally {
+      File.Delete(dstPath);
+    }
+  }
 }

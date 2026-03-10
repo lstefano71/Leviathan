@@ -225,6 +225,7 @@ public sealed class AppWindow : IDisposable
     Key.D => ImGuiKey.D,
     Key.E => ImGuiKey.E,
     Key.F => ImGuiKey.F,
+    Key.S => ImGuiKey.S,
     Key.G => ImGuiKey.G,
     Key.F1 => ImGuiKey.F1,
     Key.F2 => ImGuiKey.F2,
