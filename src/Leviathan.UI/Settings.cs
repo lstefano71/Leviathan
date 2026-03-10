@@ -12,6 +12,7 @@ public sealed class Settings
 
   public List<string> RecentFiles { get; set; } = [];
   public int BytesPerRow { get; set; } // 0 = auto
+  public bool WordWrap { get; set; } = true;
 
   /// <summary>
   /// Adds a file to the top of the MRU list (deduplicates, trims to max).
