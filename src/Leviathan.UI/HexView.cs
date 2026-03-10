@@ -293,34 +293,68 @@ public sealed class HexView
 
   private void HandleScrollInput(long totalRows, long maxFirstRow)
   {
-    if (!ImGui.IsWindowFocused()) return;
-
-    long currentRow = _baseOffset / _bytesPerRow;
-    long newRow = currentRow;
-
-    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true))
-      newRow = currentRow + 1;
-    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true))
-      newRow = currentRow - 1;
-    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true))
-      newRow = currentRow + _visibleRows;
-    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true))
-      newRow = currentRow - _visibleRows;
-
     var io = ImGui.GetIO();
-    if (ImGui.IsKeyPressed(ImGuiKey.Home) && io.KeyCtrl)
-      newRow = 0;
-    if (ImGui.IsKeyPressed(ImGuiKey.End) && io.KeyCtrl)
-      newRow = maxFirstRow;
+    if (io.WantTextInput) return;
+    if (!ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows)) return;
+    if (_document.Length == 0) return;
+
+    // Initialize cursor if not set
+    if (_selectedOffset < 0)
+      _selectedOffset = _baseOffset;
+
+    long prev = _selectedOffset;
+
+    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true))
+      _selectedOffset += 1;
+    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true))
+      _selectedOffset -= 1;
+    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true))
+      _selectedOffset += _bytesPerRow;
+    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true))
+      _selectedOffset -= _bytesPerRow;
+    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true))
+      _selectedOffset += (long)_visibleRows * _bytesPerRow;
+    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true))
+      _selectedOffset -= (long)_visibleRows * _bytesPerRow;
+
+    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) {
+      if (io.KeyCtrl)
+        _selectedOffset = 0;
+      else
+        _selectedOffset -= _selectedOffset % _bytesPerRow;
+    }
+    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) {
+      if (io.KeyCtrl)
+        _selectedOffset = Math.Max(0, _document.Length - 1);
+      else {
+        long rowStart = _selectedOffset - (_selectedOffset % _bytesPerRow);
+        _selectedOffset = Math.Min(rowStart + _bytesPerRow - 1, Math.Max(0, _document.Length - 1));
+      }
+    }
 
     // Ctrl+G = Goto offset
     if (ImGui.IsKeyPressed(ImGuiKey.G) && io.KeyCtrl)
       OpenGotoDialog();
 
-    newRow = Math.Clamp(newRow, 0, maxFirstRow);
-    if (newRow != currentRow) {
-      _baseOffset = newRow * _bytesPerRow;
-      _scrollTargetRow = newRow;
+    _selectedOffset = Math.Clamp(_selectedOffset, 0, Math.Max(0, _document.Length - 1));
+
+    if (_selectedOffset != prev)
+      EnsureSelectedVisible(maxFirstRow);
+  }
+
+  private void EnsureSelectedVisible(long maxFirstRow)
+  {
+    long cursorRow = _selectedOffset / _bytesPerRow;
+    long topRow = _baseOffset / _bytesPerRow;
+    long bottomRow = topRow + _visibleRows - 1;
+
+    if (cursorRow < topRow) {
+      _baseOffset = cursorRow * _bytesPerRow;
+      _scrollTargetRow = cursorRow;
+    } else if (cursorRow > bottomRow) {
+      long newTopRow = Math.Clamp(cursorRow - _visibleRows + 1, 0, maxFirstRow);
+      _baseOffset = newTopRow * _bytesPerRow;
+      _scrollTargetRow = newTopRow;
     }
   }
 

@@ -51,6 +51,8 @@ public sealed class TextView
 
   // Exact goto offset (overrides scroll heuristic for one frame)
   private long _gotoOffset = -1;
+  private float _lastScrollY = float.NaN;
+  private int _suppressScrollUnlockFrames;
 
   /// <summary>Current first visible byte offset.</summary>
   public long TopDocOffset => _topDocOffset;
@@ -95,6 +97,9 @@ public sealed class TextView
     _topDocOffset = LineWrapEngine.FindLineStart(
         _topDocOffset, _document.Length,
         (off, buf) => _document.Read(off, buf));
+    // Keep exact position stable until the user scrolls.
+    _gotoOffset = _topDocOffset;
+    _suppressScrollUnlockFrames = 2;
     _scrollTargetLine = -1; // will recalc from offset
   }
 
@@ -148,22 +153,31 @@ public sealed class TextView
     HandleScrollInput(totalLines, maxFirstLine);
 
     // ── Apply programmatic scroll ──
+    bool appliedProgrammaticScroll = false;
     if (_scrollTargetLine >= 0) {
       float targetScrollY = LineToScrollY(_scrollTargetLine, totalLines, maxFirstLine, idealHeight, maxScrollY, lineHeight);
       ImGui.SetScrollY(targetScrollY);
       _scrollTargetLine = -1;
+      appliedProgrammaticScroll = true;
+      _suppressScrollUnlockFrames = 2;
     }
 
     // ── Derive top offset from scroll position ──
     float scrollY = ImGui.GetScrollY();
+    if (_suppressScrollUnlockFrames > 0)
+      _suppressScrollUnlockFrames--;
+
+    bool scrollMoved = !float.IsNaN(_lastScrollY) && MathF.Abs(scrollY - _lastScrollY) > 0.5f;
+    if (scrollMoved && !appliedProgrammaticScroll && _suppressScrollUnlockFrames == 0)
+      _gotoOffset = -1;
+
     long currentLine = ScrollYToLine(scrollY, totalLines, maxFirstLine, idealHeight, maxScrollY, lineHeight);
     currentLine = Math.Clamp(currentLine, 0, maxFirstLine);
 
     // Convert line number to byte offset
     if (_gotoOffset >= 0) {
-      // Exact goto target — skip heuristic
+      // Exact goto target — skip heuristic until user scrolls.
       _topDocOffset = _gotoOffset;
-      _gotoOffset = -1;
     } else if (_document.Length > 0) {
       long approxOffset = (long)((double)currentLine / totalLines * _document.Length);
       approxOffset = Math.Clamp(approxOffset, 0, Math.Max(0, _document.Length - 1));
@@ -300,6 +314,7 @@ public sealed class TextView
     // ── Set virtual content height for scrollbar ──
     ImGui.SetCursorPosY(virtualHeight);
     ImGui.Dummy(new Vector2(0, 0));
+    _lastScrollY = ImGui.GetScrollY();
     ImGui.EndChild();
 
     // ── Goto dialog ──
@@ -383,49 +398,67 @@ public sealed class TextView
 
   private void HandleScrollInput(long totalLines, long maxFirstLine)
   {
-    if (!ImGui.IsWindowFocused()) return;
-
     var io = ImGui.GetIO();
+    if (io.WantTextInput) return;
+    if (!ImGui.IsWindowFocused(ImGuiFocusedFlags.ChildWindows)) return;
 
-    // Shift+arrows: selection mode (only when cursor is active)
-    if (io.KeyShift && _cursorOffset >= 0) {
-      bool moved = false;
-      if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true)) {
-        _cursorOffset = MoveCursorLeft(_cursorOffset); moved = true;
-      }
-      if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true)) {
-        _cursorOffset = MoveCursorRight(_cursorOffset); moved = true;
-      }
-      if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true)) {
-        _cursorOffset = MoveCursorUp(_cursorOffset); moved = true;
-      }
-      if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true)) {
-        _cursorOffset = MoveCursorDown(_cursorOffset); moved = true;
-      }
-      if (moved) EnsureCursorVisible();
-    } else {
-      // Normal scroll mode
-      if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true))
-        ScrollByLines(1);
-      if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true))
-        ScrollByLines(-1);
+    // Initialize cursor if not set
+    if (_cursorOffset < 0) {
+      _cursorOffset = _topDocOffset;
+      _selectionAnchor = _cursorOffset;
     }
 
-    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true))
-      ScrollByLines(_visibleRows);
-    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true))
-      ScrollByLines(-_visibleRows);
+    bool moved = false;
 
-    if (ImGui.IsKeyPressed(ImGuiKey.Home) && io.KeyCtrl) {
-      _topDocOffset = 0;
-      _scrollTargetLine = 0;
+    // Arrow keys — always move cursor
+    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true)) {
+      _cursorOffset = MoveCursorLeft(_cursorOffset); moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.End) && io.KeyCtrl) {
-      long endOffset = Math.Max(0, _document.Length - 1);
-      _topDocOffset = LineWrapEngine.FindLineStart(
-          endOffset, _document.Length,
-          (off, buf) => _document.Read(off, buf));
-      _scrollTargetLine = maxFirstLine;
+    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true)) {
+      _cursorOffset = MoveCursorRight(_cursorOffset); moved = true;
+    }
+    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true)) {
+      _cursorOffset = MoveCursorUp(_cursorOffset); moved = true;
+    }
+    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true)) {
+      _cursorOffset = MoveCursorDown(_cursorOffset); moved = true;
+    }
+
+    // Page Up / Page Down — move cursor by a page of lines
+    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true)) {
+      for (int i = 0; i < _visibleRows; i++)
+        _cursorOffset = MoveCursorDown(_cursorOffset);
+      moved = true;
+    }
+    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true)) {
+      for (int i = 0; i < _visibleRows; i++)
+        _cursorOffset = MoveCursorUp(_cursorOffset);
+      moved = true;
+    }
+
+    // Home / End — line start/end (Ctrl = file start/end)
+    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) {
+      if (io.KeyCtrl)
+        _cursorOffset = 0;
+      else
+        _cursorOffset = LineWrapEngine.FindLineStart(
+            _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
+      moved = true;
+    }
+    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) {
+      if (io.KeyCtrl)
+        _cursorOffset = _document.Length;
+      else
+        _cursorOffset = FindLineEnd(_cursorOffset);
+      moved = true;
+    }
+
+    // Update selection: Shift extends, plain arrow resets anchor
+    if (moved) {
+      if (!io.KeyShift)
+        _selectionAnchor = _cursorOffset;
+      _gotoOffset = -1;
+      EnsureCursorVisible();
     }
 
     // Ctrl+G = Goto line
@@ -435,6 +468,25 @@ public sealed class TextView
     // Ctrl+C = Copy selection
     if (ImGui.IsKeyPressed(ImGuiKey.C) && io.KeyCtrl && HasSelection)
       CopySelectionToClipboard();
+  }
+
+  /// <summary>
+  /// Returns the byte offset of the end of the line containing <paramref name="offset"/>
+  /// (just before the LF, or at document end).
+  /// </summary>
+  private long FindLineEnd(long offset)
+  {
+    Span<byte> buf = stackalloc byte[1024];
+    long searchPos = offset;
+    while (searchPos < _document.Length) {
+      int read = _document.Read(searchPos, buf);
+      if (read == 0) break;
+      int nlIdx = buf.Slice(0, read).IndexOf((byte)0x0A);
+      if (nlIdx >= 0)
+        return searchPos + nlIdx;
+      searchPos += read;
+    }
+    return _document.Length;
   }
 
   /// <summary>
@@ -508,6 +560,7 @@ public sealed class TextView
               (off, buf) => _document.Read(off, buf));
           _gotoOffset = _topDocOffset;
           _scrollTargetLine = lineNum - 1;
+          _suppressScrollUnlockFrames = 2;
           _cachedTopOffset = _topDocOffset;
           _cachedTopLineNumber = lineNum;
         }

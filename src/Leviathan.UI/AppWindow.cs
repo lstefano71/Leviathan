@@ -58,7 +58,6 @@ public sealed class AppWindow : IDisposable
     ImGui.SetCurrentContext(_imguiContext);
 
     var io = ImGui.GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
 
     // Load a system monospace font with broad Unicode coverage
     LoadFonts();
@@ -239,6 +238,17 @@ public sealed class AppWindow : IDisposable
     Key.AltLeft => ImGuiKey.LeftAlt,
     Key.AltRight => ImGuiKey.RightAlt,
     Key.KeypadEnter => ImGuiKey.KeypadEnter,
+    Key.Keypad0 => ImGuiKey.Keypad0,
+    Key.Keypad1 => ImGuiKey.Keypad1,
+    Key.Keypad2 => ImGuiKey.Keypad2,
+    Key.Keypad3 => ImGuiKey.Keypad3,
+    Key.Keypad4 => ImGuiKey.Keypad4,
+    Key.Keypad5 => ImGuiKey.Keypad5,
+    Key.Keypad6 => ImGuiKey.Keypad6,
+    Key.Keypad7 => ImGuiKey.Keypad7,
+    Key.Keypad8 => ImGuiKey.Keypad8,
+    Key.Keypad9 => ImGuiKey.Keypad9,
+    Key.KeypadDecimal => ImGuiKey.KeypadDecimal,
     Key.F4 => ImGuiKey.F4,
     Key.F6 => ImGuiKey.F6,
     _ => ImGuiKey.None
