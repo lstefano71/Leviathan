@@ -122,6 +122,7 @@ public sealed class AppWindow : IDisposable
     var imKey = MapKey(key);
     if (imKey != ImGuiKey.None)
       io.AddKeyEvent(imKey, true);
+    UpdateModifiers(keyboard);
   }
 
   private void OnKeyUp(IKeyboard keyboard, Key key, int scancode)
@@ -130,12 +131,22 @@ public sealed class AppWindow : IDisposable
     var imKey = MapKey(key);
     if (imKey != ImGuiKey.None)
       io.AddKeyEvent(imKey, false);
+    UpdateModifiers(keyboard);
   }
 
   private void OnKeyChar(IKeyboard keyboard, char character)
   {
     var io = ImGui.GetIO();
     io.AddInputCharacter(character);
+  }
+
+  private static void UpdateModifiers(IKeyboard keyboard)
+  {
+    var io = ImGui.GetIO();
+    io.AddKeyEvent(ImGuiKey.ModCtrl, keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight));
+    io.AddKeyEvent(ImGuiKey.ModShift, keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight));
+    io.AddKeyEvent(ImGuiKey.ModAlt, keyboard.IsKeyPressed(Key.AltLeft) || keyboard.IsKeyPressed(Key.AltRight));
+    io.AddKeyEvent(ImGuiKey.ModSuper, keyboard.IsKeyPressed(Key.SuperLeft) || keyboard.IsKeyPressed(Key.SuperRight));
   }
 
   private void OnMouseDown(IMouse mouse, MouseButton button)
@@ -224,6 +235,9 @@ public sealed class AppWindow : IDisposable
     Key.ShiftRight => ImGuiKey.RightShift,
     Key.AltLeft => ImGuiKey.LeftAlt,
     Key.AltRight => ImGuiKey.RightAlt,
+    Key.KeypadEnter => ImGuiKey.KeypadEnter,
+    Key.F4 => ImGuiKey.F4,
+    Key.F6 => ImGuiKey.F6,
     _ => ImGuiKey.None
   };
 

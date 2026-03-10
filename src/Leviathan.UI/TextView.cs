@@ -44,6 +44,14 @@ public sealed class TextView
   private readonly byte[] _gotoInputBuf = new byte[20];
   private bool _gotoFocusInput;
 
+  // Selection state
+  private long _cursorOffset = -1;
+  private long _selectionAnchor = -1;
+  private bool _isDragging;
+
+  // Exact goto offset (overrides scroll heuristic for one frame)
+  private long _gotoOffset = -1;
+
   /// <summary>Current first visible byte offset.</summary>
   public long TopDocOffset => _topDocOffset;
 
@@ -100,6 +108,10 @@ public sealed class TextView
     _gotoFocusInput = true;
   }
 
+  private bool HasSelection => _cursorOffset >= 0 && _selectionAnchor >= 0 && _cursorOffset != _selectionAnchor;
+  private long SelectionStart => Math.Min(_cursorOffset, _selectionAnchor);
+  private long SelectionEnd => Math.Max(_cursorOffset, _selectionAnchor);
+
   /// <summary>
   /// Renders the text view. Must be called between ImGui.Begin/End.
   /// </summary>
@@ -147,15 +159,14 @@ public sealed class TextView
     long currentLine = ScrollYToLine(scrollY, totalLines, maxFirstLine, idealHeight, maxScrollY, lineHeight);
     currentLine = Math.Clamp(currentLine, 0, maxFirstLine);
 
-    // Convert approximate line number to byte offset using heuristic
-    // (for large files with a LineIndex, this would use sparse lookup)
-    long approxOffset = _document.Length > 0
-        ? (long)((double)currentLine / totalLines * _document.Length)
-        : 0;
-    approxOffset = Math.Clamp(approxOffset, 0, Math.Max(0, _document.Length - 1));
-
-    // Snap to a hard-line boundary
-    if (_document.Length > 0) {
+    // Convert line number to byte offset
+    if (_gotoOffset >= 0) {
+      // Exact goto target — skip heuristic
+      _topDocOffset = _gotoOffset;
+      _gotoOffset = -1;
+    } else if (_document.Length > 0) {
+      long approxOffset = (long)((double)currentLine / totalLines * _document.Length);
+      approxOffset = Math.Clamp(approxOffset, 0, Math.Max(0, _document.Length - 1));
       _topDocOffset = LineWrapEngine.FindLineStart(
           approxOffset, _document.Length,
           (off, buf) => _document.Read(off, buf));
@@ -209,11 +220,16 @@ public sealed class TextView
     var drawList = ImGui.GetWindowDrawList();
     Vector2 cursorStart = ImGui.GetCursorScreenPos();
 
+    // ── Mouse selection handling ──
+    int linesAvail = Math.Min(lineCount, _visibleRows);
+    HandleMouseSelection(cursorStart, gutterWidth, charWidth, lineHeight, linesAvail, bytesRead);
+
     // Colors
     uint colText = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
     uint colLineNum = ImGui.GetColorU32(new Vector4(0.5f, 0.6f, 0.7f, 0.8f));
     uint colControl = ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 1.0f));
     uint colWrapIndicator = ImGui.GetColorU32(new Vector4(0.3f, 0.5f, 0.7f, 0.5f));
+    uint colSelection = ImGui.GetColorU32(new Vector4(0.2f, 0.4f, 0.8f, 0.4f));
 
     float textStartX = cursorStart.X + gutterWidth;
 
@@ -229,6 +245,19 @@ public sealed class TextView
     for (int i = 0; i < lineCount && linesRendered < _visibleRows; i++) {
       ref readonly VisualLine vl = ref _visualLines[i];
       float y = cursorStart.Y + linesRendered * lineHeight;
+
+      // ── Selection highlight ──
+      if (HasSelection) {
+        long selS = SelectionStart, selE = SelectionEnd;
+        long lineEnd = vl.DocOffset + vl.ByteLength;
+        if (selS < lineEnd && selE > vl.DocOffset) {
+          long hiS = Math.Max(selS, vl.DocOffset);
+          long hiE = Math.Min(selE, lineEnd);
+          float x1 = textStartX + ByteOffsetToPixelX(vl, hiS, charWidth);
+          float x2 = textStartX + ByteOffsetToPixelX(vl, hiE, charWidth);
+          drawList.AddRectFilled(new Vector2(x1, y), new Vector2(x2, y + lineHeight), colSelection);
+        }
+      }
 
       // ── Line number gutter ──
       // Only show line number for the first visual line of a hard line
@@ -358,10 +387,30 @@ public sealed class TextView
 
     var io = ImGui.GetIO();
 
-    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true))
-      ScrollByLines(1);
-    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true))
-      ScrollByLines(-1);
+    // Shift+arrows: selection mode (only when cursor is active)
+    if (io.KeyShift && _cursorOffset >= 0) {
+      bool moved = false;
+      if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true)) {
+        _cursorOffset = MoveCursorLeft(_cursorOffset); moved = true;
+      }
+      if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true)) {
+        _cursorOffset = MoveCursorRight(_cursorOffset); moved = true;
+      }
+      if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true)) {
+        _cursorOffset = MoveCursorUp(_cursorOffset); moved = true;
+      }
+      if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true)) {
+        _cursorOffset = MoveCursorDown(_cursorOffset); moved = true;
+      }
+      if (moved) EnsureCursorVisible();
+    } else {
+      // Normal scroll mode
+      if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true))
+        ScrollByLines(1);
+      if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true))
+        ScrollByLines(-1);
+    }
+
     if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true))
       ScrollByLines(_visibleRows);
     if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true))
@@ -372,7 +421,6 @@ public sealed class TextView
       _scrollTargetLine = 0;
     }
     if (ImGui.IsKeyPressed(ImGuiKey.End) && io.KeyCtrl) {
-      // Go to near end of file
       long endOffset = Math.Max(0, _document.Length - 1);
       _topDocOffset = LineWrapEngine.FindLineStart(
           endOffset, _document.Length,
@@ -383,6 +431,10 @@ public sealed class TextView
     // Ctrl+G = Goto line
     if (ImGui.IsKeyPressed(ImGuiKey.G) && io.KeyCtrl)
       OpenGotoDialog();
+
+    // Ctrl+C = Copy selection
+    if (ImGui.IsKeyPressed(ImGuiKey.C) && io.KeyCtrl && HasSelection)
+      CopySelectionToClipboard();
   }
 
   /// <summary>
@@ -451,7 +503,11 @@ public sealed class TextView
         string input = System.Text.Encoding.ASCII.GetString(_gotoInputBuf).TrimEnd('\0').Trim();
         if (long.TryParse(input, out long lineNum) && lineNum > 0) {
           long targetOffset = FindOffsetOfLine(lineNum);
-          ScrollToOffset(targetOffset);
+          _topDocOffset = LineWrapEngine.FindLineStart(
+              targetOffset, _document.Length,
+              (off, buf) => _document.Read(off, buf));
+          _gotoOffset = _topDocOffset;
+          _scrollTargetLine = lineNum - 1;
           _cachedTopOffset = _topDocOffset;
           _cachedTopLineNumber = lineNum;
         }
@@ -593,6 +649,216 @@ public sealed class TextView
     get {
       fixed (byte* p = WrapIndicatorBytes)
         return p;
+    }
+  }
+
+  // ── Selection & clipboard ─────────────────────────────────────
+
+  private void HandleMouseSelection(Vector2 cursorStart, float gutterWidth, float charWidth,
+      float lineHeight, int lineCount, int bytesRead)
+  {
+    if (lineCount <= 0) return;
+
+    // Click to place cursor / start drag
+    if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && ImGui.IsWindowHovered()) {
+      long hit = HitTestMouse(cursorStart, gutterWidth, charWidth, lineHeight, lineCount, bytesRead);
+      if (hit >= 0) {
+        var io = ImGui.GetIO();
+        if (io.KeyShift && _cursorOffset >= 0) {
+          // Shift+click: extend selection
+          _cursorOffset = hit;
+        } else {
+          _cursorOffset = hit;
+          _selectionAnchor = hit;
+        }
+        _isDragging = true;
+      }
+    }
+
+    // Drag to extend selection
+    if (_isDragging && ImGui.IsMouseDown(ImGuiMouseButton.Left)) {
+      long hit = HitTestMouse(cursorStart, gutterWidth, charWidth, lineHeight, lineCount, bytesRead);
+      if (hit >= 0)
+        _cursorOffset = hit;
+    }
+
+    if (_isDragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
+      _isDragging = false;
+  }
+
+  private long HitTestMouse(Vector2 cursorStart, float gutterWidth, float charWidth,
+      float lineHeight, int lineCount, int bytesRead)
+  {
+    var mousePos = ImGui.GetMousePos();
+    int row = (int)((mousePos.Y - cursorStart.Y) / lineHeight);
+    if (row < 0) row = 0;
+    if (row >= lineCount) row = lineCount - 1;
+    if (row < 0) return -1;
+
+    float targetCol = (mousePos.X - cursorStart.X - gutterWidth) / charWidth;
+    if (targetCol < 0) targetCol = 0;
+
+    ref readonly VisualLine vl = ref _visualLines[row];
+    int vlBufStart = (int)(vl.DocOffset - _topDocOffset);
+    if (vlBufStart < 0 || vlBufStart + vl.ByteLength > bytesRead)
+      return vl.DocOffset;
+
+    var lineData = _readBuffer.AsSpan(vlBufStart, vl.ByteLength);
+    int pos = 0;
+    float col = 0;
+
+    while (pos < lineData.Length) {
+      byte b = lineData[pos];
+      if (b == 0x0A || b == 0x0D) break;
+
+      int w;
+      int byteLen;
+      if (b == 0x09) { w = _tabWidth; byteLen = 1; } else if (b < 0x20) { w = 1; byteLen = 1; } else {
+        var (rune, bl) = Utf8Utils.DecodeRune(lineData, pos);
+        byteLen = bl == 0 ? 1 : bl;
+        w = Utf8Utils.RuneColumnWidth(rune, _tabWidth);
+      }
+
+      if (col + w * 0.5f >= targetCol)
+        return vl.DocOffset + pos;
+
+      col += w;
+      pos += byteLen;
+    }
+
+    return vl.DocOffset + pos;
+  }
+
+  private float ByteOffsetToPixelX(in VisualLine vl, long targetOffset, float charWidth)
+  {
+    int bytesIntoLine = (int)(targetOffset - vl.DocOffset);
+    int vlBufStart = (int)(vl.DocOffset - _topDocOffset);
+    if (vlBufStart < 0) return 0;
+
+    int walkLen = Math.Min(bytesIntoLine, vl.ByteLength);
+    if (vlBufStart + walkLen > _readBuffer.Length) return 0;
+
+    var lineData = _readBuffer.AsSpan(vlBufStart, walkLen);
+    int col = 0;
+    int pos = 0;
+
+    while (pos < lineData.Length) {
+      byte b = lineData[pos];
+      if (b == 0x0A || b == 0x0D) { pos++; continue; }
+      if (b == 0x09) { col += _tabWidth; pos++; continue; }
+      if (b < 0x20) { col++; pos++; continue; }
+
+      var (rune, byteLen) = Utf8Utils.DecodeRune(lineData, pos);
+      if (byteLen == 0) { pos++; col++; continue; }
+      col += Utf8Utils.RuneColumnWidth(rune, _tabWidth);
+      pos += byteLen;
+    }
+
+    return col * charWidth;
+  }
+
+  // ── Cursor movement helpers ───────────────────────────────────
+
+  private long MoveCursorLeft(long offset)
+  {
+    if (offset <= 0) return 0;
+    int backLen = (int)Math.Min(4, offset);
+    long readStart = offset - backLen;
+    Span<byte> buf = stackalloc byte[4];
+    int read = _document.Read(readStart, buf.Slice(0, backLen));
+    if (read == 0) return Math.Max(0, offset - 1);
+
+    int pos = 0;
+    int lastStart = 0;
+    while (pos < read) {
+      lastStart = pos;
+      var (_, byteLen) = Utf8Utils.DecodeRune(buf.Slice(0, read), pos);
+      if (byteLen == 0) { pos++; continue; }
+      pos += byteLen;
+    }
+    return readStart + lastStart;
+  }
+
+  private long MoveCursorRight(long offset)
+  {
+    if (offset >= _document.Length) return _document.Length;
+    Span<byte> buf = stackalloc byte[4];
+    int read = _document.Read(offset, buf);
+    if (read == 0) return offset;
+    var (_, byteLen) = Utf8Utils.DecodeRune(buf.Slice(0, read), 0);
+    return Math.Min(offset + Math.Max(1, byteLen), _document.Length);
+  }
+
+  private long MoveCursorUp(long offset)
+  {
+    long lineStart = LineWrapEngine.FindLineStart(
+        offset, _document.Length, (o, b) => _document.Read(o, b));
+    int col = (int)(offset - lineStart);
+
+    if (lineStart == 0) return 0;
+
+    // Go to previous line
+    long prevLineStart = LineWrapEngine.FindLineStart(
+        Math.Max(0, lineStart - 1), _document.Length, (o, b) => _document.Read(o, b));
+    int prevLineLen = (int)(lineStart - prevLineStart);
+    if (prevLineLen > 0) prevLineLen--; // exclude the terminating LF
+
+    return prevLineStart + Math.Min(col, Math.Max(0, prevLineLen));
+  }
+
+  private long MoveCursorDown(long offset)
+  {
+    // Find the next newline from the current offset
+    Span<byte> buf = stackalloc byte[1024];
+    long searchPos = offset;
+    while (searchPos < _document.Length) {
+      int read = _document.Read(searchPos, buf);
+      if (read == 0) return _document.Length;
+      int nlIdx = buf.Slice(0, read).IndexOf((byte)0x0A);
+      if (nlIdx >= 0) {
+        long nextLineStart = searchPos + nlIdx + 1;
+        if (nextLineStart >= _document.Length) return _document.Length;
+
+        // Compute column in current line
+        long lineStart = LineWrapEngine.FindLineStart(
+            offset, _document.Length, (o, b) => _document.Read(o, b));
+        int col = (int)(offset - lineStart);
+
+        // Find length of next line
+        int nextRead = _document.Read(nextLineStart, buf);
+        if (nextRead > 0) {
+          int nextNl = buf.Slice(0, nextRead).IndexOf((byte)0x0A);
+          int nextLineLen = nextNl >= 0 ? nextNl : nextRead;
+          return nextLineStart + Math.Min(col, nextLineLen);
+        }
+        return nextLineStart;
+      }
+      searchPos += read;
+    }
+    return _document.Length;
+  }
+
+  private void EnsureCursorVisible()
+  {
+    if (_cursorOffset < 0) return;
+    if (_cursorOffset < _topDocOffset || _cursorOffset > _topDocOffset + _visibleRows * 200) {
+      _topDocOffset = LineWrapEngine.FindLineStart(
+          _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
+      _gotoOffset = _topDocOffset;
+      long approxLine = GetLineNumberAtOffset(_topDocOffset) - 1;
+      _scrollTargetLine = Math.Max(0, approxLine);
+    }
+  }
+
+  private unsafe void CopySelectionToClipboard()
+  {
+    if (!HasSelection) return;
+    long selLen = Math.Min(SelectionEnd - SelectionStart, 10 * 1024 * 1024);
+    byte[] buffer = new byte[selLen + 1]; // +1 for null terminator
+    int read = _document.Read(SelectionStart, buffer.AsSpan(0, (int)selLen));
+    buffer[read] = 0;
+    fixed (byte* p = buffer) {
+      ImGui.SetClipboardText(p);
     }
   }
 }
