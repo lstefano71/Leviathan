@@ -60,6 +60,9 @@ public sealed class AppWindow : IDisposable
     var io = ImGui.GetIO();
     io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
 
+    // Load a system monospace font with broad Unicode coverage
+    LoadFonts();
+
     // Initialize OpenGL3 backend
     ImGuiImplOpenGL3.SetCurrentContext(_imguiContext);
     ImGuiImplOpenGL3.Init("#version 330");
@@ -240,6 +243,89 @@ public sealed class AppWindow : IDisposable
     Key.F6 => ImGuiKey.F6,
     _ => ImGuiKey.None
   };
+
+  /// <summary>
+  /// Loads Consolas (or falls back to ImGui default) with broad Unicode glyph ranges.
+  /// </summary>
+  private static unsafe void LoadFonts()
+  {
+    const float fontSize = 15.0f;
+    string primaryFontPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.Fonts),
+        "consola.ttf");
+
+    var io = ImGui.GetIO();
+    var atlas = io.Fonts;
+
+    if (!File.Exists(primaryFontPath))
+      return; // fall back to ImGui default font
+
+    // Pairs of (first, last) codepoints, terminated by 0
+    uint* ranges = stackalloc uint[]
+    {
+      0x0020, 0x00FF, // Basic Latin + Latin-1 Supplement
+      0x0100, 0x024F, // Latin Extended-A + B
+      0x0370, 0x03FF, // Greek and Coptic
+      0x0400, 0x052F, // Cyrillic + Cyrillic Supplement
+      0x1E00, 0x1EFF, // Latin Extended Additional
+      0x2000, 0x206F, // General Punctuation
+      0x2100, 0x214F, // Letterlike Symbols
+      0x2150, 0x218F, // Number Forms
+      0x2190, 0x21FF, // Arrows
+      0x2200, 0x22FF, // Mathematical Operators (∆∇∧∨∩∪⊂⊃⊥⊤…)
+      0x2300, 0x23FF, // Miscellaneous Technical (incl. APL: ⌶-⍺, ⎕)
+      0x2500, 0x257F, // Box Drawing
+      0x2580, 0x259F, // Block Elements
+      0x25A0, 0x25FF, // Geometric Shapes (◇○…)
+      0x2600, 0x26FF, // Miscellaneous Symbols
+      0x2700, 0x27BF, // Dingbats
+      0x27C0, 0x27EF, // Miscellaneous Mathematical Symbols-A
+      0x27F0, 0x27FF, // Supplemental Arrows-A
+      0x2900, 0x297F, // Supplemental Arrows-B
+      0x2980, 0x29FF, // Miscellaneous Mathematical Symbols-B
+      0x2A00, 0x2AFF, // Supplemental Mathematical Operators
+      0xFFFD, 0xFFFD, // Replacement character
+      0,              // Terminator
+    };
+
+    atlas.AddFontFromFileTTF(primaryFontPath, fontSize, (ImFontConfig*)null, ranges);
+
+    // Merge symbol/math fallback fonts so glyphs missing in Consolas still render.
+    // ImGui has no OS-level font fallback, so we merge additional fonts into one atlas.
+    string fontsDir = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+    string[] fallbackFontCandidates =
+    [
+      Path.Combine(fontsDir, "seguisym.ttf"),
+      Path.Combine(fontsDir, "cambria.ttc"),
+    ];
+
+    uint* fallbackRanges = stackalloc uint[]
+    {
+      0x2200, 0x22FF, // Mathematical Operators (includes U+22A5 ⊥)
+      0x2300, 0x23FF, // Miscellaneous Technical (APL symbols)
+      0x27C0, 0x27EF, // Miscellaneous Mathematical Symbols-A
+      0x2980, 0x29FF, // Miscellaneous Mathematical Symbols-B
+      0x2A00, 0x2AFF, // Supplemental Mathematical Operators
+      0,
+    };
+
+    var fallbackConfig = ImGui.ImFontConfig();
+    try {
+      fallbackConfig.MergeMode = true;
+      fallbackConfig.PixelSnapH = true;
+      fallbackConfig.RasterizerDensity = 1.0f;
+
+      foreach (string fallbackFontPath in fallbackFontCandidates) {
+        if (!File.Exists(fallbackFontPath))
+          continue;
+
+        atlas.AddFontFromFileTTF(fallbackFontPath, fontSize, fallbackConfig, fallbackRanges);
+        break;
+      }
+    } finally {
+      fallbackConfig.Destroy();
+    }
+  }
 
   public unsafe void Dispose()
   {
