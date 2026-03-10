@@ -353,26 +353,39 @@ public sealed class HexView
 
     long prev = _selectedOffset;
 
-    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true))
+    // Numpad keys act as navigation only when NumLock is off.
+    // When NumLock is on, a digit char is queued by GLFW — use that to detect the state.
+    bool numpadAsNav;
+    unsafe {
+      bool hasDigitChar = false;
+      ImVector<uint> q = io.InputQueueCharacters;
+      for (int i = 0; i < q.Size; i++) {
+        char c = (char)q.Data[i];
+        if ((c >= '0' && c <= '9') || c == '.') { hasDigitChar = true; break; }
+      }
+      numpadAsNav = !hasDigitChar;
+    }
+
+    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad6, true)))
       _selectedOffset += 1;
-    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true))
+    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad4, true)))
       _selectedOffset -= 1;
-    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true))
+    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad2, true)))
       _selectedOffset += _bytesPerRow;
-    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true))
+    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad8, true)))
       _selectedOffset -= _bytesPerRow;
-    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true))
+    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad3, true)))
       _selectedOffset += (long)_visibleRows * _bytesPerRow;
-    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true))
+    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad9, true)))
       _selectedOffset -= (long)_visibleRows * _bytesPerRow;
 
-    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad7, true))) {
       if (io.KeyCtrl)
         _selectedOffset = 0;
       else
         _selectedOffset -= _selectedOffset % _bytesPerRow;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad1, true))) {
       if (io.KeyCtrl)
         _selectedOffset = Math.Max(0, _document.Length - 1);
       else {
@@ -411,16 +424,16 @@ public sealed class HexView
     // Only when not holding Ctrl (to avoid hijacking Ctrl+G etc.)
     if (!io.KeyCtrl && !io.KeyAlt && _selectedOffset >= 0 && _selectedOffset < _document.Length) {
       int hexDigit = -1;
-      if (ImGui.IsKeyPressed(ImGuiKey.Key0, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad0, true)) hexDigit = 0;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key1, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) hexDigit = 1;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key2, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true)) hexDigit = 2;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key3, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true)) hexDigit = 3;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key4, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true)) hexDigit = 4;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key5, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad5, true)) hexDigit = 5;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key6, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true)) hexDigit = 6;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key7, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) hexDigit = 7;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key8, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true)) hexDigit = 8;
-      else if (ImGui.IsKeyPressed(ImGuiKey.Key9, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true)) hexDigit = 9;
+      if (ImGui.IsKeyPressed(ImGuiKey.Key0, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad0, true))) hexDigit = 0;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key1, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad1, true))) hexDigit = 1;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key2, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad2, true))) hexDigit = 2;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key3, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad3, true))) hexDigit = 3;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key4, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad4, true))) hexDigit = 4;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key5, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad5, true))) hexDigit = 5;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key6, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad6, true))) hexDigit = 6;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key7, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad7, true))) hexDigit = 7;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key8, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad8, true))) hexDigit = 8;
+      else if (ImGui.IsKeyPressed(ImGuiKey.Key9, true) || (!numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad9, true))) hexDigit = 9;
       else if (ImGui.IsKeyPressed(ImGuiKey.A, true)) hexDigit = 10;
       else if (ImGui.IsKeyPressed(ImGuiKey.B, true)) hexDigit = 11;
       else if (ImGui.IsKeyPressed(ImGuiKey.C, true)) hexDigit = 12;

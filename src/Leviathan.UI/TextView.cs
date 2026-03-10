@@ -461,34 +461,48 @@ public sealed class TextView
 
     bool moved = false;
 
+    // Numpad keys act as navigation only when NumLock is off.
+    // GLFW always reports the physical key (e.g. Keypad7) regardless of NumLock.
+    // When NumLock is on, a digit char is also queued — use that to detect the state.
+    bool numpadAsNav;
+    unsafe {
+      bool hasDigitChar = false;
+      ImVector<uint> q = io.InputQueueCharacters;
+      for (int i = 0; i < q.Size; i++) {
+        char c = (char)q.Data[i];
+        if ((c >= '0' && c <= '9') || c == '.') { hasDigitChar = true; break; }
+      }
+      numpadAsNav = !hasDigitChar;
+    }
+
     // Arrow keys — always move cursor
-    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad4, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.LeftArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad4, true))) {
       _cursorOffset = MoveCursorLeft(_cursorOffset); moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad6, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.RightArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad6, true))) {
       _cursorOffset = MoveCursorRight(_cursorOffset); moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad8, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.UpArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad8, true))) {
       _cursorOffset = MoveCursorUp(_cursorOffset); moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad2, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.DownArrow, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad2, true))) {
       _cursorOffset = MoveCursorDown(_cursorOffset); moved = true;
     }
 
     // Page Up / Page Down — move cursor by a page of lines
-    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad3, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.PageDown, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad3, true))) {
       for (int i = 0; i < _visibleRows; i++)
         _cursorOffset = MoveCursorDown(_cursorOffset);
       moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad9, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.PageUp, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad9, true))) {
       for (int i = 0; i < _visibleRows; i++)
         _cursorOffset = MoveCursorUp(_cursorOffset);
       moved = true;
     }
 
     // Home / End — line start/end (Ctrl = file start/end)
-    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad7, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.Home, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad7, true))) {
       if (io.KeyCtrl)
         _cursorOffset = 0;
       else
@@ -496,7 +510,7 @@ public sealed class TextView
             _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
       moved = true;
     }
-    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || ImGui.IsKeyPressed(ImGuiKey.Keypad1, true)) {
+    if (ImGui.IsKeyPressed(ImGuiKey.End, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad1, true))) {
       if (io.KeyCtrl)
         _cursorOffset = _document.Length;
       else
@@ -556,7 +570,7 @@ public sealed class TextView
     }
 
     // Enter = insert newline
-    if (ImGui.IsKeyPressed(ImGuiKey.Enter, true) && !io.KeyCtrl) {
+    if ((ImGui.IsKeyPressed(ImGuiKey.Enter, true) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter, true)) && !io.KeyCtrl) {
       if (HasSelection) {
         _document.Delete(SelectionStart, SelectionEnd - SelectionStart);
         _cursorOffset = SelectionStart;
