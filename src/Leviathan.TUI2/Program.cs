@@ -1,13 +1,10 @@
-using System.Collections.ObjectModel;
-using Leviathan.Core;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.TUI2;
 using Leviathan.TUI2.Views;
 using Leviathan.TUI2.Widgets;
+
 using Terminal.Gui.App;
-using Terminal.Gui.Drawing;
-using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -24,7 +21,7 @@ state.WordWrap = state.Settings.WordWrap;
 
 // Open file from CLI argument
 if (args.Length > 0 && File.Exists(args[0]))
-    state.OpenFile(args[0]);
+  state.OpenFile(args[0]);
 
 // ─── Terminal.Gui lifecycle ───
 using IApplication app = Application.Create();
@@ -43,99 +40,82 @@ state.Document?.Dispose();
 
 internal sealed class MainWindow : Window
 {
-    private readonly IApplication _app;
-    private readonly AppState _state;
-    private readonly LeviathanHexView _hexView;
-    private readonly LeviathanTextView _textView;
-    private readonly CommandPalette _palette;
-    private readonly StatusBar _statusBar;
-    private readonly MenuBar _menuBar;
-    private MenuBarItem _viewMenu = null!;
-    private readonly View _welcomeView;
+  private readonly IApplication _app;
+  private readonly AppState _state;
+  private readonly LeviathanHexView _hexView;
+  private readonly LeviathanTextView _textView;
+  private readonly CommandPalette _palette;
+  private readonly StatusBar _statusBar;
 
-    // Checkable menu items we need to update
-    private CheckBox _wordWrapCheck = null!;
+  internal MainWindow(
+      IApplication app,
+      AppState state,
+      LeviathanHexView hexView,
+      LeviathanTextView textView,
+      CommandPalette palette)
+  {
+    _app = app;
+    _state = state;
+    _hexView = hexView;
+    _textView = textView;
+    _palette = palette;
 
-    internal MainWindow(
-        IApplication app,
-        AppState state,
-        LeviathanHexView hexView,
-        LeviathanTextView textView,
-        CommandPalette palette)
-    {
-        _app = app;
-        _state = state;
-        _hexView = hexView;
-        _textView = textView;
-        _palette = palette;
+    Title = "Leviathan — Large File Editor";
 
-        BorderStyle = LineStyle.None;
+    // ─── Menu bar ───
+    MenuBar menuBar = BuildMenuBar();
 
-        // ─── Menu bar ───
-        _menuBar = BuildMenuBar();
+    // ─── Content views ───
+    _hexView.X = 0;
+    _hexView.Y = Pos.Bottom(menuBar);
+    _hexView.Width = Dim.Fill();
+    _hexView.Height = Dim.Fill(1); // Leave 1 row for status bar
+    _hexView.Visible = state.ActiveView == ViewMode.Hex;
 
-        // ─── Welcome view (shown when no file is open) ───
-        _welcomeView = BuildWelcomeView();
-        _welcomeView.Y = Pos.Bottom(_menuBar);
-        _welcomeView.Width = Dim.Fill();
-        _welcomeView.Height = Dim.Fill(1);
-        _welcomeView.Visible = state.Document is null;
+    _textView.X = 0;
+    _textView.Y = Pos.Bottom(menuBar);
+    _textView.Width = Dim.Fill();
+    _textView.Height = Dim.Fill(1);
+    _textView.Visible = state.ActiveView == ViewMode.Text;
 
-        // ─── Content views ───
-        _hexView.X = 0;
-        _hexView.Y = Pos.Bottom(_menuBar);
-        _hexView.Width = Dim.Fill();
-        _hexView.Height = Dim.Fill(1);
-        _hexView.Visible = state.Document is not null && state.ActiveView == ViewMode.Hex;
-
-        _textView.X = 0;
-        _textView.Y = Pos.Bottom(_menuBar);
-        _textView.Width = Dim.Fill();
-        _textView.Height = Dim.Fill(1);
-        _textView.Visible = state.Document is not null && state.ActiveView == ViewMode.Text;
-
-        // ─── Status bar ───
-        _statusBar = new StatusBar([
-            new Shortcut(Key.F5, "Hex", () => SwitchView(ViewMode.Hex)),
-            new Shortcut(Key.F6, "Text", () => SwitchView(ViewMode.Text)),
-            new Shortcut(Key.O.WithCtrl, "Open", () => ShowOpenDialog()),
-            new Shortcut(Key.S.WithCtrl, "Save", () => SaveFile()),
+    // ─── Status bar ───
+    _statusBar = new StatusBar([
+        new Shortcut(Key.F5, "Hex", null),
+            new Shortcut(Key.F6, "Text", null),
+            new Shortcut(Key.CtrlMask | Key.O, "Open", null),
+            new Shortcut(Key.CtrlMask | Key.S, "Save", null),
         ]);
 
-        Add(_menuBar, _welcomeView, _hexView, _textView, _statusBar);
+    Add(menuBar, _hexView, _textView, _statusBar);
 
-        // Wire state-changed events
-        _hexView.StateChanged += UpdateStatusBar;
-        _textView.StateChanged += UpdateStatusBar;
+    // Wire state-changed events to update status bar
+    _hexView.StateChanged += UpdateStatusBar;
+    _textView.StateChanged += UpdateStatusBar;
 
-        RegisterCommands();
-        SetupAppKeyBindings();
-        UpdateTitle();
-    }
+    // Register command palette commands
+    RegisterCommands();
 
-    private MenuBar BuildMenuBar()
-    {
-        _wordWrapCheck = new CheckBox { Text = "_Word Wrap", CanFocus = false };
-        _wordWrapCheck.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
-        _wordWrapCheck.ValueChanged += (_, _) =>
-        {
-            _state.WordWrap = _wordWrapCheck.Value == CheckState.Checked;
-            _state.Settings.WordWrap = _state.WordWrap;
-            _state.Settings.Save();
-            _textView.SetNeedsDraw();
-            UpdateStatusBar();
-        };
+    // ─── Application-level key bindings ───
+    SetupAppKeyBindings();
+  }
 
-        _viewMenu = new MenuBarItem("_View", BuildViewMenuItems());
-
-        return new MenuBar([
-            new MenuBarItem("_File", [
+  private MenuBar BuildMenuBar()
+  {
+    return new MenuBar([
+        new MenuBarItem("_File", [
                 new MenuItem("_Open...", "Open a file", () => ShowOpenDialog(), Key.O.WithCtrl),
                 new MenuItem("_Save", "Save the file", () => SaveFile(), Key.S.WithCtrl),
                 new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
                 new MenuItem("_Quit", "Exit Leviathan", () => GuardUnsavedChanges(() => _app.RequestStop()), Key.Q.WithCtrl),
             ]),
-            _viewMenu,
+            new MenuBarItem("_View", [
+                new MenuItem("_Hex View", "Switch to hex view", () => SwitchView(ViewMode.Hex), Key.F5),
+                new MenuItem("_Text View", "Switch to text view", () => SwitchView(ViewMode.Text), Key.F6),
+                new MenuItem("_Word Wrap", "Toggle word wrap", () => ToggleWordWrap()),
+                new MenuItem("Encoding: _UTF-8", null, () => SwitchEncoding(TextEncoding.Utf8)),
+                new MenuItem("Encoding: UTF-_16 LE", null, () => SwitchEncoding(TextEncoding.Utf16Le)),
+                new MenuItem("Encoding: _Windows-1252", null, () => SwitchEncoding(TextEncoding.Windows1252)),
+            ]),
             new MenuBarItem("_Navigate", [
                 new MenuItem("_Go to Offset/Line...", "Jump to offset or line", () => ShowGotoDialog(), Key.G.WithCtrl),
             ]),
@@ -150,815 +130,570 @@ internal sealed class MainWindow : Window
                 new MenuItem("Select _All", "Select entire file", () => DoSelectAll(), Key.A.WithCtrl),
             ]),
         ]);
-    }
+  }
 
-    /// <summary>
-    /// Build view menu items depending on active view mode. Hex shows BPR options, Text shows encoding.
-    /// </summary>
-    private MenuItem[] BuildViewMenuItems()
-    {
-        // Hex/Text radio items
-        MenuItem hexItem = new("_Hex View", "F5", () => SwitchView(ViewMode.Hex), Key.F5);
-        MenuItem textItem = new("_Text View", "F6", () => SwitchView(ViewMode.Text), Key.F6);
+  private void SetupAppKeyBindings()
+  {
+    // F5/F6 view switching
+    AddCommand(Command.Refresh, () => { SwitchView(ViewMode.Hex); return true; });
+    KeyBindings.Add(Key.F5, Command.Refresh);
 
-        List<MenuItem> items = [hexItem, textItem];
+    // Command palette
+    KeyDown += (_, e) => {
+      if (e.KeyCode == (KeyCode.P | KeyCode.CtrlMask)) {
+        ShowCommandPalette();
+        e.Handled = true;
+      } else if (e.KeyCode == KeyCode.F6) {
+        SwitchView(ViewMode.Text);
+        e.Handled = true;
+      }
+    };
+  }
 
-        if (_state.ActiveView == ViewMode.Hex)
-        {
-            // Bytes per row radio set
-            int[] bprOptions = [0, 8, 16, 24, 32, 48, 64];
-            string[] bprLabels = ["Auto", "8", "16", "24", "32", "48", "64"];
-            for (int i = 0; i < bprOptions.Length; i++)
-            {
-                int bpr = bprOptions[i];
-                string mark = _state.BytesPerRowSetting == bpr ? "● " : "  ";
-                items.Add(new MenuItem($"{mark}{bprLabels[i]} bytes/row", "", () => SetBytesPerRow(bpr)));
-            }
+  // ─── View switching ───
+
+  private void SwitchView(ViewMode mode)
+  {
+    _state.ActiveView = mode;
+    _hexView.Visible = mode == ViewMode.Hex;
+    _textView.Visible = mode == ViewMode.Text;
+
+    if (mode == ViewMode.Hex)
+      _hexView.SetFocus();
+    else
+      _textView.SetFocus();
+
+    UpdateStatusBar();
+    UpdateTitle();
+  }
+
+  // ─── File operations ───
+
+  private void ShowOpenDialog()
+  {
+    GuardUnsavedChanges(() => {
+      OpenDialog openDlg = new() {
+        Title = "Open File",
+        OpenMode = OpenMode.File,
+      };
+      _app.Run(openDlg);
+
+      if (!openDlg.Canceled && openDlg.FilePaths.Count > 0) {
+        string path = openDlg.FilePaths[0];
+        if (File.Exists(path)) {
+          _state.OpenFile(path);
+          UpdateTitle();
+          UpdateStatusBar();
+          _hexView.SetNeedsDraw();
+          _textView.SetNeedsDraw();
         }
-        else
-        {
-            // Word wrap toggle
-            items.Add(new MenuItem { CommandView = _wordWrapCheck });
+      }
+      openDlg.Dispose();
+    });
+  }
 
-            // Encoding radio set
-            TextEncoding current = _state.Decoder.Encoding;
-            (string label, TextEncoding enc)[] encodings = [
-                ("UTF-8", TextEncoding.Utf8),
-                ("UTF-16 LE", TextEncoding.Utf16Le),
-                ("Windows-1252", TextEncoding.Windows1252),
-            ];
-            foreach ((string label, TextEncoding enc) in encodings)
-            {
-                string mark = current == enc ? "● " : "  ";
-                items.Add(new MenuItem($"{mark}{label}", "", () => SwitchEncoding(enc)));
-            }
-        }
-
-        return [.. items];
+  private void SaveFile()
+  {
+    if (_state.Document is null || _state.CurrentFilePath is null) {
+      ShowSaveAsDialog();
+      return;
     }
 
-    private void RebuildViewMenu()
-    {
-        _viewMenu.PopoverMenu = new PopoverMenu(BuildViewMenuItems());
+    if (_state.TrySave(_state.CurrentFilePath, out string? error)) {
+      UpdateTitle();
+      UpdateStatusBar();
+    } else {
+      ShowSaveErrorDialog(error ?? "Unknown error");
     }
+  }
 
-    private void SetupAppKeyBindings()
-    {
-        // F5/F6 view switching
-        AddCommand(Command.Refresh, () => { SwitchView(ViewMode.Hex); return true; });
-        KeyBindings.Add(Key.F5, Command.Refresh);
+  private void ShowSaveAsDialog()
+  {
+    if (_state.Document is null) return;
 
-        // Command palette
-        KeyDown += (_, e) =>
-        {
-            if (e.IsCtrl && e.NoCtrl.KeyCode == Terminal.Gui.Drivers.KeyCode.P)
-            {
-                ShowCommandPalette();
-                e.Handled = true;
-            }
-            else if (e.KeyCode == Terminal.Gui.Drivers.KeyCode.F6)
-            {
-                SwitchView(ViewMode.Text);
-                e.Handled = true;
-            }
-        };
-    }
+    SaveDialog saveDlg = new() {
+      Title = "Save As",
+    };
+    _app.Run(saveDlg);
 
-    // ─── Welcome view (MRU) ───
-
-    private View BuildWelcomeView()
-    {
-        View container = new()
-        {
-            CanFocus = true,
-        };
-
-        Label title = new()
-        {
-            Text = "Leviathan — Large File Editor",
-            X = Pos.Center(),
-            Y = 2,
-        };
-
-        Label subtitle = new()
-        {
-            Text = "Open a file with Ctrl+O or select a recent file:",
-            X = Pos.Center(),
-            Y = 4,
-        };
-
-        container.Add(title, subtitle);
-
-        IReadOnlyList<string> recentFiles = _state.Settings.RecentFiles;
-        for (int i = 0; i < Math.Min(recentFiles.Count, 9); i++)
-        {
-            string path = recentFiles[i];
-            int idx = i;
-            Label item = new()
-            {
-                Text = $"  {idx + 1}. {path}",
-                X = 2,
-                Y = 6 + idx,
-            };
-            container.Add(item);
-        }
-
-        if (recentFiles.Count == 0)
-        {
-            Label noRecent = new()
-            {
-                Text = "  No recent files.",
-                X = 2,
-                Y = 6,
-            };
-            container.Add(noRecent);
-        }
-
-        container.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode >= KeyCode.D1 && e.KeyCode <= KeyCode.D9)
-            {
-                int idx = (int)e.KeyCode - (int)KeyCode.D1;
-                if (idx < recentFiles.Count)
-                {
-                    string path = recentFiles[idx];
-                    if (File.Exists(path))
-                    {
-                        _state.OpenFile(path);
-                        SwitchView(_state.ActiveView);
-                        RegisterCommands();
-                    }
-                    e.Handled = true;
-                }
-            }
-        };
-
-        return container;
-    }
-
-    // ─── Bytes per row ───
-
-    private void SetBytesPerRow(int bpr)
-    {
-        _state.BytesPerRowSetting = bpr;
-        _state.Settings.BytesPerRow = bpr;
-        _state.Settings.Save();
-        _hexView.SetNeedsDraw();
-        RebuildViewMenu();
-        UpdateStatusBar();
-    }
-
-    // ─── View switching ───
-
-    private void SwitchView(ViewMode mode)
-    {
-        _state.ActiveView = mode;
-        bool hasDoc = _state.Document is not null;
-        _welcomeView.Visible = !hasDoc;
-        _hexView.Visible = hasDoc && mode == ViewMode.Hex;
-        _textView.Visible = hasDoc && mode == ViewMode.Text;
-
-        if (hasDoc)
-        {
-            if (mode == ViewMode.Hex)
-                _hexView.SetFocus();
-            else
-                _textView.SetFocus();
-        }
-
-        RebuildViewMenu();
-        UpdateStatusBar();
+    if (!saveDlg.Canceled && saveDlg.FileName is not null) {
+      if (_state.TrySave(saveDlg.FileName, out string? error)) {
         UpdateTitle();
-    }
-
-    // ─── File operations ───
-
-    private void ShowOpenDialog()
-    {
-        GuardUnsavedChanges(() =>
-        {
-            OpenDialog openDlg = new()
-            {
-                Title = "Open File",
-                OpenMode = OpenMode.File,
-                Width = Dim.Percent(85),
-                Height = Dim.Percent(80),
-            };
-            _app.Run(openDlg);
-
-            if (!openDlg.Canceled && openDlg.FilePaths.Count > 0)
-            {
-                string path = openDlg.FilePaths[0];
-                if (File.Exists(path))
-                {
-                    _state.OpenFile(path);
-                    SwitchView(_state.ActiveView); // Updates welcome/content visibility
-                    RegisterCommands(); // Refresh MRU entries
-                }
-            }
-            openDlg.Dispose();
-        });
-    }
-
-    private void SaveFile()
-    {
-        if (_state.Document is null || _state.CurrentFilePath is null)
-        {
-            ShowSaveAsDialog();
-            return;
-        }
-
-        if (_state.TrySave(_state.CurrentFilePath, out string? error))
-        {
-            UpdateTitle();
-            UpdateStatusBar();
-        }
-        else
-        {
-            ShowSaveErrorDialog(error ?? "Unknown error");
-        }
-    }
-
-    private void ShowSaveAsDialog()
-    {
-        if (_state.Document is null) return;
-
-        SaveDialog saveDlg = new()
-        {
-            Title = "Save As",
-            Width = Dim.Percent(85),
-            Height = Dim.Percent(80),
-        };
-        _app.Run(saveDlg);
-
-        if (!saveDlg.Canceled && saveDlg.FileName is not null)
-        {
-            if (_state.TrySave(saveDlg.FileName, out string? error))
-            {
-                UpdateTitle();
-                UpdateStatusBar();
-            }
-            else
-            {
-                ShowSaveErrorDialog(error ?? "Unknown error");
-            }
-        }
-        saveDlg.Dispose();
-    }
-
-    private void ShowSaveErrorDialog(string message)
-    {
-        MessageBox.ErrorQuery(_app, "Save Error", message, "OK");
-    }
-
-    private void GuardUnsavedChanges(Action action)
-    {
-        if (!_state.IsModified)
-        {
-            action();
-            return;
-        }
-
-        int? result = MessageBox.Query(
-            _app,
-            "Unsaved Changes",
-            "You have unsaved changes. Save before proceeding?",
-            "Save", "Don't Save", "Cancel");
-
-        switch (result)
-        {
-            case 0: // Save
-                SaveFile();
-                if (!_state.IsModified) // Save succeeded
-                    action();
-                break;
-            case 1: // Don't Save
-                action();
-                break;
-            // 2 = Cancel → do nothing
-        }
-    }
-
-    // ─── Go to dialog ───
-
-    private void ShowGotoDialog()
-    {
-        if (_state.Document is null) return;
-
-        Dialog gotoDialog = new() { Title = "Go to Offset/Line", Width = 50, Height = 8 };
-
-        Label label = new()
-        {
-            Text = _state.ActiveView == ViewMode.Hex
-                ? "Hex offset (e.g. 0x1A3F or 6719):"
-                : "Line number:",
-            X = 1,
-            Y = 1,
-        };
-
-        TextField inputField = new()
-        {
-            X = 1,
-            Y = 2,
-            Width = Dim.Fill(1),
-            Text = "",
-        };
-
-        gotoDialog.Add(label, inputField);
-        gotoDialog.AddButton(new Button() { Text = "Cancel" });
-        gotoDialog.AddButton(new Button() { Text = "Go", IsDefault = true });
-
-        gotoDialog.Initialized += (_, _) => inputField.SetFocus();
-        _app.Run(gotoDialog);
-
-        if (!gotoDialog.Canceled)
-        {
-            string input = inputField.Text?.Trim() ?? "";
-            if (_state.ActiveView == ViewMode.Hex)
-            {
-                if (TryParseOffset(input, out long offset))
-                    _hexView.GotoOffset(offset);
-            }
-            else
-            {
-                if (long.TryParse(input, out long lineNum))
-                    _textView.GotoLine(lineNum);
-            }
-        }
-        gotoDialog.Dispose();
-    }
-
-    // ─── Find dialog ───
-
-    private void ShowFindDialog()
-    {
-        if (_state.Document is null) return;
-
-        Dialog findDialog = new()
-        {
-            Title = "Find",
-            Width = 60,
-            Height = 10,
-        };
-
-        Label modeLabel = new()
-        {
-            Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT",
-            X = 1,
-            Y = 1,
-        };
-
-        CheckBox hexModeCheck = new()
-        {
-            Text = "_Hex mode",
-            X = 1,
-            Y = 2,
-        };
-        hexModeCheck.Value = _state.FindHexMode ? CheckState.Checked : CheckState.UnChecked;
-        hexModeCheck.ValueChanged += (_, e) =>
-        {
-            _state.FindHexMode = e.NewValue == CheckState.Checked;
-            modeLabel.Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT";
-        };
-
-        CheckBox caseSensitiveCheck = new()
-        {
-            Text = "_Case sensitive",
-            X = Pos.Right(hexModeCheck) + 2,
-            Y = 2,
-        };
-        caseSensitiveCheck.Value = _state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked;
-        caseSensitiveCheck.ValueChanged += (_, e) =>
-        {
-            _state.FindCaseSensitive = e.NewValue == CheckState.Checked;
-        };
-
-        Label queryLabel = new()
-        {
-            Text = "Search for:",
-            X = 1,
-            Y = 3,
-        };
-
-        TextField queryField = new()
-        {
-            X = 1,
-            Y = 4,
-            Width = Dim.Fill(1),
-            Text = _state.FindInput,
-        };
-
-        findDialog.Add(modeLabel, hexModeCheck, caseSensitiveCheck, queryLabel, queryField);
-        findDialog.AddButton(new Button() { Text = "Cancel" });
-        findDialog.AddButton(new Button() { Text = "Find", IsDefault = true });
-
-        findDialog.Initialized += (_, _) => queryField.SetFocus();
-        _app.Run(findDialog);
-
-        if (!findDialog.Canceled)
-        {
-            string query = queryField.Text?.Trim() ?? "";
-            if (!string.IsNullOrEmpty(query))
-            {
-                _state.FindInput = query;
-                _state.Settings.AddFindHistory(query);
-                StartSearch(query);
-            }
-        }
-        findDialog.Dispose();
-    }
-
-    private void StartSearch(string query)
-    {
-        if (_state.Document is null) return;
-
-        _state.CancelSearch();
-        _state.SearchResults.Clear();
-        _state.CurrentMatchIndex = -1;
-        _state.SearchStatus = "Searching…";
-        _state.IsSearching = true;
         UpdateStatusBar();
+      } else {
+        ShowSaveErrorDialog(error ?? "Unknown error");
+      }
+    }
+    saveDlg.Dispose();
+  }
 
-        CancellationTokenSource cts = new();
-        _state.SearchCts = cts;
+  private void ShowSaveErrorDialog(string message)
+  {
+    MessageBox.ErrorQuery(App!, "Save Error", message, "OK");
+  }
 
-        byte[]? pattern;
-        if (_state.FindHexMode)
-        {
-            pattern = ParseHexPattern(query);
-            if (pattern is null || pattern.Length == 0)
-            {
-                _state.SearchStatus = "Invalid hex pattern";
-                _state.IsSearching = false;
-                UpdateStatusBar();
-                return;
-            }
-        }
-        else
-        {
-            pattern = System.Text.Encoding.UTF8.GetBytes(query);
-        }
-
-        Document doc = _state.Document;
-        Task.Run(() =>
-        {
-            try
-            {
-                List<SearchResult> results = SearchEngine.FindAll(doc, pattern).ToList();
-                if (!cts.Token.IsCancellationRequested)
-                {
-                    _state.SearchResults.Clear();
-                    _state.SearchResults.AddRange(results);
-                    _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
-                    _state.SearchStatus = results.Count > 0
-                        ? $"{results.Count} match{(results.Count > 1 ? "es" : "")}"
-                        : "No matches";
-                    _state.IsSearching = false;
-
-                    // Navigate to first match
-                    if (results.Count > 0)
-                        NavigateToMatch(0);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                _state.SearchStatus = "Search cancelled";
-                _state.IsSearching = false;
-            }
-
-            // Schedule UI update on main thread
-            _app.Invoke(() =>
-            {
-                UpdateStatusBar();
-                _hexView.SetNeedsDraw();
-                _textView.SetNeedsDraw();
-            });
-        }, cts.Token);
+  private void GuardUnsavedChanges(Action action)
+  {
+    if (!_state.IsModified) {
+      action();
+      return;
     }
 
-    private void FindNext()
-    {
-        if (_state.SearchResults.Count == 0) return;
-        int next = (_state.CurrentMatchIndex + 1) % _state.SearchResults.Count;
-        NavigateToMatch(next);
+    int result = MessageBox.Query(
+        App!,
+        "Unsaved Changes",
+        "You have unsaved changes. Save before proceeding?",
+        "Save", "Don't Save", "Cancel");
+
+    switch (result) {
+      case 0: // Save
+        SaveFile();
+        if (!_state.IsModified) // Save succeeded
+          action();
+        break;
+      case 1: // Don't Save
+        action();
+        break;
+        // 2 = Cancel → do nothing
     }
+  }
 
-    private void FindPrevious()
-    {
-        if (_state.SearchResults.Count == 0) return;
-        int prev = (_state.CurrentMatchIndex - 1 + _state.SearchResults.Count) % _state.SearchResults.Count;
-        NavigateToMatch(prev);
+  // ─── Go to dialog ───
+
+  private void ShowGotoDialog()
+  {
+    if (_state.Document is null) return;
+
+    Dialog gotoDialog = new() { Title = "Go to Offset/Line", Width = 50, Height = 8 };
+
+    Label label = new() {
+      Text = _state.ActiveView == ViewMode.Hex
+            ? "Hex offset (e.g. 0x1A3F or 6719):"
+            : "Line number:",
+      X = 1,
+      Y = 1,
+    };
+
+    TextField inputField = new() {
+      X = 1,
+      Y = 2,
+      Width = Dim.Fill(1),
+      Text = "",
+    };
+
+    gotoDialog.Add(label, inputField);
+    gotoDialog.AddButton(new Button() { Text = "_Cancel" });
+    gotoDialog.AddButton(new Button() { Text = "_Go", IsDefault = true });
+
+    _app.Run(gotoDialog);
+
+    if (!gotoDialog.Canceled) {
+      string input = inputField.Text?.Trim() ?? "";
+      if (_state.ActiveView == ViewMode.Hex) {
+        if (TryParseOffset(input, out long offset))
+          _hexView.GotoOffset(offset);
+      } else {
+        if (long.TryParse(input, out long lineNum))
+          _textView.GotoLine(lineNum);
+      }
     }
+    gotoDialog.Dispose();
+  }
 
-    private void NavigateToMatch(int index)
-    {
-        if (index < 0 || index >= _state.SearchResults.Count) return;
-        _state.CurrentMatchIndex = index;
-        SearchResult match = _state.SearchResults[index];
+  // ─── Find dialog ───
 
-        if (_state.ActiveView == ViewMode.Hex)
-            _hexView.GotoOffset(match.Offset);
-        else
-            _textView.GotoOffset(match.Offset);
+  private void ShowFindDialog()
+  {
+    if (_state.Document is null) return;
 
+    Dialog findDialog = new() {
+      Title = "Find",
+      Width = 60,
+      Height = 10,
+    };
+
+    Label modeLabel = new() {
+      Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT",
+      X = 1,
+      Y = 1,
+    };
+
+    CheckBox hexModeCheck = new() {
+      Text = "_Hex mode",
+      X = 1,
+      Y = 2,
+      CheckedState = _state.FindHexMode ? CheckState.Checked : CheckState.UnChecked,
+    };
+    hexModeCheck.CheckedStateChanging += (_, e) => {
+      _state.FindHexMode = e.NewValue == CheckState.Checked;
+      modeLabel.Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT";
+    };
+
+    CheckBox caseSensitiveCheck = new() {
+      Text = "_Case sensitive",
+      X = Pos.Right(hexModeCheck) + 2,
+      Y = 2,
+      CheckedState = _state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked,
+    };
+    caseSensitiveCheck.CheckedStateChanging += (_, e) => {
+      _state.FindCaseSensitive = e.NewValue == CheckState.Checked;
+    };
+
+    Label queryLabel = new() {
+      Text = "Search for:",
+      X = 1,
+      Y = 3,
+    };
+
+    TextField queryField = new() {
+      X = 1,
+      Y = 4,
+      Width = Dim.Fill(1),
+      Text = _state.FindInput,
+    };
+
+    findDialog.Add(modeLabel, hexModeCheck, caseSensitiveCheck, queryLabel, queryField);
+    findDialog.AddButton(new Button() { Text = "_Cancel" });
+    findDialog.AddButton(new Button() { Text = "_Find", IsDefault = true });
+
+    _app.Run(findDialog);
+
+    if (!findDialog.Canceled) {
+      string query = queryField.Text?.Trim() ?? "";
+      if (!string.IsNullOrEmpty(query)) {
+        _state.FindInput = query;
+        _state.Settings.AddFindHistory(query);
+        StartSearch(query);
+      }
+    }
+    findDialog.Dispose();
+  }
+
+  private void StartSearch(string query)
+  {
+    if (_state.Document is null) return;
+
+    _state.CancelSearch();
+    _state.SearchResults.Clear();
+    _state.CurrentMatchIndex = -1;
+    _state.SearchStatus = "Searching…";
+    _state.IsSearching = true;
+    UpdateStatusBar();
+
+    CancellationTokenSource cts = new();
+    _state.SearchCts = cts;
+
+    byte[]? pattern;
+    if (_state.FindHexMode) {
+      pattern = ParseHexPattern(query);
+      if (pattern is null || pattern.Length == 0) {
+        _state.SearchStatus = "Invalid hex pattern";
+        _state.IsSearching = false;
         UpdateStatusBar();
+        return;
+      }
+    } else {
+      pattern = System.Text.Encoding.UTF8.GetBytes(query);
     }
 
-    // ─── Copy/Paste ───
+    SearchEngine engine = new(_state.Document);
+    Task.Run(() => {
+      try {
+        List<SearchResult> results = engine.Search(pattern, _state.FindCaseSensitive, cts.Token);
+        if (!cts.Token.IsCancellationRequested) {
+          _state.SearchResults.Clear();
+          _state.SearchResults.AddRange(results);
+          _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
+          _state.SearchStatus = results.Count > 0
+              ? $"{results.Count} match{(results.Count > 1 ? "es" : "")}"
+              : "No matches";
+          _state.IsSearching = false;
 
-    private void DoCopy()
-    {
-        string? text = _state.ActiveView == ViewMode.Hex
-            ? _hexView.CopySelection()
-            : _textView.CopySelection();
-
-        if (text is not null)
-            _app.Clipboard?.TrySetClipboardData(text);
-    }
-
-    private void DoPaste()
-    {
-        if (_app.Clipboard is { } clipboard && clipboard.TryGetClipboardData(out string? text) && text is not null)
-        {
-            if (_state.ActiveView == ViewMode.Hex)
-                _hexView.Paste(text);
-            else
-                _textView.Paste(text);
+          // Navigate to first match
+          if (results.Count > 0)
+            NavigateToMatch(0);
         }
-    }
+      } catch (OperationCanceledException) {
+        _state.SearchStatus = "Search cancelled";
+        _state.IsSearching = false;
+      }
 
-    private void DoSelectAll()
-    {
-        if (_state.ActiveView == ViewMode.Hex)
-            _hexView.SelectAll();
-        else
-            _textView.SelectAll();
-    }
-
-    // ─── Word wrap ───
-
-    private void ToggleWordWrap()
-    {
-        _state.WordWrap = !_state.WordWrap;
-        _state.Settings.WordWrap = _state.WordWrap;
-        _state.Settings.Save();
-        _wordWrapCheck.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
-        _textView.SetNeedsDraw();
+      // Schedule UI update on main thread
+      Application.Invoke(() => {
         UpdateStatusBar();
-    }
-
-    // ─── Encoding ───
-
-    private void SwitchEncoding(TextEncoding encoding)
-    {
-        _state.SwitchEncoding(encoding);
         _hexView.SetNeedsDraw();
         _textView.SetNeedsDraw();
-        RebuildViewMenu();
-        UpdateStatusBar();
+      });
+    }, cts.Token);
+  }
+
+  private void FindNext()
+  {
+    if (_state.SearchResults.Count == 0) return;
+    int next = (_state.CurrentMatchIndex + 1) % _state.SearchResults.Count;
+    NavigateToMatch(next);
+  }
+
+  private void FindPrevious()
+  {
+    if (_state.SearchResults.Count == 0) return;
+    int prev = (_state.CurrentMatchIndex - 1 + _state.SearchResults.Count) % _state.SearchResults.Count;
+    NavigateToMatch(prev);
+  }
+
+  private void NavigateToMatch(int index)
+  {
+    if (index < 0 || index >= _state.SearchResults.Count) return;
+    _state.CurrentMatchIndex = index;
+    SearchResult match = _state.SearchResults[index];
+
+    if (_state.ActiveView == ViewMode.Hex)
+      _hexView.GotoOffset(match.Offset);
+    else
+      _textView.GotoOffset(match.Offset);
+
+    UpdateStatusBar();
+  }
+
+  // ─── Copy/Paste ───
+
+  private void DoCopy()
+  {
+    string? text = _state.ActiveView == ViewMode.Hex
+        ? _hexView.CopySelection()
+        : _textView.CopySelection();
+
+    if (text is not null)
+      Clipboard.TrySetClipboardData(text);
+  }
+
+  private void DoPaste()
+  {
+    if (Clipboard.TryGetClipboardData(out string? text) && text is not null) {
+      if (_state.ActiveView == ViewMode.Hex)
+        _hexView.Paste(text);
+      else
+        _textView.Paste(text);
     }
+  }
 
-    // ─── Command palette ───
+  private void DoSelectAll()
+  {
+    if (_state.ActiveView == ViewMode.Hex)
+      _hexView.SelectAll();
+    else
+      _textView.SelectAll();
+  }
 
-    private void ShowCommandPalette()
-    {
-        RegisterCommands(); // Refresh MRU entries
-        _palette.Reset();
+  // ─── Word wrap ───
 
-        Dialog paletteDialog = new()
-        {
-            Title = "Command Palette",
-            Width = Dim.Percent(80),
-            Height = Dim.Percent(70),
-        };
+  private void ToggleWordWrap()
+  {
+    _state.WordWrap = !_state.WordWrap;
+    _state.Settings.WordWrap = _state.WordWrap;
+    _state.Settings.Save();
+    _textView.SetNeedsDraw();
+    UpdateStatusBar();
+  }
 
-        TextField queryField = new()
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Text = "",
-        };
+  // ─── Encoding ───
 
-        ListView listView = new()
-        {
-            X = 0,
-            Y = Pos.Bottom(queryField),
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-        };
+  private void SwitchEncoding(TextEncoding encoding)
+  {
+    _state.SwitchEncoding(encoding);
+    _hexView.SetNeedsDraw();
+    _textView.SetNeedsDraw();
+    UpdateStatusBar();
+  }
 
-        UpdatePaletteList(listView);
+  // ─── Command palette ───
 
-        queryField.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == KeyCode.CursorDown)
-            {
-                _palette.MoveDown();
-                listView.SelectedItem = _palette.SelectedIndex;
-                e.Handled = true;
-            }
-            else if (e.KeyCode == KeyCode.CursorUp)
-            {
-                _palette.MoveUp();
-                listView.SelectedItem = _palette.SelectedIndex;
-                e.Handled = true;
-            }
-            else if (e.KeyCode == KeyCode.Enter)
-            {
-                PaletteCommand? cmd = _palette.GetSelected();
-                paletteDialog.RequestStop();
-                cmd?.Execute();
-                e.Handled = true;
-            }
-            else if (e.KeyCode == KeyCode.Esc)
-            {
-                paletteDialog.RequestStop();
-                e.Handled = true;
-            }
-        };
+  private void ShowCommandPalette()
+  {
+    _palette.Reset();
 
-        // Filter as user types — use TextChanged for reliable text reading
-        queryField.TextChanged += (_, _) =>
-        {
-            string newQuery = queryField.Text ?? "";
-            if (newQuery != _palette.Query)
-            {
-                _palette.Query = newQuery;
-                UpdatePaletteList(listView);
-            }
-        };
+    Dialog paletteDialog = new() {
+      Title = "Command Palette",
+      Width = Dim.Percent(60),
+      Height = Dim.Percent(50),
+    };
 
-        paletteDialog.Add(queryField, listView);
-        paletteDialog.Initialized += (_, _) => queryField.SetFocus();
-        _app.Run(paletteDialog);
-        paletteDialog.Dispose();
-    }
+    TextField queryField = new() {
+      X = 0,
+      Y = 0,
+      Width = Dim.Fill(),
+      Text = "",
+    };
 
-    private void UpdatePaletteList(ListView listView)
-    {
-        ObservableCollection<string> items = new(
-            _palette.FilteredCommands
-            .Select(c => $"[{c.Category}] {c.Name}  {c.Shortcut}"));
-        listView.SetSource(items);
+    ListView listView = new() {
+      X = 0,
+      Y = Pos.Bottom(queryField),
+      Width = Dim.Fill(),
+      Height = Dim.Fill(),
+    };
+
+    UpdatePaletteList(listView);
+
+    queryField.HasFocusChanged += (_, __) => {
+      // Keep focus on queryField
+    };
+
+    queryField.KeyDown += (_, e) => {
+      if (e.KeyCode == KeyCode.CursorDown) {
+        _palette.MoveDown();
         listView.SelectedItem = _palette.SelectedIndex;
+        e.Handled = true;
+      } else if (e.KeyCode == KeyCode.CursorUp) {
+        _palette.MoveUp();
+        listView.SelectedItem = _palette.SelectedIndex;
+        e.Handled = true;
+      } else if (e.KeyCode == KeyCode.Enter) {
+        PaletteCommand? cmd = _palette.GetSelected();
+        paletteDialog.RequestStop();
+        cmd?.Execute();
+        e.Handled = true;
+      } else if (e.KeyCode == KeyCode.Esc) {
+        paletteDialog.RequestStop();
+        e.Handled = true;
+      }
+    };
+
+    // Update filtering as user types - check on each key event
+    queryField.KeyUp += (_, _) => {
+      string newQuery = queryField.Text?.ToString() ?? "";
+      if (newQuery != _palette.Query) {
+        _palette.Query = newQuery;
+        UpdatePaletteList(listView);
+      }
+    };
+
+    paletteDialog.Add(queryField, listView);
+    _app.Run(paletteDialog);
+    paletteDialog.Dispose();
+  }
+
+  private void UpdatePaletteList(ListView listView)
+  {
+    List<string> items = _palette.FilteredCommands
+        .Select(c => $"[{c.Category}] {c.Name}  {c.Shortcut}")
+        .ToList();
+    listView.SetSource(items);
+    listView.SelectedItem = _palette.SelectedIndex;
+  }
+
+  private void RegisterCommands()
+  {
+    _palette.RegisterCommand("File", "Open File", "Ctrl+O", () => ShowOpenDialog());
+    _palette.RegisterCommand("File", "Save", "Ctrl+S", () => SaveFile());
+    _palette.RegisterCommand("File", "Save As...", "", () => ShowSaveAsDialog());
+    _palette.RegisterCommand("File", "Quit", "Ctrl+Q", () => GuardUnsavedChanges(() => _app.RequestStop()));
+    _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
+    _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
+    _palette.RegisterCommand("View", "Toggle Word Wrap", "", () => ToggleWordWrap());
+    _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => ShowGotoDialog());
+    _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => ShowFindDialog());
+    _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
+    _palette.RegisterCommand("Search", "Find Previous", "Shift+F3", () => FindPrevious());
+    _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
+    _palette.RegisterCommand("Edit", "Paste", "Ctrl+V", () => DoPaste());
+    _palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () => DoSelectAll());
+    _palette.RegisterCommand("Encoding", "UTF-8", "", () => SwitchEncoding(TextEncoding.Utf8));
+    _palette.RegisterCommand("Encoding", "UTF-16 LE", "", () => SwitchEncoding(TextEncoding.Utf16Le));
+    _palette.RegisterCommand("Encoding", "Windows-1252", "", () => SwitchEncoding(TextEncoding.Windows1252));
+  }
+
+  // ─── Status bar & title ───
+
+  private void UpdateStatusBar()
+  {
+    if (_state.Document is null) {
+      Title = "Leviathan — Large File Editor";
+      return;
     }
 
-    private void RegisterCommands()
-    {
-        _palette.Clear();
-        _palette.RegisterCommand("File", "Open File", "Ctrl+O", () => ShowOpenDialog());
-        _palette.RegisterCommand("File", "Save", "Ctrl+S", () => SaveFile());
-        _palette.RegisterCommand("File", "Save As...", "", () => ShowSaveAsDialog());
-        _palette.RegisterCommand("File", "Quit", "Ctrl+Q", () => GuardUnsavedChanges(() => _app.RequestStop()));
+    UpdateTitle();
+    SetNeedsDraw();
+  }
 
-        // MRU entries
-        foreach (string recent in _state.Settings.RecentFiles)
-        {
-            string path = recent;
-            _palette.RegisterCommand("File", $"Open: {Path.GetFileName(path)}", "",
-                () => GuardUnsavedChanges(() =>
-                {
-                    _state.OpenFile(path);
-                    SwitchView(_state.ActiveView);
-                    RegisterCommands();
-                }));
-        }
-
-        _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
-        _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
-
-        string wrapState = _state.WordWrap ? "[✓]" : "[ ]";
-        _palette.RegisterCommand("View", $"{wrapState} Word Wrap", "", () => ToggleWordWrap());
-
-        // Bytes per row
-        foreach (int bpr in new[] { 0, 8, 16, 24, 32, 48, 64 })
-        {
-            string label = bpr == 0 ? "Auto" : $"{bpr}";
-            string mark = _state.BytesPerRowSetting == bpr ? "●" : " ";
-            int val = bpr;
-            _palette.RegisterCommand("View", $"{mark} {label} bytes/row", "", () => SetBytesPerRow(val));
-        }
-
-        _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => ShowGotoDialog());
-        _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => ShowFindDialog());
-        _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
-        _palette.RegisterCommand("Search", "Find Previous", "Shift+F3", () => FindPrevious());
-        _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
-        _palette.RegisterCommand("Edit", "Paste", "Ctrl+V", () => DoPaste());
-        _palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () => DoSelectAll());
-
-        // Encoding radio in palette
-        TextEncoding current = _state.Decoder.Encoding;
-        foreach ((string label, TextEncoding enc) in new[] {
-            ("UTF-8", TextEncoding.Utf8),
-            ("UTF-16 LE", TextEncoding.Utf16Le),
-            ("Windows-1252", TextEncoding.Windows1252) })
-        {
-            string mark = current == enc ? "●" : " ";
-            _palette.RegisterCommand("Encoding", $"{mark} {label}", "", () => SwitchEncoding(enc));
-        }
+  private void UpdateTitle()
+  {
+    if (_state.CurrentFilePath is null) {
+      Title = "Leviathan — Large File Editor";
+      return;
     }
 
-    // ─── Status bar & title ───
+    string fileName = Path.GetFileName(_state.CurrentFilePath);
+    string modified = _state.IsModified ? "● " : "";
+    string viewName = _state.ActiveView == ViewMode.Hex ? "HEX" : "TEXT";
+    string encoding = _state.Decoder.Encoding.ToString();
+    long cursor = _state.CurrentCursorOffset;
+    string searchInfo = _state.SearchResults.Count > 0
+        ? $" | {_state.CurrentMatchIndex + 1}/{_state.SearchResults.Count} matches"
+        : _state.IsSearching ? " | Searching…" : "";
 
-    private void UpdateStatusBar()
-    {
-        if (_state.Document is null)
-        {
-            Console.Title = "Leviathan — Large File Editor";
-            return;
-        }
+    Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+  }
 
-        UpdateTitle();
-        SetNeedsDraw();
+  private static string FormatFileSize(long bytes)
+  {
+    if (bytes < 1024) return $"{bytes} B";
+    if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+    if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+    return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+  }
+
+  // ─── Helpers ───
+
+  private static bool TryParseOffset(string input, out long offset)
+  {
+    offset = 0;
+    if (string.IsNullOrWhiteSpace(input)) return false;
+
+    input = input.Trim();
+    if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
+        input.StartsWith("0X", StringComparison.OrdinalIgnoreCase)) {
+      return long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
     }
 
-    private void UpdateTitle()
-    {
-        if (_state.CurrentFilePath is null)
-        {
-            Console.Title = "Leviathan — Large File Editor";
-            return;
-        }
+    // Try hex if it contains hex chars
+    if (input.Any(c => c is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
+      return long.TryParse(input, System.Globalization.NumberStyles.HexNumber, null, out offset);
 
-        string fileName = Path.GetFileName(_state.CurrentFilePath);
-        string modified = _state.IsModified ? "● " : "";
-        string viewName = _state.ActiveView == ViewMode.Hex ? "HEX" : "TEXT";
-        string encoding = _state.Decoder.Encoding.ToString();
-        long cursor = _state.CurrentCursorOffset;
-        string searchInfo = _state.SearchResults.Count > 0
-            ? $" | {_state.CurrentMatchIndex + 1}/{_state.SearchResults.Count} matches"
-            : _state.IsSearching ? " | Searching…" : "";
+    return long.TryParse(input, out offset);
+  }
 
-        Console.Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+  private static byte[]? ParseHexPattern(string text)
+  {
+    List<byte> result = [];
+    int nibbleCount = 0;
+    int current = 0;
+
+    foreach (char c in text) {
+      if (c is ' ' or '\t' or '\r' or '\n' or '-' or ':') {
+        if (nibbleCount == 1) return null;
+        continue;
+      }
+
+      int digit = c switch {
+        >= '0' and <= '9' => c - '0',
+        >= 'a' and <= 'f' => c - 'a' + 10,
+        >= 'A' and <= 'F' => c - 'A' + 10,
+        _ => -1
+      };
+
+      if (digit < 0) return null;
+
+      current = (current << 4) | digit;
+      nibbleCount++;
+
+      if (nibbleCount == 2) {
+        result.Add((byte)current);
+        current = 0;
+        nibbleCount = 0;
+      }
     }
 
-    private static string FormatFileSize(long bytes)
-    {
-        if (bytes < 1024) return $"{bytes} B";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
-        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
-    }
-
-    // ─── Helpers ───
-
-    private static bool TryParseOffset(string input, out long offset)
-    {
-        offset = 0;
-        if (string.IsNullOrWhiteSpace(input)) return false;
-
-        input = input.Trim();
-        if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
-            input.StartsWith("0X", StringComparison.OrdinalIgnoreCase))
-        {
-            return long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
-        }
-
-        // Try hex if it contains hex chars
-        if (input.Any(c => c is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
-            return long.TryParse(input, System.Globalization.NumberStyles.HexNumber, null, out offset);
-
-        return long.TryParse(input, out offset);
-    }
-
-    private static byte[]? ParseHexPattern(string text)
-    {
-        List<byte> result = [];
-        int nibbleCount = 0;
-        int current = 0;
-
-        foreach (char c in text)
-        {
-            if (c is ' ' or '\t' or '\r' or '\n' or '-' or ':')
-            {
-                if (nibbleCount == 1) return null;
-                continue;
-            }
-
-            int digit = c switch
-            {
-                >= '0' and <= '9' => c - '0',
-                >= 'a' and <= 'f' => c - 'a' + 10,
-                >= 'A' and <= 'F' => c - 'A' + 10,
-                _ => -1
-            };
-
-            if (digit < 0) return null;
-
-            current = (current << 4) | digit;
-            nibbleCount++;
-
-            if (nibbleCount == 2)
-            {
-                result.Add((byte)current);
-                current = 0;
-                nibbleCount = 0;
-            }
-        }
-
-        if (nibbleCount != 0) return null;
-        return result.ToArray();
-    }
+    if (nibbleCount != 0) return null;
+    return result.ToArray();
+  }
 }

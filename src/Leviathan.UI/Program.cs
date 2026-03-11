@@ -67,8 +67,7 @@ void OpenFile(string path)
   Console.WriteLine($"Opening: {path} ({document.Length:N0} bytes, {encoding})");
 }
 
-ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch
-{
+ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch {
   TextEncoding.Utf16Le => new Utf16LeTextDecoder(),
   TextEncoding.Windows1252 => new Windows1252TextDecoder(),
   _ => new Utf8TextDecoder(),
@@ -126,8 +125,7 @@ appWindow.OnCloseRequested = () => {
 
 // ── Drag-and-drop file open ────────────────────────────────────
 appWindow.OnFileDrop = paths => {
-  if (paths.Length > 0 && File.Exists(paths[0]))
-  {
+  if (paths.Length > 0 && File.Exists(paths[0])) {
     EnqueueUiAction(() => GuardUnsavedChanges(() => OpenFile(paths[0])));
   }
 };

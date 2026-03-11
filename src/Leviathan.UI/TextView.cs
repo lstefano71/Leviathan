@@ -1041,9 +1041,7 @@ public sealed class TextView
       if (byteLen == 0) { pos++; col++; continue; }
 
       int cp = rune.Value;
-      if (cp == '\t') { col += _tabWidth; }
-      else if (cp < 0x20) { col++; }
-      else { col += Utf8Utils.RuneColumnWidth(rune, _tabWidth); }
+      if (cp == '\t') { col += _tabWidth; } else if (cp < 0x20) { col++; } else { col += Utf8Utils.RuneColumnWidth(rune, _tabWidth); }
       pos += byteLen;
     }
 

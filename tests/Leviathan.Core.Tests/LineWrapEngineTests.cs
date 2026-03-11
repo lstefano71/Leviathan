@@ -185,8 +185,7 @@ public class LineWrapEngineTests
   {
     // 20 ASCII chars "ABCDEFGHIJKLMNOPQRST" in UTF-16 LE = 40 bytes, no newlines
     byte[] data = new byte[40];
-    for (int i = 0; i < 20; i++)
-    {
+    for (int i = 0; i < 20; i++) {
       data[i * 2] = (byte)(0x41 + i); // A..T
       data[i * 2 + 1] = 0x00;
     }
