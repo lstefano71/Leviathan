@@ -13,6 +13,12 @@
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
   </PropertyGroup>
 
+  <!-- Root all Terminal.Gui types so the AOT trimmer does not strip
+       reflection-dependent internals (config, JSON converters, etc.) -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Terminal.Gui" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Leviathan.Core\Leviathan.Core.csproj" />
   </ItemGroup>

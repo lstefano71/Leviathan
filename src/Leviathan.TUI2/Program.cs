@@ -49,6 +49,12 @@ internal sealed class MainWindow : Window
     private readonly LeviathanTextView _textView;
     private readonly CommandPalette _palette;
     private readonly StatusBar _statusBar;
+    private readonly MenuBar _menuBar;
+    private MenuBarItem _viewMenu = null!;
+    private readonly View _welcomeView;
+
+    // Checkable menu items we need to update
+    private CheckBox _wordWrapCheck = null!;
 
     internal MainWindow(
         IApplication app,
@@ -63,47 +69,65 @@ internal sealed class MainWindow : Window
         _textView = textView;
         _palette = palette;
 
-        Title = "Leviathan — Large File Editor";
+        BorderStyle = LineStyle.None;
 
         // ─── Menu bar ───
-        MenuBar menuBar = BuildMenuBar();
+        _menuBar = BuildMenuBar();
+
+        // ─── Welcome view (shown when no file is open) ───
+        _welcomeView = BuildWelcomeView();
+        _welcomeView.Y = Pos.Bottom(_menuBar);
+        _welcomeView.Width = Dim.Fill();
+        _welcomeView.Height = Dim.Fill(1);
+        _welcomeView.Visible = state.Document is null;
 
         // ─── Content views ───
         _hexView.X = 0;
-        _hexView.Y = Pos.Bottom(menuBar);
+        _hexView.Y = Pos.Bottom(_menuBar);
         _hexView.Width = Dim.Fill();
-        _hexView.Height = Dim.Fill(1); // Leave 1 row for status bar
-        _hexView.Visible = state.ActiveView == ViewMode.Hex;
+        _hexView.Height = Dim.Fill(1);
+        _hexView.Visible = state.Document is not null && state.ActiveView == ViewMode.Hex;
 
         _textView.X = 0;
-        _textView.Y = Pos.Bottom(menuBar);
+        _textView.Y = Pos.Bottom(_menuBar);
         _textView.Width = Dim.Fill();
         _textView.Height = Dim.Fill(1);
-        _textView.Visible = state.ActiveView == ViewMode.Text;
+        _textView.Visible = state.Document is not null && state.ActiveView == ViewMode.Text;
 
         // ─── Status bar ───
         _statusBar = new StatusBar([
-            new Shortcut(Key.F5, "Hex", null),
-            new Shortcut(Key.F6, "Text", null),
-            new Shortcut(Key.O.WithCtrl, "Open", null),
-            new Shortcut(Key.S.WithCtrl, "Save", null),
+            new Shortcut(Key.F5, "Hex", () => SwitchView(ViewMode.Hex)),
+            new Shortcut(Key.F6, "Text", () => SwitchView(ViewMode.Text)),
+            new Shortcut(Key.O.WithCtrl, "Open", () => ShowOpenDialog()),
+            new Shortcut(Key.S.WithCtrl, "Save", () => SaveFile()),
         ]);
 
-        Add(menuBar, _hexView, _textView, _statusBar);
+        Add(_menuBar, _welcomeView, _hexView, _textView, _statusBar);
 
-        // Wire state-changed events to update status bar
+        // Wire state-changed events
         _hexView.StateChanged += UpdateStatusBar;
         _textView.StateChanged += UpdateStatusBar;
 
-        // Register command palette commands
         RegisterCommands();
-
-        // ─── Application-level key bindings ───
         SetupAppKeyBindings();
+        UpdateTitle();
     }
 
     private MenuBar BuildMenuBar()
     {
+        _wordWrapCheck = new CheckBox { Text = "_Word Wrap", CanFocus = false };
+        _wordWrapCheck.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
+        _wordWrapCheck.ValueChanged += (_, _) =>
+        {
+            _state.WordWrap = _wordWrapCheck.Value == CheckState.Checked;
+            _state.Settings.WordWrap = _state.WordWrap;
+            _state.Settings.Save();
+            _textView.SetNeedsDraw();
+            UpdateStatusBar();
+        };
+
+        _viewMenu = new MenuBarItem("_View", BuildViewMenuItems());
+
         return new MenuBar([
             new MenuBarItem("_File", [
                 new MenuItem("_Open...", "Open a file", () => ShowOpenDialog(), Key.O.WithCtrl),
@@ -111,14 +135,7 @@ internal sealed class MainWindow : Window
                 new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
                 new MenuItem("_Quit", "Exit Leviathan", () => GuardUnsavedChanges(() => _app.RequestStop()), Key.Q.WithCtrl),
             ]),
-            new MenuBarItem("_View", [
-                new MenuItem("_Hex View", "Switch to hex view", () => SwitchView(ViewMode.Hex), Key.F5),
-                new MenuItem("_Text View", "Switch to text view", () => SwitchView(ViewMode.Text), Key.F6),
-                new MenuItem("_Word Wrap", "Toggle word wrap", () => ToggleWordWrap()),
-                new MenuItem("Encoding: _UTF-8", null, () => SwitchEncoding(TextEncoding.Utf8)),
-                new MenuItem("Encoding: UTF-_16 LE", null, () => SwitchEncoding(TextEncoding.Utf16Le)),
-                new MenuItem("Encoding: _Windows-1252", null, () => SwitchEncoding(TextEncoding.Windows1252)),
-            ]),
+            _viewMenu,
             new MenuBarItem("_Navigate", [
                 new MenuItem("_Go to Offset/Line...", "Jump to offset or line", () => ShowGotoDialog(), Key.G.WithCtrl),
             ]),
@@ -133,6 +150,56 @@ internal sealed class MainWindow : Window
                 new MenuItem("Select _All", "Select entire file", () => DoSelectAll(), Key.A.WithCtrl),
             ]),
         ]);
+    }
+
+    /// <summary>
+    /// Build view menu items depending on active view mode. Hex shows BPR options, Text shows encoding.
+    /// </summary>
+    private MenuItem[] BuildViewMenuItems()
+    {
+        // Hex/Text radio items
+        MenuItem hexItem = new("_Hex View", "F5", () => SwitchView(ViewMode.Hex), Key.F5);
+        MenuItem textItem = new("_Text View", "F6", () => SwitchView(ViewMode.Text), Key.F6);
+
+        List<MenuItem> items = [hexItem, textItem];
+
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            // Bytes per row radio set
+            int[] bprOptions = [0, 8, 16, 24, 32, 48, 64];
+            string[] bprLabels = ["Auto", "8", "16", "24", "32", "48", "64"];
+            for (int i = 0; i < bprOptions.Length; i++)
+            {
+                int bpr = bprOptions[i];
+                string mark = _state.BytesPerRowSetting == bpr ? "● " : "  ";
+                items.Add(new MenuItem($"{mark}{bprLabels[i]} bytes/row", "", () => SetBytesPerRow(bpr)));
+            }
+        }
+        else
+        {
+            // Word wrap toggle
+            items.Add(new MenuItem { CommandView = _wordWrapCheck });
+
+            // Encoding radio set
+            TextEncoding current = _state.Decoder.Encoding;
+            (string label, TextEncoding enc)[] encodings = [
+                ("UTF-8", TextEncoding.Utf8),
+                ("UTF-16 LE", TextEncoding.Utf16Le),
+                ("Windows-1252", TextEncoding.Windows1252),
+            ];
+            foreach ((string label, TextEncoding enc) in encodings)
+            {
+                string mark = current == enc ? "● " : "  ";
+                items.Add(new MenuItem($"{mark}{label}", "", () => SwitchEncoding(enc)));
+            }
+        }
+
+        return [.. items];
+    }
+
+    private void RebuildViewMenu()
+    {
+        _viewMenu.PopoverMenu = new PopoverMenu(BuildViewMenuItems());
     }
 
     private void SetupAppKeyBindings()
@@ -157,19 +224,109 @@ internal sealed class MainWindow : Window
         };
     }
 
+    // ─── Welcome view (MRU) ───
+
+    private View BuildWelcomeView()
+    {
+        View container = new()
+        {
+            CanFocus = true,
+        };
+
+        Label title = new()
+        {
+            Text = "Leviathan — Large File Editor",
+            X = Pos.Center(),
+            Y = 2,
+        };
+
+        Label subtitle = new()
+        {
+            Text = "Open a file with Ctrl+O or select a recent file:",
+            X = Pos.Center(),
+            Y = 4,
+        };
+
+        container.Add(title, subtitle);
+
+        IReadOnlyList<string> recentFiles = _state.Settings.RecentFiles;
+        for (int i = 0; i < Math.Min(recentFiles.Count, 9); i++)
+        {
+            string path = recentFiles[i];
+            int idx = i;
+            Label item = new()
+            {
+                Text = $"  {idx + 1}. {path}",
+                X = 2,
+                Y = 6 + idx,
+            };
+            container.Add(item);
+        }
+
+        if (recentFiles.Count == 0)
+        {
+            Label noRecent = new()
+            {
+                Text = "  No recent files.",
+                X = 2,
+                Y = 6,
+            };
+            container.Add(noRecent);
+        }
+
+        container.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode >= KeyCode.D1 && e.KeyCode <= KeyCode.D9)
+            {
+                int idx = (int)e.KeyCode - (int)KeyCode.D1;
+                if (idx < recentFiles.Count)
+                {
+                    string path = recentFiles[idx];
+                    if (File.Exists(path))
+                    {
+                        _state.OpenFile(path);
+                        SwitchView(_state.ActiveView);
+                        RegisterCommands();
+                    }
+                    e.Handled = true;
+                }
+            }
+        };
+
+        return container;
+    }
+
+    // ─── Bytes per row ───
+
+    private void SetBytesPerRow(int bpr)
+    {
+        _state.BytesPerRowSetting = bpr;
+        _state.Settings.BytesPerRow = bpr;
+        _state.Settings.Save();
+        _hexView.SetNeedsDraw();
+        RebuildViewMenu();
+        UpdateStatusBar();
+    }
+
     // ─── View switching ───
 
     private void SwitchView(ViewMode mode)
     {
         _state.ActiveView = mode;
-        _hexView.Visible = mode == ViewMode.Hex;
-        _textView.Visible = mode == ViewMode.Text;
+        bool hasDoc = _state.Document is not null;
+        _welcomeView.Visible = !hasDoc;
+        _hexView.Visible = hasDoc && mode == ViewMode.Hex;
+        _textView.Visible = hasDoc && mode == ViewMode.Text;
 
-        if (mode == ViewMode.Hex)
-            _hexView.SetFocus();
-        else
-            _textView.SetFocus();
+        if (hasDoc)
+        {
+            if (mode == ViewMode.Hex)
+                _hexView.SetFocus();
+            else
+                _textView.SetFocus();
+        }
 
+        RebuildViewMenu();
         UpdateStatusBar();
         UpdateTitle();
     }
@@ -184,6 +341,8 @@ internal sealed class MainWindow : Window
             {
                 Title = "Open File",
                 OpenMode = OpenMode.File,
+                Width = Dim.Percent(85),
+                Height = Dim.Percent(80),
             };
             _app.Run(openDlg);
 
@@ -193,10 +352,8 @@ internal sealed class MainWindow : Window
                 if (File.Exists(path))
                 {
                     _state.OpenFile(path);
-                    UpdateTitle();
-                    UpdateStatusBar();
-                    _hexView.SetNeedsDraw();
-                    _textView.SetNeedsDraw();
+                    SwitchView(_state.ActiveView); // Updates welcome/content visibility
+                    RegisterCommands(); // Refresh MRU entries
                 }
             }
             openDlg.Dispose();
@@ -229,6 +386,8 @@ internal sealed class MainWindow : Window
         SaveDialog saveDlg = new()
         {
             Title = "Save As",
+            Width = Dim.Percent(85),
+            Height = Dim.Percent(80),
         };
         _app.Run(saveDlg);
 
@@ -306,9 +465,10 @@ internal sealed class MainWindow : Window
         };
 
         gotoDialog.Add(label, inputField);
-        gotoDialog.AddButton(new Button() { Text = "_Cancel" });
-        gotoDialog.AddButton(new Button() { Text = "_Go", IsDefault = true });
+        gotoDialog.AddButton(new Button() { Text = "Cancel" });
+        gotoDialog.AddButton(new Button() { Text = "Go", IsDefault = true });
 
+        gotoDialog.Initialized += (_, _) => inputField.SetFocus();
         _app.Run(gotoDialog);
 
         if (!gotoDialog.Canceled)
@@ -389,9 +549,10 @@ internal sealed class MainWindow : Window
         };
 
         findDialog.Add(modeLabel, hexModeCheck, caseSensitiveCheck, queryLabel, queryField);
-        findDialog.AddButton(new Button() { Text = "_Cancel" });
-        findDialog.AddButton(new Button() { Text = "_Find", IsDefault = true });
+        findDialog.AddButton(new Button() { Text = "Cancel" });
+        findDialog.AddButton(new Button() { Text = "Find", IsDefault = true });
 
+        findDialog.Initialized += (_, _) => queryField.SetFocus();
         _app.Run(findDialog);
 
         if (!findDialog.Canceled)
@@ -541,6 +702,7 @@ internal sealed class MainWindow : Window
         _state.WordWrap = !_state.WordWrap;
         _state.Settings.WordWrap = _state.WordWrap;
         _state.Settings.Save();
+        _wordWrapCheck.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
         _textView.SetNeedsDraw();
         UpdateStatusBar();
     }
@@ -552,6 +714,7 @@ internal sealed class MainWindow : Window
         _state.SwitchEncoding(encoding);
         _hexView.SetNeedsDraw();
         _textView.SetNeedsDraw();
+        RebuildViewMenu();
         UpdateStatusBar();
     }
 
@@ -559,13 +722,14 @@ internal sealed class MainWindow : Window
 
     private void ShowCommandPalette()
     {
+        RegisterCommands(); // Refresh MRU entries
         _palette.Reset();
 
         Dialog paletteDialog = new()
         {
             Title = "Command Palette",
-            Width = Dim.Percent(60),
-            Height = Dim.Percent(50),
+            Width = Dim.Percent(80),
+            Height = Dim.Percent(70),
         };
 
         TextField queryField = new()
@@ -585,11 +749,6 @@ internal sealed class MainWindow : Window
         };
 
         UpdatePaletteList(listView);
-
-        queryField.HasFocusChanged += (_, __) =>
-        {
-            // Keep focus on queryField
-        };
 
         queryField.KeyDown += (_, e) =>
         {
@@ -619,10 +778,10 @@ internal sealed class MainWindow : Window
             }
         };
 
-        // Update filtering as user types - check on each key event
-        queryField.KeyUp += (_, _) =>
+        // Filter as user types — use TextChanged for reliable text reading
+        queryField.TextChanged += (_, _) =>
         {
-            string newQuery = queryField.Text?.ToString() ?? "";
+            string newQuery = queryField.Text ?? "";
             if (newQuery != _palette.Query)
             {
                 _palette.Query = newQuery;
@@ -631,6 +790,7 @@ internal sealed class MainWindow : Window
         };
 
         paletteDialog.Add(queryField, listView);
+        paletteDialog.Initialized += (_, _) => queryField.SetFocus();
         _app.Run(paletteDialog);
         paletteDialog.Dispose();
     }
@@ -646,13 +806,40 @@ internal sealed class MainWindow : Window
 
     private void RegisterCommands()
     {
+        _palette.Clear();
         _palette.RegisterCommand("File", "Open File", "Ctrl+O", () => ShowOpenDialog());
         _palette.RegisterCommand("File", "Save", "Ctrl+S", () => SaveFile());
         _palette.RegisterCommand("File", "Save As...", "", () => ShowSaveAsDialog());
         _palette.RegisterCommand("File", "Quit", "Ctrl+Q", () => GuardUnsavedChanges(() => _app.RequestStop()));
+
+        // MRU entries
+        foreach (string recent in _state.Settings.RecentFiles)
+        {
+            string path = recent;
+            _palette.RegisterCommand("File", $"Open: {Path.GetFileName(path)}", "",
+                () => GuardUnsavedChanges(() =>
+                {
+                    _state.OpenFile(path);
+                    SwitchView(_state.ActiveView);
+                    RegisterCommands();
+                }));
+        }
+
         _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
         _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
-        _palette.RegisterCommand("View", "Toggle Word Wrap", "", () => ToggleWordWrap());
+
+        string wrapState = _state.WordWrap ? "[✓]" : "[ ]";
+        _palette.RegisterCommand("View", $"{wrapState} Word Wrap", "", () => ToggleWordWrap());
+
+        // Bytes per row
+        foreach (int bpr in new[] { 0, 8, 16, 24, 32, 48, 64 })
+        {
+            string label = bpr == 0 ? "Auto" : $"{bpr}";
+            string mark = _state.BytesPerRowSetting == bpr ? "●" : " ";
+            int val = bpr;
+            _palette.RegisterCommand("View", $"{mark} {label} bytes/row", "", () => SetBytesPerRow(val));
+        }
+
         _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => ShowGotoDialog());
         _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => ShowFindDialog());
         _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
@@ -660,9 +847,17 @@ internal sealed class MainWindow : Window
         _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
         _palette.RegisterCommand("Edit", "Paste", "Ctrl+V", () => DoPaste());
         _palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () => DoSelectAll());
-        _palette.RegisterCommand("Encoding", "UTF-8", "", () => SwitchEncoding(TextEncoding.Utf8));
-        _palette.RegisterCommand("Encoding", "UTF-16 LE", "", () => SwitchEncoding(TextEncoding.Utf16Le));
-        _palette.RegisterCommand("Encoding", "Windows-1252", "", () => SwitchEncoding(TextEncoding.Windows1252));
+
+        // Encoding radio in palette
+        TextEncoding current = _state.Decoder.Encoding;
+        foreach ((string label, TextEncoding enc) in new[] {
+            ("UTF-8", TextEncoding.Utf8),
+            ("UTF-16 LE", TextEncoding.Utf16Le),
+            ("Windows-1252", TextEncoding.Windows1252) })
+        {
+            string mark = current == enc ? "●" : " ";
+            _palette.RegisterCommand("Encoding", $"{mark} {label}", "", () => SwitchEncoding(enc));
+        }
     }
 
     // ─── Status bar & title ───
@@ -671,7 +866,7 @@ internal sealed class MainWindow : Window
     {
         if (_state.Document is null)
         {
-            Title = "Leviathan — Large File Editor";
+            Console.Title = "Leviathan — Large File Editor";
             return;
         }
 
@@ -683,7 +878,7 @@ internal sealed class MainWindow : Window
     {
         if (_state.CurrentFilePath is null)
         {
-            Title = "Leviathan — Large File Editor";
+            Console.Title = "Leviathan — Large File Editor";
             return;
         }
 
@@ -696,7 +891,7 @@ internal sealed class MainWindow : Window
             ? $" | {_state.CurrentMatchIndex + 1}/{_state.SearchResults.Count} matches"
             : _state.IsSearching ? " | Searching…" : "";
 
-        Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+        Console.Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
     }
 
     private static string FormatFileSize(long bytes)

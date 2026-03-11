@@ -28,6 +28,13 @@ internal sealed class CommandPalette
     internal IReadOnlyList<PaletteCommand> FilteredCommands => _filtered;
     internal int SelectedIndex => _selectedIndex;
 
+    internal void Clear()
+    {
+        _allCommands.Clear();
+        _filtered.Clear();
+        _selectedIndex = 0;
+    }
+
     internal void RegisterCommand(string category, string name, string shortcut, Action execute)
     {
         _allCommands.Add(new PaletteCommand(category, name, shortcut, execute));

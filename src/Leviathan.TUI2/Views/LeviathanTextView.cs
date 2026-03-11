@@ -772,13 +772,47 @@ internal sealed class LeviathanTextView : View
         {
             long lineEnd = FindLineEnd(_state.TextCursorOffset);
             if (lineEnd >= doc.Length) return;
+
+            // Skip the full newline sequence: \r\n (2 bytes for UTF-8/1252, 4 for UTF-16) or lone \n / \r
+            long nextLineStart = lineEnd + SkipNewlineBytes(doc, lineEnd);
+
             long lineStart = FindLineStart(_state.TextCursorOffset);
             long col = _state.TextCursorOffset - lineStart;
-            long nextLineStart = lineEnd + _state.Decoder.MinCharBytes;
             long nextLineEnd = FindLineEnd(nextLineStart);
             _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
         }
         OnStateChanged();
+    }
+
+    /// <summary>
+    /// Returns the byte length of the newline sequence at the given offset (1 or 2 for UTF-8, 2 or 4 for UTF-16).
+    /// Handles \r\n as a single newline.
+    /// </summary>
+    private int SkipNewlineBytes(Document doc, long offset)
+    {
+        ITextDecoder decoder = _state.Decoder;
+        int minChar = decoder.MinCharBytes;
+
+        // Read enough for two characters (to check for \r\n)
+        byte[] buf = new byte[minChar * 2];
+        int read = doc.Read(offset, buf.AsSpan());
+        if (read < minChar) return minChar;
+
+        if (!decoder.IsNewline(buf, 0, out int nlLen)) return minChar;
+
+        // Check if this is \r followed by \n (CRLF pair)
+        if (read >= minChar * 2)
+        {
+            byte firstByte = buf[0]; // UTF-8: 0x0D = \r
+            byte secondByte = buf[minChar]; // UTF-8: next char's first byte
+            bool isCR = minChar == 1 ? firstByte == 0x0D : (firstByte == 0x0D && buf[1] == 0x00);
+            bool isLF = minChar == 1 ? secondByte == 0x0A : (secondByte == 0x0A && buf[minChar + 1] == 0x00);
+
+            if (isCR && isLF)
+                return minChar * 2; // Skip both \r and \n
+        }
+
+        return minChar;
     }
 
     private long FindLineStart(long offset)
@@ -796,7 +830,10 @@ internal sealed class LeviathanTextView : View
         for (int i = lookBack - minChar; i >= 0; i -= minChar)
         {
             if (decoder.IsNewline(buf, i, out _))
-                return offset - lookBack + i + minChar;
+            {
+                int nextCharStart = i + minChar;
+                return offset - lookBack + nextCharStart;
+            }
         }
         return offset - lookBack;
     }
@@ -817,8 +854,11 @@ internal sealed class LeviathanTextView : View
 
         for (int i = 0; i + minChar <= lookAhead; i += minChar)
         {
-            if (decoder.IsNewline(buf, i, out _))
+            if (decoder.IsNewline(buf, i, out int nlLen))
+            {
+                // Return position of the first newline byte (the \r in \r\n, or \n alone)
                 return offset + i;
+            }
         }
         return Math.Min(offset + lookAhead, doc.Length);
     }
@@ -913,6 +953,7 @@ internal sealed class LeviathanTextView : View
         long count = 0;
         long pos = from;
         byte[] buf = new byte[8192];
+        int minChar = decoder.MinCharBytes;
 
         while (pos < to)
         {
@@ -920,11 +961,24 @@ internal sealed class LeviathanTextView : View
             int read = doc.Read(pos, buf.AsSpan(0, readLen));
             if (read == 0) break;
 
-            int minChar = decoder.MinCharBytes;
             for (int i = 0; i + minChar <= read; i += minChar)
             {
                 if (decoder.IsNewline(buf, i, out _))
+                {
+                    // Check for CRLF pair: \r followed by \n — count as one newline
+                    bool isCR = minChar == 1 ? buf[i] == 0x0D : (buf[i] == 0x0D && i + 1 < read && buf[i + 1] == 0x00);
+                    if (isCR && i + minChar * 2 <= read)
+                    {
+                        bool nextIsLF = minChar == 1 ? buf[i + 1] == 0x0A : (buf[i + 2] == 0x0A && buf[i + 3] == 0x00);
+                        if (nextIsLF)
+                        {
+                            count++;
+                            i += minChar; // Skip the \n, loop will advance by another minChar
+                            continue;
+                        }
+                    }
                     count++;
+                }
             }
             pos += read;
         }
@@ -937,6 +991,7 @@ internal sealed class LeviathanTextView : View
         if (doc is null || targetLine <= 1) return 0;
 
         ITextDecoder decoder = _state.Decoder;
+        int minChar = decoder.MinCharBytes;
         long linesFound = 0;
         long pos = 0;
         byte[] buf = new byte[8192];
@@ -947,14 +1002,25 @@ internal sealed class LeviathanTextView : View
             int read = doc.Read(pos, buf.AsSpan(0, readLen));
             if (read == 0) break;
 
-            int minChar = decoder.MinCharBytes;
             for (int i = 0; i + minChar <= read; i += minChar)
             {
                 if (decoder.IsNewline(buf, i, out _))
                 {
+                    // Handle CRLF as one newline
+                    int skipBytes = minChar;
+                    bool isCR = minChar == 1 ? buf[i] == 0x0D : (buf[i] == 0x0D && i + 1 < read && buf[i + 1] == 0x00);
+                    if (isCR && i + minChar * 2 <= read)
+                    {
+                        bool nextIsLF = minChar == 1 ? buf[i + minChar] == 0x0A : (buf[i + minChar] == 0x0A && buf[i + minChar + 1] == 0x00);
+                        if (nextIsLF)
+                            skipBytes = minChar * 2;
+                    }
+
                     linesFound++;
                     if (linesFound >= targetLine - 1)
-                        return pos + i + minChar;
+                        return pos + i + skipBytes;
+
+                    i += skipBytes - minChar; // loop will advance by minChar
                 }
             }
             pos += read;

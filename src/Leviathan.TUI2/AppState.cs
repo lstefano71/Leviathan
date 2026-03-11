@@ -34,6 +34,7 @@ internal sealed class AppState
     public bool WordWrap { get; set; } = true;
     public int TabWidth { get; set; } = 4;
     public long EstimatedTotalLines { get; set; }
+    public int BomLength { get; set; }
 
     // --- Scroll ---
     public int VisibleRows { get; set; } = 24;
@@ -99,15 +100,16 @@ internal sealed class AppState
         int sampleSize = (int)Math.Min(8192, Document.Length);
         Span<byte> sample = stackalloc byte[sampleSize];
         Document.Read(0, sample);
-        (TextEncoding encoding, _) = EncodingDetector.Detect(sample);
+        (TextEncoding encoding, int bomLength) = EncodingDetector.Detect(sample);
         Decoder = CreateDecoder(encoding);
+        BomLength = bomLength;
 
         HexBaseOffset = 0;
         HexCursorOffset = 0;
         HexSelectionAnchor = -1;
         NibbleLow = false;
-        TextTopOffset = 0;
-        TextCursorOffset = 0;
+        TextTopOffset = bomLength;
+        TextCursorOffset = bomLength;
         TextSelectionAnchor = -1;
         EstimatedTotalLines = Math.Max(1, Document.Length / 80);
         SearchResults.Clear();
