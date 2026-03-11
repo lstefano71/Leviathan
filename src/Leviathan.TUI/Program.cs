@@ -47,37 +47,43 @@ void UpdateTitle()
 }
 
 // ─── Build UI ───
-using Hex1bApp app = new(ctx =>
-{
-    UpdateTitle();
+await using var terminal = Hex1bTerminal.CreateBuilder()
+    .WithMouse()
+    .WithHex1bApp((app, options) =>
+    {
+        appRef = app;
+        return ctx =>
+        {
+            UpdateTitle();
 
-    int width = Console.WindowWidth;
-    int height = Console.WindowHeight;
+            int width = Console.WindowWidth;
+            int height = Console.WindowHeight;
 
-    // Modal overlays (highest priority first)
-    if (state.ShowSaveError)
-        return BuildSaveErrorView(ctx, width);
+            // Modal overlays (highest priority first)
+            if (state.ShowSaveError)
+                return BuildSaveErrorView(ctx, width);
 
-    if (state.ShowUnsavedDialog)
-        return BuildUnsavedDialogView(ctx);
+            if (state.ShowUnsavedDialog)
+                return BuildUnsavedDialogView(ctx);
 
-    if (state.ShowCommandPalette)
-        return BuildCommandPaletteView(ctx, width, height);
+            if (state.ShowCommandPalette)
+                return BuildCommandPaletteView(ctx, width, height);
 
-    if (state.ShowFileOpenDialog)
-        return BuildFileOpenView(ctx);
+            if (state.ShowFileOpenDialog)
+                return BuildFileOpenView(ctx);
 
-    if (state.ShowFileBrowser)
-        return BuildFileBrowserView(ctx, width, height);
+            if (state.ShowFileBrowser)
+                return BuildFileBrowserView(ctx, width, height);
 
-    if (state.ShowGotoDialog)
-        return BuildGotoView(ctx);
+            if (state.ShowGotoDialog)
+                return BuildGotoView(ctx);
 
-    return BuildMainView(ctx, width, height);
-}, new Hex1bAppOptions { EnableMouse = true });
-appRef = app;
+            return BuildMainView(ctx, width, height);
+        };
+    })
+    .Build();
 
-await app.RunAsync();
+await terminal.RunAsync();
 
 // Clean up
 state.CancelSearch();
@@ -141,10 +147,10 @@ Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
         if (state.ShowFindBar)
         {
             Hex1bWidget findBar = ic.Text(BuildFindBarText());
-            return new VStackWidget([content, findBar, statusBar]);
+            return ic.VStack(v => [content, findBar, statusBar]);
         }
 
-        return new VStackWidget([content, statusBar]);
+        return ic.VStack(v => [content, statusBar]);
     }).WithInputBindings(bindings =>
     {
         // Global shortcuts
@@ -180,7 +186,7 @@ Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
     });
 
     // Wrap with PastableWidget to handle terminal bracketed paste (Ctrl+V)
-    return new PastableWidget(interactable)
+    return ctx.Pastable(interactable)
         .OnPaste(async (PasteEventArgs e) =>
         {
             string pastedText = await e.Paste.ReadToEndAsync();
@@ -969,11 +975,22 @@ void RegisterCommands()
 /// </summary>
 static bool IsSafeText(string text)
 {
+    if (text.Length == 0)
+        return false;
+
     for (int i = 0; i < text.Length; i++)
     {
         if (text[i] < 0x20)
             return false;
     }
-    return text.Length > 0;
+
+    // Reject ANSI escape sequence fragments (e.g. "[A" from Esc+Arrow)
+    if (text.Length == 2 && text[0] == '[' && text[1] >= 'A' && text[1] <= 'Z')
+        return false;
+    // Reject CSI parameter fragments like "[1~", "[15~"
+    if (text.Length >= 2 && text[0] == '[' && text[text.Length - 1] == '~')
+        return false;
+
+    return true;
 }
 
