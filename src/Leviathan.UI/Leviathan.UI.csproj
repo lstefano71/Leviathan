@@ -6,12 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <PublishAot>true</PublishAot>
+    <PublishAot>false</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <Platforms>AnyCPU;x64</Platforms>
-    <!-- Surfaces trim warnings at build time; fix before shipping AOT binary -->
+    <!-- Surfaces trim warnings at build time -->
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-    <!-- Optimise AOT-compiled code for throughput (render loop, SIMD paths) -->
+    <!-- Optimise generated code for throughput (render loop, SIMD paths) -->
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
   </PropertyGroup>
 
