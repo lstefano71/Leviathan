@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Leviathan.Core;
 using Leviathan.Core.Search;
 using Leviathan.TUI.Rendering;
@@ -257,6 +258,177 @@ internal sealed class HexViewController
         _state.HexBaseOffset = Math.Min(maxBase, newBase);
     }
 
+    // ─── Clipboard ───
+
+    /// <summary>
+    /// Maximum number of bytes that can be copied to the clipboard.
+    /// </summary>
+    private const long MaxCopyBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Copies the selected bytes as a space-separated uppercase hex string (e.g. "DE AD BE EF").
+    /// Returns null if there is no selection or the selection exceeds the size cap.
+    /// </summary>
+    internal string? CopySelection()
+    {
+        Document? doc = _state.Document;
+        if (doc is null || _state.HexSelectionAnchor < 0) return null;
+
+        long start = _state.HexSelStart;
+        long len = _state.HexSelEnd - start + 1;
+        if (len <= 0 || len > MaxCopyBytes) return null;
+
+        byte[] buf = new byte[(int)len];
+        int read = doc.Read(start, buf);
+        if (read <= 0) return null;
+
+        // "XX" per byte + " " separator between bytes → 3*N - 1 chars
+        StringBuilder sb = new(read * 3 - 1);
+        for (int i = 0; i < read; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            sb.Append(buf[i].ToString("X2"));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parses a hex string (flexible whitespace/separators) and inserts the resulting bytes
+    /// at the cursor. If a selection is active it is deleted first.
+    /// Accepted formats: "DEADBEEF", "DE AD BE EF", "DE-AD-BE-EF".
+    /// </summary>
+    internal void Paste(string text)
+    {
+        Document? doc = _state.Document;
+        if (doc is null || string.IsNullOrEmpty(text)) return;
+
+        byte[]? bytes = ParseHexString(text);
+        if (bytes is null || bytes.Length == 0) return;
+
+        // Delete selection if active
+        if (_state.HexSelectionAnchor >= 0)
+        {
+            long start = _state.HexSelStart;
+            long len = _state.HexSelEnd - start + 1;
+            doc.Delete(start, len);
+            _state.HexCursorOffset = start;
+            _state.HexSelectionAnchor = -1;
+        }
+
+        doc.Insert(_state.HexCursorOffset, bytes);
+        _state.HexCursorOffset += bytes.Length;
+        _state.NibbleLow = false;
+        ClampCursor();
+    }
+
+    // ─── Selection ───
+
+    /// <summary>
+    /// Selects the entire document (anchor = 0, cursor = last byte).
+    /// </summary>
+    internal void SelectAll()
+    {
+        Document? doc = _state.Document;
+        if (doc is null || doc.Length == 0) return;
+
+        _state.HexSelectionAnchor = 0;
+        _state.HexCursorOffset = doc.Length - 1;
+        _state.NibbleLow = false;
+    }
+
+    // ─── Mouse ───
+
+    /// <summary>
+    /// Moves the cursor to the byte offset corresponding to the given screen position.
+    /// When <paramref name="extend"/> is true, the selection anchor is preserved (drag select).
+    /// </summary>
+    internal void ClickAtPosition(int viewRow, int viewCol, bool extend = false)
+    {
+        Document? doc = _state.Document;
+        if (doc is null) return;
+
+        long? offset = PositionToOffset(viewRow, viewCol);
+        if (offset is null) return;
+
+        if (!extend)
+        {
+            _state.HexSelectionAnchor = -1;
+        }
+        else if (_state.HexSelectionAnchor < 0)
+        {
+            _state.HexSelectionAnchor = _state.HexCursorOffset;
+        }
+
+        _state.HexCursorOffset = offset.Value;
+        _state.NibbleLow = false;
+    }
+
+    /// <summary>
+    /// Maps screen (row, col) to a document byte offset, or null if outside data area.
+    /// Hex row layout: [offset 17+1] [hex: 3 per byte + 1 per 8-byte group] [│1] [ascii: 1 per byte]
+    /// </summary>
+    internal long? PositionToOffset(int viewRow, int viewCol)
+    {
+        Document? doc = _state.Document;
+        if (doc is null) return null;
+
+        int bpr = _state.BytesPerRow;
+        if (bpr <= 0) return null;
+
+        long rowOffset = _state.HexBaseOffset + (long)viewRow * bpr;
+        if (rowOffset >= doc.Length) return null;
+
+        const int OffsetWidth = 18;
+        int hexWidth = bpr * 3 + (bpr > 0 ? (bpr - 1) / 8 : 0);
+        int asciiStart = OffsetWidth + hexWidth + 1;
+
+        int byteIndex;
+        if (viewCol < OffsetWidth)
+        {
+            byteIndex = 0;
+        }
+        else if (viewCol < OffsetWidth + hexWidth)
+        {
+            int hexCol = viewCol - OffsetWidth;
+            byteIndex = HexColToByteIndex(hexCol, bpr);
+        }
+        else if (viewCol >= asciiStart && viewCol < asciiStart + bpr)
+        {
+            byteIndex = viewCol - asciiStart;
+        }
+        else
+        {
+            return null;
+        }
+
+        byteIndex = Math.Clamp(byteIndex, 0, bpr - 1);
+        long newOffset = rowOffset + byteIndex;
+        if (newOffset >= doc.Length) newOffset = doc.Length - 1;
+        return newOffset;
+    }
+
+    /// <summary>
+    /// Maps a column position within the hex area to a byte index.
+    /// Layout per byte: "XX " (3 chars), with an extra space between every 8-byte group.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int HexColToByteIndex(int hexCol, int bytesPerRow)
+    {
+        // Walk the layout to find the byte
+        int col = 0;
+        for (int b = 0; b < bytesPerRow; b++)
+        {
+            if (b > 0 && b % 8 == 0)
+                col++; // group separator
+
+            // This byte occupies cols [col..col+2] (XX + space)
+            if (hexCol < col + 3)
+                return b;
+            col += 3;
+        }
+        return bytesPerRow - 1;
+    }
+
     // ─── Helpers ───
 
     private void ClampCursor()
@@ -301,5 +473,54 @@ internal sealed class HexViewController
                 visible.Add(m);
         }
         return visible;
+    }
+
+    /// <summary>
+    /// Parses a hex string into bytes. Accepts "DEADBEEF", "DE AD BE EF", "DE-AD-BE-EF",
+    /// and mixed whitespace/separators. Returns null if the input contains invalid hex.
+    /// </summary>
+    private static byte[]? ParseHexString(string text)
+    {
+        List<byte> result = [];
+        int nibbleCount = 0;
+        int current = 0;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+
+            // Skip whitespace and common separators
+            if (c is ' ' or '\t' or '\r' or '\n' or '-' or ':')
+            {
+                // If we have a dangling nibble, it's invalid
+                if (nibbleCount == 1) return null;
+                continue;
+            }
+
+            int digit = c switch
+            {
+                >= '0' and <= '9' => c - '0',
+                >= 'a' and <= 'f' => c - 'a' + 10,
+                >= 'A' and <= 'F' => c - 'A' + 10,
+                _ => -1
+            };
+
+            if (digit < 0) return null;
+
+            current = (current << 4) | digit;
+            nibbleCount++;
+
+            if (nibbleCount == 2)
+            {
+                result.Add((byte)current);
+                current = 0;
+                nibbleCount = 0;
+            }
+        }
+
+        // Dangling nibble means invalid input
+        if (nibbleCount != 0) return null;
+
+        return result.ToArray();
     }
 }

@@ -1,5 +1,6 @@
 using System.Text;
 using Hex1b;
+using Hex1b.Events;
 using Hex1b.Input;
 using Hex1b.Widgets;
 using Hex1b.Theming;
@@ -73,7 +74,7 @@ using Hex1bApp app = new(ctx =>
         return BuildGotoView(ctx);
 
     return BuildMainView(ctx, width, height);
-});
+}, new Hex1bAppOptions { EnableMouse = true });
 appRef = app;
 
 await app.RunAsync();
@@ -86,7 +87,7 @@ state.Document?.Dispose();
 
 Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
 {
-    return ctx.Interactable(ic =>
+    Hex1bWidget interactable = ctx.Interactable(ic =>
     {
         Hex1bWidget content;
 
@@ -106,14 +107,33 @@ Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
         }
         else
         {
-            content = ic.VStack(v => [
-                v.Text(""),
-                v.Text("  Leviathan — Terminal Hex + Text Editor"),
-                v.Text(""),
-                v.Text("  Open a file:  Ctrl+O  or  pass a file path as argument"),
-                v.Text("  Command palette:  Ctrl+P"),
-                v.Text("  Quit:  Ctrl+Q"),
-            ]).FillHeight();
+            List<string> mru = state.Settings.RecentFiles;
+            content = ic.VStack(v =>
+            {
+                List<Hex1bWidget> lines =
+                [
+                    v.Text(""),
+                    v.Text("  Leviathan — Terminal Hex + Text Editor"),
+                    v.Text("")
+                ];
+
+                if (mru.Count > 0)
+                {
+                    lines.Add(v.Text("  Recent files:"));
+                    for (int idx = 0; idx < mru.Count; idx++)
+                    {
+                        int num = idx + 1;
+                        string shortcut = num <= 9 ? num.ToString() : " ";
+                        lines.Add(v.Text($"    [{shortcut}] {mru[idx]}"));
+                    }
+                    lines.Add(v.Text(""));
+                }
+
+                lines.Add(v.Text("  Open a file:  Ctrl+O  or  pass a file path as argument"));
+                lines.Add(v.Text("  Command palette:  Ctrl+P"));
+                lines.Add(v.Text("  Quit:  Ctrl+Q"));
+                return lines.ToArray();
+            }).FillHeight();
         }
 
         Hex1bWidget statusBar = ic.Text(BuildStatusBarText(width));
@@ -151,11 +171,29 @@ Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
         // When find bar is active, intercept character input for the search field
         if (state.ShowFindBar)
             BindFindBarInput(bindings);
+        else if (state.Document is null)
+            BindWelcomeInput(bindings);
         else if (state.ActiveView == ViewMode.Hex)
             BindHexNavigation(bindings);
         else
             BindTextNavigation(bindings);
     });
+
+    // Wrap with PastableWidget to handle terminal bracketed paste (Ctrl+V)
+    return new PastableWidget(interactable)
+        .OnPaste(async (PasteEventArgs e) =>
+        {
+            string pastedText = await e.Paste.ReadToEndAsync();
+            if (string.IsNullOrEmpty(pastedText)) return;
+
+            if (state.ActiveView == ViewMode.Hex)
+                hexView.Paste(pastedText);
+            else
+                textView.Paste(pastedText);
+
+            appRef?.Invalidate();
+        })
+        .WithMaxSize(10 * 1024 * 1024);
 }
 
 Hex1bWidget BuildCommandPaletteView(RootContext ctx, int width, int height)
@@ -198,7 +236,7 @@ Hex1bWidget BuildCommandPaletteView(RootContext ctx, int width, int height)
                 palette.Query = palette.Query[..^1];
         }, "Delete Char");
 
-        bindings.AnyCharacter().Action(text => { palette.Query += text; }, "Type");
+        bindings.AnyCharacter().Action(text => { if (IsSafeText(text)) palette.Query += text; }, "Type");
     });
 }
 
@@ -240,7 +278,7 @@ Hex1bWidget BuildGotoView(RootContext ctx)
                 state.GotoInput = state.GotoInput[..^1];
         }, "Delete");
 
-        bindings.AnyCharacter().Action(text => { state.GotoInput += text; }, "Type");
+        bindings.AnyCharacter().Action(text => { if (IsSafeText(text)) state.GotoInput += text; }, "Type");
     });
 }
 
@@ -275,7 +313,7 @@ Hex1bWidget BuildFileOpenView(RootContext ctx)
                 state.FileOpenInput = state.FileOpenInput[..^1];
         }, "Delete");
 
-        bindings.AnyCharacter().Action(text => { state.FileOpenInput += text; }, "Type");
+        bindings.AnyCharacter().Action(text => { if (IsSafeText(text)) state.FileOpenInput += text; }, "Type");
     });
 }
 
@@ -335,7 +373,7 @@ Hex1bWidget BuildSaveErrorView(RootContext ctx, int width)
     {
         bindings.Key(Hex1bKey.Escape).Action(() => { state.ShowSaveError = false; }, "Dismiss");
         bindings.Key(Hex1bKey.Enter).Action(() => { state.ShowSaveError = false; }, "Dismiss");
-        bindings.AnyCharacter().Action(_ => { state.ShowSaveError = false; }, "Dismiss");
+        bindings.AnyCharacter().Action(text => { if (IsSafeText(text)) state.ShowSaveError = false; }, "Dismiss");
     });
 }
 
@@ -390,7 +428,7 @@ Hex1bWidget BuildFileBrowserView(RootContext ctx, int width, int height)
 
         bindings.AnyCharacter().Action(text =>
         {
-            fileBrowser.Filter += text;
+            if (IsSafeText(text)) fileBrowser.Filter += text;
         }, "Filter");
     });
 }
@@ -458,7 +496,25 @@ void BindFindBarInput(InputBindingsBuilder bindings)
         if (state.FindInput.Length > 0)
             state.FindInput = state.FindInput[..^1];
     }, "Delete");
-    bindings.AnyCharacter().Action(text => { state.FindInput += text; }, "Type");
+    bindings.AnyCharacter().Action(text => { if (IsSafeText(text)) state.FindInput += text; }, "Type");
+}
+
+// ─── Welcome screen bindings (MRU number keys) ───
+
+void BindWelcomeInput(InputBindingsBuilder bindings)
+{
+    bindings.AnyCharacter().Action(text =>
+    {
+        if (text.Length != 1) return;
+        char c = text[0];
+        if (c is >= '1' and <= '9')
+        {
+            int idx = c - '1';
+            List<string> mru = state.Settings.RecentFiles;
+            if (idx < mru.Count && File.Exists(mru[idx]))
+                state.OpenFile(mru[idx]);
+        }
+    }, "Open Recent");
 }
 
 // ─── Navigation bindings ───
@@ -484,6 +540,22 @@ void BindHexNavigation(InputBindingsBuilder bindings)
     bindings.Key(Hex1bKey.Backspace).Action(() => hexView.BackspaceAtCursor(), "Backspace");
     bindings.Key(Hex1bKey.Delete).Action(() => hexView.DeleteAtCursor(), "Delete");
 
+    bindings.Ctrl().Key(Hex1bKey.C).Action(() =>
+    {
+        string? hex = hexView.CopySelection();
+        if (hex is not null) appRef?.CopyToClipboard(hex);
+    }, "Copy");
+    bindings.Ctrl().Key(Hex1bKey.X).Action(() =>
+    {
+        string? hex = hexView.CopySelection();
+        if (hex is not null)
+        {
+            appRef?.CopyToClipboard(hex);
+            hexView.DeleteAtCursor();
+        }
+    }, "Cut");
+    bindings.Ctrl().Key(Hex1bKey.A).Action(() => hexView.SelectAll(), "Select All");
+
     bindings.AnyCharacter().Action(text =>
     {
         if (text.Length != 1) return;
@@ -497,6 +569,24 @@ void BindHexNavigation(InputBindingsBuilder bindings)
         };
         if (digit >= 0) hexView.InputHexDigit(digit);
     }, "Hex Input");
+
+    // Mouse
+    bindings.Mouse(MouseButton.ScrollUp).Action(() => hexView.ScrollUp(3), "Scroll Up");
+    bindings.Mouse(MouseButton.ScrollDown).Action(() => hexView.ScrollDown(3), "Scroll Down");
+    bindings.Mouse(MouseButton.Left).Action(ctx =>
+    {
+        hexView.ClickAtPosition(ctx.MouseY, ctx.MouseX);
+    }, "Click");
+    bindings.Drag(MouseButton.Left).Action((startX, startY) =>
+    {
+        hexView.ClickAtPosition(startY, startX);
+        state.HexSelectionAnchor = state.HexCursorOffset;
+        return new DragHandler(
+            onMove: (ctx, deltaX, deltaY) =>
+            {
+                hexView.ClickAtPosition(startY + deltaY, startX + deltaX, extend: true);
+            });
+    }, "Drag Select");
 }
 
 void BindTextNavigation(InputBindingsBuilder bindings)
@@ -535,12 +625,34 @@ void BindTextNavigation(InputBindingsBuilder bindings)
             textView.Delete();
         }
     }, "Cut");
+    bindings.Ctrl().Key(Hex1bKey.A).Action(() => textView.SelectAll(), "Select All");
 
     bindings.AnyCharacter().Action(text =>
     {
+        if (!IsSafeText(text)) return;
         foreach (char ch in text)
             textView.InsertChar(ch);
     }, "Insert Text");
+
+    // Mouse
+    bindings.Mouse(MouseButton.ScrollUp).Action(() => textView.ScrollUp(3), "Scroll Up");
+    bindings.Mouse(MouseButton.ScrollDown).Action(() => textView.ScrollDown(3), "Scroll Down");
+    bindings.Mouse(MouseButton.Left).Action(ctx =>
+    {
+        int textAreaCols = Math.Max(1, Console.WindowWidth - 9);
+        textView.ClickAtPosition(ctx.MouseY, ctx.MouseX, textAreaCols);
+    }, "Click");
+    bindings.Drag(MouseButton.Left).Action((startX, startY) =>
+    {
+        int textAreaCols = Math.Max(1, Console.WindowWidth - 9);
+        textView.ClickAtPosition(startY, startX, textAreaCols);
+        state.TextSelectionAnchor = state.TextCursorOffset;
+        return new DragHandler(
+            onMove: (ctx, deltaX, deltaY) =>
+            {
+                textView.ClickAtPosition(startY + deltaY, startX + deltaX, textAreaCols, extend: true);
+            });
+    }, "Drag Select");
 }
 
 // ─── Actions ───
@@ -812,5 +924,56 @@ void RegisterCommands()
     palette.RegisterCommand("Search", "Find", "Ctrl+F", () => ToggleFindBar());
     palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
     palette.RegisterCommand("Search", "Find Previous", "Shift+F3", () => FindPrevious());
+
+    palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () =>
+    {
+        string? text = state.ActiveView == ViewMode.Hex
+            ? hexView.CopySelection()
+            : textView.CopySelection();
+        if (text is not null) appRef?.CopyToClipboard(text);
+    });
+    palette.RegisterCommand("Edit", "Cut", "Ctrl+X", () =>
+    {
+        if (state.ActiveView == ViewMode.Hex)
+        {
+            string? hex = hexView.CopySelection();
+            if (hex is not null)
+            {
+                appRef?.CopyToClipboard(hex);
+                hexView.DeleteAtCursor();
+            }
+        }
+        else
+        {
+            string? text = textView.CopySelection();
+            if (text is not null)
+            {
+                appRef?.CopyToClipboard(text);
+                textView.Delete();
+            }
+        }
+    });
+    palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () =>
+    {
+        if (state.ActiveView == ViewMode.Hex)
+            hexView.SelectAll();
+        else
+            textView.SelectAll();
+    });
+}
+
+/// <summary>
+/// Returns true if the text is safe to use as typed input (no control characters).
+/// Hex1b's IsPrintableText allows multi-char strings even when they contain control chars.
+/// This guards against unrecognized escape sequences leaking into text fields.
+/// </summary>
+static bool IsSafeText(string text)
+{
+    for (int i = 0; i < text.Length; i++)
+    {
+        if (text[i] < 0x20)
+            return false;
+    }
+    return text.Length > 0;
 }
 

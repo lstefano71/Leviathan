@@ -1,8 +1,7 @@
 {
   "profiles": {
     "Leviathan.TUI": {
-      "commandName": "Project",
-      "commandLineArgs": "\"D:\\Trash\\sofia\\JobLog.orig.csv\""
+      "commandName": "Project"
     }
   }
 }

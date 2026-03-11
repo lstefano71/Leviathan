@@ -18,7 +18,14 @@ internal sealed class TuiSettings
 
     public void AddRecent(string filePath)
     {
-        RecentFiles.Remove(filePath);
+        // If already in the list, leave it at its current position (stable ordering).
+        // Only insert at front when the file is truly new to the list.
+        if (RecentFiles.Contains(filePath))
+        {
+            Save();
+            return;
+        }
+
         RecentFiles.Insert(0, filePath);
         if (RecentFiles.Count > MaxRecentFiles)
             RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);

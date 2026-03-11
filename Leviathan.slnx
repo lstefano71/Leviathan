@@ -18,5 +18,8 @@
     <Project Path="tests/Leviathan.Core.Tests/Leviathan.Core.Tests.csproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="tests/Leviathan.TUI.Tests/Leviathan.TUI.Tests.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
 </Solution>

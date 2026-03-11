@@ -20,6 +20,7 @@ internal sealed class TextViewController
     private readonly List<int> _charByteOffsets = new(4096);
     private long _cachedTopOffset;
     private long _cachedTopLineNumber = 1;
+    private int _lastRenderedLineCount;
 
     internal TextViewController(AppState state)
     {
@@ -94,6 +95,7 @@ internal sealed class TextViewController
 
         // Track line numbers
         long currentLineNumber = ComputeLineNumber(_state.TextTopOffset);
+        _lastRenderedLineCount = lineCount;
 
         string[] rows = new string[Math.Min(visibleRows, lineCount)];
         for (int i = 0; i < rows.Length; i++)
@@ -131,6 +133,10 @@ internal sealed class TextViewController
             if (isHardLine)
                 currentLineNumber++;
 
+            // Is this the very last visible line? (no more visual lines after this one)
+            // Used by BuildTextLine to decide whether to show a block cursor at lineEnd (EOF).
+            bool isLastVisibleLine = i + 1 >= lineCount;
+
             rows[i] = AnsiBuilder.BuildTextLine(
                 text.AsSpan(),
                 isHardLine ? currentLineNumber - 1 : -1,
@@ -141,6 +147,7 @@ internal sealed class TextViewController
                 _state.TextSelStart,
                 _state.TextSelEnd,
                 _state.TabWidth,
+                isLastVisibleLine,
                 _charByteOffsets,
                 visibleMatches,
                 activeMatch);
@@ -213,6 +220,43 @@ internal sealed class TextViewController
             MoveVertical(1, extend);
     }
 
+    /// <summary>
+    /// Scrolls the view up by the specified number of lines without moving the cursor.
+    /// </summary>
+    internal void ScrollUp(int lines)
+    {
+        Document? doc = _state.Document;
+        if (doc is null || _state.TextTopOffset <= 0) return;
+
+        long offset = _state.TextTopOffset;
+        for (int i = 0; i < lines && offset > 0; i++)
+        {
+            // Move to the end of the previous line, then find its start
+            long prevLineEnd = Math.Max(0, offset - 1);
+            offset = FindLineStart(prevLineEnd);
+        }
+        _state.TextTopOffset = offset;
+    }
+
+    /// <summary>
+    /// Scrolls the view down by the specified number of lines without moving the cursor.
+    /// </summary>
+    internal void ScrollDown(int lines)
+    {
+        Document? doc = _state.Document;
+        if (doc is null) return;
+
+        long offset = _state.TextTopOffset;
+        for (int i = 0; i < lines && offset < doc.Length; i++)
+        {
+            long lineEnd = FindLineEnd(offset);
+            long nextStart = lineEnd + 1;
+            if (nextStart > doc.Length) nextStart = doc.Length;
+            offset = nextStart;
+        }
+        _state.TextTopOffset = Math.Min(offset, doc.Length);
+    }
+
     internal void Home(bool extend)
     {
         Document? doc = _state.Document;
@@ -270,6 +314,18 @@ internal sealed class TextViewController
         if (_state.Document is null) return;
         _state.TextCursorOffset = Math.Clamp(offset, 0, _state.Document.Length);
         _state.TextSelectionAnchor = -1;
+    }
+
+    /// <summary>
+    /// Selects the entire document (anchor = 0, cursor = Length).
+    /// </summary>
+    internal void SelectAll()
+    {
+        Document? doc = _state.Document;
+        if (doc is null || doc.Length == 0) return;
+
+        _state.TextSelectionAnchor = 0;
+        _state.TextCursorOffset = doc.Length - 1;
     }
 
     // ─── Editing ───
@@ -426,6 +482,76 @@ internal sealed class TextViewController
             doc.Insert(_state.TextCursorOffset, data);
             _state.TextCursorOffset += data.Length;
         }
+    }
+
+    // ─── Mouse ───
+
+    /// <summary>
+    /// Moves the cursor to the byte offset corresponding to the given screen position.
+    /// Gutter: 9 chars (8-char line number + 1 space). Text starts at column 9.
+    /// Uses the visual lines from the most recent render pass.
+    /// </summary>
+    /// <summary>
+    /// Moves the cursor to the byte offset corresponding to the given screen position.
+    /// When <paramref name="extend"/> is true, the selection anchor is preserved (drag select).
+    /// </summary>
+    internal void ClickAtPosition(int viewRow, int viewCol, int textAreaCols, bool extend = false)
+    {
+        Document? doc = _state.Document;
+        if (doc is null) return;
+        if (viewRow < 0 || viewRow >= _lastRenderedLineCount) return;
+
+        VisualLine vl = _visualLines[viewRow];
+
+        const int GutterWidth = 9;
+        int textCol = viewCol - GutterWidth;
+        if (textCol < 0) textCol = 0;
+
+        long relativeStart = vl.DocOffset - _state.TextTopOffset;
+        if (relativeStart < 0) return;
+
+        int lineStart = (int)relativeStart;
+        int lineByteLen = vl.ByteLength;
+        int maxLen = _readBuffer.Length - lineStart;
+        if (lineByteLen > maxLen) lineByteLen = maxLen;
+        if (lineByteLen <= 0)
+        {
+            if (!extend) _state.TextSelectionAnchor = -1;
+            else if (_state.TextSelectionAnchor < 0) _state.TextSelectionAnchor = _state.TextCursorOffset;
+            _state.TextCursorOffset = vl.DocOffset;
+            return;
+        }
+
+        ReadOnlySpan<byte> lineBytes = _readBuffer.AsSpan(lineStart, lineByteLen);
+        List<int> offsets = new(lineByteLen);
+        ITextDecoder decoder = _state.Decoder;
+        DecodeLineToDisplay(lineBytes, decoder, _state.TabWidth, offsets);
+
+        int charIdx = Math.Min(textCol, offsets.Count);
+        long newOffset;
+        if (charIdx >= offsets.Count)
+        {
+            newOffset = vl.DocOffset + lineByteLen;
+            if (newOffset > doc.Length) newOffset = doc.Length;
+            if (newOffset > 0 && newOffset == doc.Length) newOffset = doc.Length - 1;
+        }
+        else
+        {
+            newOffset = vl.DocOffset + offsets[charIdx];
+        }
+
+        newOffset = Math.Clamp(newOffset, 0, Math.Max(0, doc.Length - 1));
+
+        if (!extend)
+        {
+            _state.TextSelectionAnchor = -1;
+        }
+        else if (_state.TextSelectionAnchor < 0)
+        {
+            _state.TextSelectionAnchor = _state.TextCursorOffset;
+        }
+
+        _state.TextCursorOffset = newOffset;
     }
 
     // ─── Helpers ───

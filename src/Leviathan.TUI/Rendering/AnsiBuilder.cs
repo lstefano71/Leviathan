@@ -153,6 +153,7 @@ internal static class AnsiBuilder
         long selStart,
         long selEnd,
         int tabWidth,
+        bool isLastVisibleLine = true,
         List<int>? charByteOffsets = null,
         List<SearchResult>? visibleMatches = null,
         SearchResult? activeMatch = null)
@@ -185,6 +186,7 @@ internal static class AnsiBuilder
         // Text content — character by character with cursor/selection/match highlights
         bool hasOffsets = charByteOffsets is not null && charByteOffsets.Count == text.Length;
         long lineEnd = lineStartOffset + lineByteLen;
+        long lastDisplayedDocOffset = -1;
 
         for (int ci = 0; ci < text.Length; ci++)
         {
@@ -194,6 +196,9 @@ internal static class AnsiBuilder
             long charDocOffset = hasOffsets
                 ? lineStartOffset + charByteOffsets![ci]
                 : -1;
+
+            if (charDocOffset >= 0)
+                lastDisplayedDocOffset = charDocOffset;
 
             // Determine background: cursor > selection > active match > match > none
             string? bg = null;
@@ -253,13 +258,23 @@ internal static class AnsiBuilder
                 sb.Append(Reset);
         }
 
-        // If cursor is at the end of the line (past last char), show a block cursor
-        if (hasOffsets && cursorOffset >= lineStartOffset && cursorOffset >= lineEnd && cursorOffset == lineEnd)
+        // Show block cursor past the last displayed character.
+        // Case 1: cursor is on a non-displayed byte within this line (e.g. newline char
+        //         that DecodeLineToDisplay skips). Cursor is in [lineStartOffset, lineEnd)
+        //         but past the last displayed char offset.
+        // Case 2: cursor == lineEnd AND this is the last visible line (true EOF — no more
+        //         lines after this one). This handles the cursor-past-end-of-file position.
+        if (hasOffsets && cursorOffset >= lineStartOffset)
         {
-            sb.Append(CurBg);
-            sb.Append(TextFg);
-            sb.Append(' ');
-            sb.Append(Reset);
+            bool cursorOnHiddenByte = cursorOffset > lastDisplayedDocOffset && cursorOffset < lineEnd;
+            bool cursorAtEof = cursorOffset == lineEnd && isLastVisibleLine;
+            if (cursorOnHiddenByte || cursorAtEof)
+            {
+                sb.Append(CurBg);
+                sb.Append(TextFg);
+                sb.Append(' ');
+                sb.Append(Reset);
+            }
         }
 
         sb.Append(Reset);
