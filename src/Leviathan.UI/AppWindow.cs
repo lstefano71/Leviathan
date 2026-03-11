@@ -32,6 +32,12 @@ public sealed class AppWindow : IDisposable
   /// </summary>
   public Action? OnCloseRequested { get; set; }
 
+  /// <summary>
+  /// Callback invoked when the user drops one or more files onto the window from the OS shell.
+  /// The array contains the full paths of the dropped files.
+  /// </summary>
+  public Action<string[]>? OnFileDrop { get; set; }
+
   public AppWindow(Action<float> renderCallback)
   {
     _renderCallback = renderCallback;
@@ -53,6 +59,7 @@ public sealed class AppWindow : IDisposable
     _window.Render += OnRender;
     _window.FramebufferResize += OnResize;
     _window.Closing += OnClosing;
+    _window.FileDrop += OnFileDropped;
     _window.Run();
   }
 
@@ -128,6 +135,11 @@ public sealed class AppWindow : IDisposable
       _window.IsClosing = false;
       OnCloseRequested();
     }
+  }
+
+  private void OnFileDropped(string[] paths)
+  {
+    OnFileDrop?.Invoke(paths);
   }
 
   /// <summary>

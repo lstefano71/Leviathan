@@ -1,6 +1,7 @@
 using Hexa.NET.ImGui;
 
 using Leviathan.Core;
+using Leviathan.Core.Text;
 using Leviathan.UI;
 using Leviathan.UI.Windows;
 
@@ -16,6 +17,7 @@ Document? document = null;
 HexView? hexView = null;
 TextView? textView = null;
 FindWindow findWindow = new();
+ITextDecoder activeDecoder = new Utf8TextDecoder();
 string? currentFilePath = null;
 
 // Active view mode: 0 = Hex, 1 = Text
@@ -50,10 +52,33 @@ void OpenFile(string path)
   document?.Dispose();
   document = new Document(path);
   currentFilePath = path;
+
+  // Auto-detect encoding from first 8 KB
+  int sampleSize = (int)Math.Min(document.Length, 8192);
+  byte[] sampleBuf = new byte[sampleSize];
+  document.Read(0, sampleBuf);
+  var (encoding, _) = EncodingDetector.Detect(sampleBuf);
+  activeDecoder = CreateDecoder(encoding);
+
   hexView = new HexView(document) { BytesPerRowSetting = settings.BytesPerRow };
-  textView = new TextView(document) { WordWrap = settings.WordWrap };
+  textView = new TextView(document, activeDecoder) { WordWrap = settings.WordWrap };
+  findWindow.ActiveDecoder = activeDecoder;
   settings.AddRecent(path);
-  Console.WriteLine($"Opening: {path} ({document.Length:N0} bytes)");
+  Console.WriteLine($"Opening: {path} ({document.Length:N0} bytes, {encoding})");
+}
+
+ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch
+{
+  TextEncoding.Utf16Le => new Utf16LeTextDecoder(),
+  TextEncoding.Windows1252 => new Windows1252TextDecoder(),
+  _ => new Utf8TextDecoder(),
+};
+
+void SwitchEncoding(TextEncoding encoding)
+{
+  activeDecoder = CreateDecoder(encoding);
+  if (textView is not null) textView.Decoder = activeDecoder;
+  findWindow.ActiveDecoder = activeDecoder;
 }
 
 /// <summary>
@@ -97,6 +122,14 @@ appWindow = new AppWindow(deltaTime => {
 // ── Close interception ──────────────────────────────────────────
 appWindow.OnCloseRequested = () => {
   EnqueueUiAction(() => GuardUnsavedChanges(() => appWindow!.ConfirmClose()));
+};
+
+// ── Drag-and-drop file open ────────────────────────────────────
+appWindow.OnFileDrop = paths => {
+  if (paths.Length > 0 && File.Exists(paths[0]))
+  {
+    EnqueueUiAction(() => GuardUnsavedChanges(() => OpenFile(paths[0])));
+  }
 };
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -187,6 +220,18 @@ void RenderMainMenuBar()
         if (textView is not null) textView.WordWrap = settings.WordWrap;
         settings.Save();
       }
+
+      ImGui.Separator();
+      if (ImGui.BeginMenu("Encoding"u8)) {
+        TextEncoding current = activeDecoder.Encoding;
+        if (ImGui.MenuItem("UTF-8"u8, ""u8, current == TextEncoding.Utf8))
+          SwitchEncoding(TextEncoding.Utf8);
+        if (ImGui.MenuItem("UTF-16 LE"u8, ""u8, current == TextEncoding.Utf16Le))
+          SwitchEncoding(TextEncoding.Utf16Le);
+        if (ImGui.MenuItem("Windows-1252"u8, ""u8, current == TextEncoding.Windows1252))
+          SwitchEncoding(TextEncoding.Windows1252);
+        ImGui.EndMenu();
+      }
     }
 
     ImGui.EndMenu();
@@ -253,7 +298,12 @@ void RenderStatusBar()
         ImGui.Text($"[{viewName}] Size: {document.Length:N0} bytes | Offset: {hexView?.BaseOffset ?? 0:X} | {hexView?.CurrentBytesPerRow ?? 16} B/row | {io.Framerate:F0} FPS");
       } else {
         string wrapLabel = textView?.WordWrap == true ? "Wrap" : "NoWrap";
-        ImGui.Text($"[{viewName}] Size: {document.Length:N0} bytes | Offset: {textView?.TopDocOffset ?? 0:X} | {wrapLabel} | {io.Framerate:F0} FPS");
+        string encLabel = activeDecoder.Encoding switch {
+          TextEncoding.Utf16Le => "UTF-16 LE",
+          TextEncoding.Windows1252 => "W-1252",
+          _ => "UTF-8"
+        };
+        ImGui.Text($"[{viewName}] Size: {document.Length:N0} bytes | Offset: {textView?.TopDocOffset ?? 0:X} | {encLabel} | {wrapLabel} | {io.Framerate:F0} FPS");
       }
     } else {
       ImGui.Text($"No file open | {io.Framerate:F0} FPS");

@@ -3,6 +3,7 @@ using Hexa.NET.ImGui;
 using Leviathan.Core;
 using Leviathan.Core.Text;
 
+using System.Buffers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -11,13 +12,23 @@ namespace Leviathan.UI;
 
 /// <summary>
 /// Renders a text editor view using ImGui immediate-mode drawing.
-/// Features UTF-8 decoding via <see cref="System.Text.Rune"/>,
+/// Features multi-encoding decoding via <see cref="ITextDecoder"/>,
 /// JIT line wrapping for the visible viewport, and zero-allocation rendering.
 /// </summary>
 public sealed class TextView
 {
   private readonly Document _document;
   private readonly LineWrapEngine _wrapEngine;
+  private ITextDecoder _decoder;
+
+  /// <summary>The active text decoder. Setting this switches the encoding interpretation.</summary>
+  public ITextDecoder Decoder {
+    get => _decoder;
+    set {
+      _decoder = value;
+      InvalidateLineCache();
+    }
+  }
 
   private long _topDocOffset;         // document byte offset at top of viewport
   private int _visibleRows;
@@ -77,9 +88,10 @@ public sealed class TextView
     set { _tabWidth = Math.Max(1, value); }
   }
 
-  public TextView(Document document)
+  public TextView(Document document, ITextDecoder? decoder = null)
   {
     _document = document;
+    _decoder = decoder ?? new Utf8TextDecoder();
     _wrapEngine = new LineWrapEngine(_tabWidth);
     // Rough heuristic: assume ~80 bytes per line for initial estimate
     _estimatedTotalLines = Math.Max(1, _document.Length / 80);
@@ -104,7 +116,7 @@ public sealed class TextView
     // Snap to line start
     _topDocOffset = LineWrapEngine.FindLineStart(
         _topDocOffset, _document.Length,
-        (off, buf) => _document.Read(off, buf));
+        (off, buf) => _document.Read(off, buf), _decoder);
     // Keep exact position stable until the user scrolls.
     _gotoOffset = _topDocOffset;
     _suppressScrollUnlockFrames = 2;
@@ -208,7 +220,7 @@ public sealed class TextView
       approxOffset = Math.Clamp(approxOffset, 0, Math.Max(0, _document.Length - 1));
       _topDocOffset = LineWrapEngine.FindLineStart(
           approxOffset, _document.Length,
-          (off, buf) => _document.Read(off, buf));
+          (off, buf) => _document.Read(off, buf), _decoder);
     } else {
       _topDocOffset = 0;
     }
@@ -234,12 +246,12 @@ public sealed class TextView
         ? _document.Read(_topDocOffset, _readBuffer.AsSpan(0, bytesToRead))
         : 0;
 
-    // ── UTF-8 boundary alignment ──
+    // ── Character boundary alignment ──
     // If we started mid-sequence, the first few bytes may be continuation bytes.
     // AlignToCharBoundary ensures we start at a valid character.
     int startAdj = 0;
     if (_topDocOffset > 0 && bytesRead > 0) {
-      startAdj = Utf8Utils.AlignToCharBoundary(_readBuffer.AsSpan(0, bytesRead), 0);
+      startAdj = _decoder.AlignToCharBoundary(_readBuffer.AsSpan(0, bytesRead), 0);
     }
 
     // ── Compute visual lines ──
@@ -252,7 +264,8 @@ public sealed class TextView
         _topDocOffset + startAdj,
         maxColumns,
         _wordWrap,
-        _visualLines.AsSpan());
+        _visualLines.AsSpan(),
+        _decoder);
 
     // ── Render ──
     ImGui.SetCursorPosY(scrollY);
@@ -324,7 +337,8 @@ public sealed class TextView
         int renderLen = RenderLineToBuffer(
             _readBuffer.AsSpan(vlBufStart, vl.ByteLength),
             renderBuf,
-            _tabWidth);
+            _tabWidth,
+            _decoder);
 
         if (renderLen > 0) {
           fixed (byte* pText = renderBuf) {
@@ -380,63 +394,85 @@ public sealed class TextView
   {
     if (docOffset <= 0) return true;
 
+    int checkLen = _decoder.MinCharBytes;
+    if (docOffset < checkLen) return false;
+
     long bufStart = _topDocOffset;
-    long posInBuf = docOffset - 1 - bufStart;
-    if (posInBuf >= 0 && posInBuf < _readBuffer.Length) {
-      byte b = _readBuffer[posInBuf];
-      return b == 0x0A;
+    long posInBuf = docOffset - checkLen - bufStart;
+
+    if (posInBuf >= 0 && posInBuf + checkLen <= _readBuffer.Length) {
+      ReadOnlySpan<byte> check = _readBuffer.AsSpan((int)posInBuf, checkLen);
+      if (_decoder.IsNewline(check, 0, out _)) {
+        var (r, _) = _decoder.DecodeRune(check, 0);
+        return r.Value == '\n';
+      }
+      return false;
     }
 
-    // Fallback: read single byte from document
-    Span<byte> tmp = stackalloc byte[1];
-    int read = _document.Read(docOffset - 1, tmp);
-    return read > 0 && tmp[0] == 0x0A;
+    // Fallback: read from document
+    Span<byte> tmp = stackalloc byte[4];
+    int read = _document.Read(docOffset - checkLen, tmp.Slice(0, checkLen));
+    if (read < checkLen) return false;
+    ReadOnlySpan<byte> fallback = tmp.Slice(0, checkLen);
+    if (_decoder.IsNewline(fallback, 0, out _)) {
+      var (r, _) = _decoder.DecodeRune(fallback, 0);
+      return r.Value == '\n';
+    }
+    return false;
   }
 
   /// <summary>
-  /// Renders a single visual line's UTF-8 bytes into a null-terminated display buffer,
-  /// replacing control characters and expanding tabs.
+  /// Renders a single visual line's bytes into a null-terminated UTF-8 display buffer,
+  /// replacing control characters and expanding tabs. Decodes from the source encoding
+  /// and re-encodes as UTF-8 for ImGui.
   /// Returns the number of bytes written (excluding the null terminator).
   /// </summary>
-  private static int RenderLineToBuffer(ReadOnlySpan<byte> lineData, Span<byte> output, int tabWidth)
+  private static int RenderLineToBuffer(ReadOnlySpan<byte> lineData, Span<byte> output, int tabWidth, ITextDecoder decoder)
   {
     int outPos = 0;
     int pos = 0;
     int maxOut = output.Length - 1; // leave room for null terminator
+    Span<byte> utf8Tmp = stackalloc byte[4]; // for re-encoding runes to UTF-8
 
     while (pos < lineData.Length && outPos < maxOut) {
-      byte b = lineData[pos];
-
-      // Strip CR/LF from rendering
-      if (b == 0x0A || b == 0x0D) {
-        pos++;
+      // Check for newlines using the decoder
+      if (decoder.IsNewline(lineData, pos, out int nlLen)) {
+        pos += nlLen;
         continue;
       }
 
+      // Decode the next rune from the source encoding
+      var (rune, byteLen) = decoder.DecodeRune(lineData, pos);
+      if (byteLen == 0) { pos++; continue; }
+
+      int cp = rune.Value;
+
       // Tab expansion
-      if (b == 0x09) {
+      if (cp == '\t') {
         int spaces = Math.Min(tabWidth, maxOut - outPos);
         for (int s = 0; s < spaces; s++)
           output[outPos++] = (byte)' ';
-        pos++;
+        pos += byteLen;
         continue;
       }
 
       // Control characters → dot
-      if (b < 0x20) {
+      if (cp < 0x20) {
         output[outPos++] = (byte)'.';
-        pos++;
+        pos += byteLen;
         continue;
       }
 
-      // Regular UTF-8: copy the byte sequence as-is (ImGui handles UTF-8)
-      var (rune, byteLen) = Utf8Utils.DecodeRune(lineData, pos);
-      if (byteLen == 0) { pos++; continue; }
-
-      if (outPos + byteLen > maxOut) break; // not enough space
-
-      lineData.Slice(pos, byteLen).CopyTo(output.Slice(outPos));
-      outPos += byteLen;
+      // Encode the rune as UTF-8 for ImGui display
+      if (rune.TryEncodeToUtf8(utf8Tmp, out int utf8Len)) {
+        if (outPos + utf8Len > maxOut) break; // not enough space
+        utf8Tmp.Slice(0, utf8Len).CopyTo(output.Slice(outPos));
+        outPos += utf8Len;
+      } else {
+        // Can't encode → dot
+        if (outPos < maxOut)
+          output[outPos++] = (byte)'.';
+      }
       pos += byteLen;
     }
 
@@ -507,7 +543,7 @@ public sealed class TextView
         _cursorOffset = 0;
       else
         _cursorOffset = LineWrapEngine.FindLineStart(
-            _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
+            _cursorOffset, _document.Length, (o, b) => _document.Read(o, b), _decoder);
       moved = true;
     }
     if (ImGui.IsKeyPressed(ImGuiKey.End, true) || (numpadAsNav && ImGui.IsKeyPressed(ImGuiKey.Keypad1, true))) {
@@ -559,8 +595,12 @@ public sealed class TextView
               _cursorOffset = SelectionStart;
               _selectionAnchor = _cursorOffset;
             }
-            _document.Insert(_cursorOffset, new ReadOnlySpan<byte>(clipText, len));
-            _cursorOffset += len;
+
+            // Transcode from clipboard UTF-8 to the active encoding
+            ReadOnlySpan<byte> clipSpan = new ReadOnlySpan<byte>(clipText, len);
+            byte[] transcoded = TranscodeFromUtf8(clipSpan);
+            _document.Insert(_cursorOffset, transcoded);
+            _cursorOffset += transcoded.Length;
             _selectionAnchor = _cursorOffset;
             InvalidateLineCache();
             moved = true;
@@ -576,8 +616,10 @@ public sealed class TextView
         _cursorOffset = SelectionStart;
         _selectionAnchor = _cursorOffset;
       }
-      _document.Insert(_cursorOffset, "\n"u8);
-      _cursorOffset += 1;
+      Span<byte> nlBytes = stackalloc byte[4];
+      int nlLen = _decoder.EncodeRune(new Rune('\n'), nlBytes);
+      _document.Insert(_cursorOffset, nlBytes.Slice(0, nlLen));
+      _cursorOffset += nlLen;
       _selectionAnchor = _cursorOffset;
       InvalidateLineCache();
       moved = true;
@@ -620,6 +662,7 @@ public sealed class TextView
     if (!io.KeyCtrl && !io.KeyAlt) {
       unsafe {
         var charQueue = io.InputQueueCharacters;
+        Span<byte> encoded = stackalloc byte[4];
         for (int ci = 0; ci < charQueue.Size; ci++) {
           char ch = (char)charQueue.Data[ci];
           if (ch < 0x20 && ch != '\t') continue; // skip control chars (Enter handled above)
@@ -630,13 +673,15 @@ public sealed class TextView
             _selectionAnchor = _cursorOffset;
           }
 
-          Span<byte> utf8 = stackalloc byte[4];
-          if (Rune.TryCreate(ch, out Rune rune) && rune.TryEncodeToUtf8(utf8, out int written)) {
-            _document.Insert(_cursorOffset, utf8.Slice(0, written));
-            _cursorOffset += written;
-            _selectionAnchor = _cursorOffset;
-            InvalidateLineCache();
-            moved = true;
+          if (Rune.TryCreate(ch, out Rune rune)) {
+            int written = _decoder.EncodeRune(rune, encoded);
+            if (written > 0) {
+              _document.Insert(_cursorOffset, encoded.Slice(0, written));
+              _cursorOffset += written;
+              _selectionAnchor = _cursorOffset;
+              InvalidateLineCache();
+              moved = true;
+            }
           }
         }
       }
@@ -661,7 +706,7 @@ public sealed class TextView
     while (searchPos < _document.Length) {
       int read = _document.Read(searchPos, buf);
       if (read == 0) break;
-      int nlIdx = buf.Slice(0, read).IndexOf((byte)0x0A);
+      int nlIdx = FindNewlineInSpan(buf.Slice(0, read));
       if (nlIdx >= 0)
         return searchPos + nlIdx;
       searchPos += read;
@@ -684,11 +729,13 @@ public sealed class TextView
         int read = _document.Read(offset, buf);
         if (read == 0) break;
         // Find next newline
-        int nlPos = buf.Slice(0, read).IndexOf((byte)0x0A);
-        if (nlPos >= 0)
-          offset += nlPos + 1;
-        else
+        int nlPos = FindNewlineInSpan(buf.Slice(0, read));
+        if (nlPos >= 0) {
+          _decoder.IsNewline(buf.Slice(0, read), nlPos, out int nlByteLen);
+          offset += nlPos + nlByteLen;
+        } else {
           offset += read;
+        }
       }
       _topDocOffset = Math.Min(offset, Math.Max(0, _document.Length - 1));
     } else {
@@ -699,7 +746,7 @@ public sealed class TextView
         offset = Math.Max(0, offset - 1);
         offset = LineWrapEngine.FindLineStart(
             offset, _document.Length,
-            (off, buf) => _document.Read(off, buf));
+            (off, buf) => _document.Read(off, buf), _decoder);
       }
       _topDocOffset = offset;
     }
@@ -737,7 +784,7 @@ public sealed class TextView
           long targetOffset = FindOffsetOfLine(lineNum);
           _topDocOffset = LineWrapEngine.FindLineStart(
               targetOffset, _document.Length,
-              (off, buf) => _document.Read(off, buf));
+              (off, buf) => _document.Read(off, buf), _decoder);
           _gotoOffset = _topDocOffset;
           _scrollTargetLine = lineNum - 1;
           _suppressScrollUnlockFrames = 2;
@@ -790,17 +837,23 @@ public sealed class TextView
     return _cachedTopLineNumber;
   }
 
-  /// <summary>Counts LF bytes in [start, end).</summary>
+  /// <summary>Counts LF characters in [start, end).</summary>
   private long CountNewlinesInRange(long start, long end)
   {
     long count = 0;
     long pos = start;
+    int step = _decoder.MinCharBytes;
     while (pos < end) {
       int chunkLen = (int)Math.Min(end - pos, _countBuffer.Length);
       int read = _document.Read(pos, _countBuffer.AsSpan(0, chunkLen));
       if (read == 0) break;
-      for (int i = 0; i < read; i++)
-        if (_countBuffer[i] == 0x0A) count++;
+      var data = _countBuffer.AsSpan(0, read);
+      for (int i = 0; i + step <= data.Length; i += step) {
+        if (_decoder.IsNewline(data, i, out _)) {
+          var (r, _) = _decoder.DecodeRune(data, i);
+          if (r.Value == '\n') count++;
+        }
+      }
       pos += read;
     }
     return count;
@@ -813,14 +866,19 @@ public sealed class TextView
     long targetNewlines = lineNumber - 1;
     long nlCount = 0;
     long pos = 0;
+    int step = _decoder.MinCharBytes;
     while (pos < _document.Length) {
       int chunkLen = (int)Math.Min(_document.Length - pos, _countBuffer.Length);
       int read = _document.Read(pos, _countBuffer.AsSpan(0, chunkLen));
       if (read == 0) break;
-      for (int i = 0; i < read; i++) {
-        if (_countBuffer[i] == 0x0A) {
-          nlCount++;
-          if (nlCount == targetNewlines) return pos + i + 1;
+      var data = _countBuffer.AsSpan(0, read);
+      for (int i = 0; i + step <= data.Length; i += step) {
+        if (_decoder.IsNewline(data, i, out int nlLen)) {
+          var (r, _) = _decoder.DecodeRune(data, i);
+          if (r.Value == '\n') {
+            nlCount++;
+            if (nlCount == targetNewlines) return pos + i + nlLen;
+          }
         }
       }
       pos += read;
@@ -942,14 +1000,14 @@ public sealed class TextView
     float col = 0;
 
     while (pos < lineData.Length) {
-      byte b = lineData[pos];
-      if (b == 0x0A || b == 0x0D) break;
+      // Check for newline
+      if (_decoder.IsNewline(lineData, pos, out _)) break;
 
+      var (rune, byteLen2) = _decoder.DecodeRune(lineData, pos);
+      int byteLen = byteLen2 == 0 ? 1 : byteLen2;
+      int cp = rune.Value;
       int w;
-      int byteLen;
-      if (b == 0x09) { w = _tabWidth; byteLen = 1; } else if (b < 0x20) { w = 1; byteLen = 1; } else {
-        var (rune, bl) = Utf8Utils.DecodeRune(lineData, pos);
-        byteLen = bl == 0 ? 1 : bl;
+      if (cp == '\t') { w = _tabWidth; } else if (cp < 0x20) { w = 1; } else {
         w = Utf8Utils.RuneColumnWidth(rune, _tabWidth);
       }
 
@@ -977,14 +1035,15 @@ public sealed class TextView
     int pos = 0;
 
     while (pos < lineData.Length) {
-      byte b = lineData[pos];
-      if (b == 0x0A || b == 0x0D) { pos++; continue; }
-      if (b == 0x09) { col += _tabWidth; pos++; continue; }
-      if (b < 0x20) { col++; pos++; continue; }
+      if (_decoder.IsNewline(lineData, pos, out int nlLen)) { pos += nlLen; continue; }
 
-      var (rune, byteLen) = Utf8Utils.DecodeRune(lineData, pos);
+      var (rune, byteLen) = _decoder.DecodeRune(lineData, pos);
       if (byteLen == 0) { pos++; col++; continue; }
-      col += Utf8Utils.RuneColumnWidth(rune, _tabWidth);
+
+      int cp = rune.Value;
+      if (cp == '\t') { col += _tabWidth; }
+      else if (cp < 0x20) { col++; }
+      else { col += Utf8Utils.RuneColumnWidth(rune, _tabWidth); }
       pos += byteLen;
     }
 
@@ -1006,7 +1065,7 @@ public sealed class TextView
     int lastStart = 0;
     while (pos < read) {
       lastStart = pos;
-      var (_, byteLen) = Utf8Utils.DecodeRune(buf.Slice(0, read), pos);
+      var (_, byteLen) = _decoder.DecodeRune(buf.Slice(0, read), pos);
       if (byteLen == 0) { pos++; continue; }
       pos += byteLen;
     }
@@ -1019,21 +1078,21 @@ public sealed class TextView
     Span<byte> buf = stackalloc byte[4];
     int read = _document.Read(offset, buf);
     if (read == 0) return offset;
-    var (_, byteLen) = Utf8Utils.DecodeRune(buf.Slice(0, read), 0);
+    var (_, byteLen) = _decoder.DecodeRune(buf.Slice(0, read), 0);
     return Math.Min(offset + Math.Max(1, byteLen), _document.Length);
   }
 
   private long MoveCursorUp(long offset)
   {
     long lineStart = LineWrapEngine.FindLineStart(
-        offset, _document.Length, (o, b) => _document.Read(o, b));
+        offset, _document.Length, (o, b) => _document.Read(o, b), _decoder);
     int col = (int)(offset - lineStart);
 
     if (lineStart == 0) return 0;
 
     // Go to previous line
     long prevLineStart = LineWrapEngine.FindLineStart(
-        Math.Max(0, lineStart - 1), _document.Length, (o, b) => _document.Read(o, b));
+        Math.Max(0, lineStart - 1), _document.Length, (o, b) => _document.Read(o, b), _decoder);
     int prevLineLen = (int)(lineStart - prevLineStart);
     if (prevLineLen > 0) prevLineLen--; // exclude the terminating LF
 
@@ -1042,26 +1101,24 @@ public sealed class TextView
 
   private long MoveCursorDown(long offset)
   {
-    // Find the next newline from the current offset
     Span<byte> buf = stackalloc byte[1024];
     long searchPos = offset;
     while (searchPos < _document.Length) {
       int read = _document.Read(searchPos, buf);
       if (read == 0) return _document.Length;
-      int nlIdx = buf.Slice(0, read).IndexOf((byte)0x0A);
+      int nlIdx = FindNewlineInSpan(buf.Slice(0, read));
       if (nlIdx >= 0) {
-        long nextLineStart = searchPos + nlIdx + 1;
+        _decoder.IsNewline(buf.Slice(0, read), nlIdx, out int nlByteLen);
+        long nextLineStart = searchPos + nlIdx + nlByteLen;
         if (nextLineStart >= _document.Length) return _document.Length;
 
-        // Compute column in current line
         long lineStart = LineWrapEngine.FindLineStart(
-            offset, _document.Length, (o, b) => _document.Read(o, b));
+            offset, _document.Length, (o, b) => _document.Read(o, b), _decoder);
         int col = (int)(offset - lineStart);
 
-        // Find length of next line
         int nextRead = _document.Read(nextLineStart, buf);
         if (nextRead > 0) {
-          int nextNl = buf.Slice(0, nextRead).IndexOf((byte)0x0A);
+          int nextNl = FindNewlineInSpan(buf.Slice(0, nextRead));
           int nextLineLen = nextNl >= 0 ? nextNl : nextRead;
           return nextLineStart + Math.Min(col, nextLineLen);
         }
@@ -1079,7 +1136,7 @@ public sealed class TextView
     // Check if cursor is outside the currently visible byte range
     if (_cursorOffset < _topDocOffset || _cursorOffset >= _visibleEndOffset) {
       _topDocOffset = LineWrapEngine.FindLineStart(
-          _cursorOffset, _document.Length, (o, b) => _document.Read(o, b));
+          _cursorOffset, _document.Length, (o, b) => _document.Read(o, b), _decoder);
       long approxLine = GetLineNumberAtOffset(_topDocOffset) - 1;
       _scrollTargetLine = Math.Max(0, approxLine);
     }
@@ -1093,11 +1150,74 @@ public sealed class TextView
   {
     if (!HasSelection) return;
     long selLen = Math.Min(SelectionEnd - SelectionStart, 10 * 1024 * 1024);
-    byte[] buffer = new byte[selLen + 1]; // +1 for null terminator
-    int read = _document.Read(SelectionStart, buffer.AsSpan(0, (int)selLen));
-    buffer[read] = 0;
-    fixed (byte* p = buffer) {
+    byte[] rawBuffer = new byte[(int)selLen];
+    int read = _document.Read(SelectionStart, rawBuffer.AsSpan(0, (int)selLen));
+
+    byte[] clipBytes;
+    if (_decoder.Encoding == TextEncoding.Utf8) {
+      clipBytes = new byte[read + 1];
+      rawBuffer.AsSpan(0, read).CopyTo(clipBytes);
+      clipBytes[read] = 0;
+    } else {
+      // Transcode to UTF-8 for clipboard
+      var result = new List<byte>(read * 2);
+      Span<byte> tmp = stackalloc byte[4];
+      int pos = 0;
+      var data = rawBuffer.AsSpan(0, read);
+      while (pos < data.Length) {
+        var (rune, byteLen) = _decoder.DecodeRune(data, pos);
+        if (byteLen == 0) { pos++; continue; }
+        if (rune.TryEncodeToUtf8(tmp, out int utf8Len)) {
+          for (int i = 0; i < utf8Len; i++)
+            result.Add(tmp[i]);
+        }
+        pos += byteLen;
+      }
+      clipBytes = new byte[result.Count + 1];
+      for (int i = 0; i < result.Count; i++)
+        clipBytes[i] = result[i];
+      clipBytes[result.Count] = 0;
+    }
+
+    fixed (byte* p = clipBytes) {
       ImGui.SetClipboardText(p);
     }
+  }
+
+  /// <summary>Finds the byte offset of the next LF newline in the span, or -1.</summary>
+  private int FindNewlineInSpan(ReadOnlySpan<byte> data)
+  {
+    int step = _decoder.MinCharBytes;
+    for (int i = 0; i + step <= data.Length; i += step) {
+      if (_decoder.IsNewline(data, i, out _)) {
+        var (r, _) = _decoder.DecodeRune(data, i);
+        if (r.Value == '\n') return i;
+      }
+    }
+    return -1;
+  }
+
+  /// <summary>Transcodes UTF-8 clipboard data to the active encoding.</summary>
+  private byte[] TranscodeFromUtf8(ReadOnlySpan<byte> utf8Data)
+  {
+    if (_decoder.Encoding == TextEncoding.Utf8)
+      return utf8Data.ToArray();
+
+    // Decode UTF-8 runes, re-encode in target
+    var result = new List<byte>();
+    Span<byte> tmp = stackalloc byte[4];
+    int pos = 0;
+    while (pos < utf8Data.Length) {
+      OperationStatus status = Rune.DecodeFromUtf8(utf8Data.Slice(pos), out Rune rune, out int consumed);
+      if (status != OperationStatus.Done) {
+        consumed = consumed > 0 ? consumed : 1;
+        rune = Rune.ReplacementChar;
+      }
+      int written = _decoder.EncodeRune(rune, tmp);
+      for (int i = 0; i < written; i++)
+        result.Add(tmp[i]);
+      pos += consumed;
+    }
+    return result.ToArray();
   }
 }

@@ -2,6 +2,7 @@ using Hexa.NET.ImGui;
 
 using Leviathan.Core;
 using Leviathan.Core.Search;
+using Leviathan.Core.Text;
 
 using System.Numerics;
 using System.Text;
@@ -16,8 +17,9 @@ public sealed class FindWindow
 {
   private bool _isOpen;
   private readonly byte[] _inputBuf = new byte[256];
-  private bool _hexMode;       // false = UTF-8 text, true = hex byte pattern
+  private bool _hexMode;       // false = text (encoding from decoder), true = hex byte pattern
   private bool _matchCase;
+  private ITextDecoder? _decoder;
   private bool _focusInput;
 
   // Search results
@@ -37,6 +39,9 @@ public sealed class FindWindow
   private string? _parseError;
 
   public bool IsOpen => _isOpen;
+
+  /// <summary>Sets the active text decoder for encoding-aware text search.</summary>
+  public ITextDecoder? ActiveDecoder { get => _decoder; set => _decoder = value; }
 
   /// <summary>Opens the find bar and focuses the input field.</summary>
   public void Open()
@@ -120,8 +125,16 @@ public sealed class FindWindow
       ImGui.SameLine();
 
       // ── Mode toggle ──
-      if (ImGui.Button(_hexMode ? "Hex"u8 : "Text"u8))
-        _hexMode = !_hexMode;
+      if (_hexMode) {
+        if (ImGui.Button("Hex"u8)) _hexMode = !_hexMode;
+      } else {
+        string encodingLabel = _decoder?.Encoding switch {
+          TextEncoding.Utf16Le => "Text (UTF-16)",
+          TextEncoding.Windows1252 => "Text (W1252)",
+          _ => "Text (UTF-8)"
+        };
+        if (ImGui.Button(encodingLabel)) _hexMode = !_hexMode;
+      }
 
       ImGui.SameLine();
 
@@ -228,6 +241,10 @@ public sealed class FindWindow
 
     if (!_matchCase)
       query = query.ToLowerInvariant();
+
+    // Use active decoder encoding if set, otherwise default to UTF-8
+    if (_decoder is not null)
+      return _decoder.EncodeString(query);
 
     return Encoding.UTF8.GetBytes(query);
   }

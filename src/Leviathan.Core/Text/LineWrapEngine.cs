@@ -36,7 +36,7 @@ public sealed class LineWrapEngine
   }
 
   /// <summary>
-  /// Computes visual lines from a chunk of document bytes.
+  /// Computes visual lines from a chunk of document bytes using the specified text decoder.
   /// <paramref name="data"/> is the raw bytes; <paramref name="baseDocOffset"/> is the
   /// document offset of the first byte in <paramref name="data"/>.
   /// <paramref name="maxColumns"/> is the available character columns on screen.
@@ -48,7 +48,8 @@ public sealed class LineWrapEngine
       long baseDocOffset,
       int maxColumns,
       bool wrap,
-      Span<VisualLine> output)
+      Span<VisualLine> output,
+      ITextDecoder decoder)
   {
     if (data.IsEmpty || output.IsEmpty) return 0;
     if (maxColumns < 1) maxColumns = 1;
@@ -61,24 +62,22 @@ public sealed class LineWrapEngine
       int colCount = 0;
 
       while (pos < data.Length) {
-        byte b = data[pos];
-
-        // Hard newline — end this visual line
-        if (b == 0x0A) {
-          pos++; // consume the LF
-          break;
-        }
-
-        // CR+LF — consume both
-        if (b == 0x0D) {
-          pos++;
-          if (pos < data.Length && data[pos] == 0x0A)
-            pos++;
+        // Check for newline
+        if (decoder.IsNewline(data, pos, out int nlLen)) {
+          // Peek at what the newline character is
+          var (nlRune, _) = decoder.DecodeRune(data, pos);
+          pos += nlLen;
+          // If it was CR, also consume a following LF
+          if (nlRune.Value == '\r' && pos < data.Length && decoder.IsNewline(data, pos, out int lfLen)) {
+            var (nextRune, _) = decoder.DecodeRune(data, pos);
+            if (nextRune.Value == '\n')
+              pos += lfLen;
+          }
           break;
         }
 
         // Decode the next rune to measure its width
-        var (rune, byteLen) = Utf8Utils.DecodeRune(data, pos);
+        var (rune, byteLen) = decoder.DecodeRune(data, pos);
         if (byteLen == 0) { pos++; break; } // safety
 
         int runeWidth = Utf8Utils.RuneColumnWidth(rune, _tabWidth);
@@ -101,14 +100,16 @@ public sealed class LineWrapEngine
   /// <summary>
   /// Scans backwards from <paramref name="offset"/> to find the start of the hard line
   /// containing that offset. Reads chunks from the document via <paramref name="readFunc"/>.
+  /// Uses <paramref name="decoder"/> to identify newline characters across encodings.
   /// Returns the document offset of the line start (after the preceding LF, or 0).
   /// </summary>
-  public static long FindLineStart(long offset, long docLength, Func<long, Span<byte>, int> readFunc)
+  public static long FindLineStart(long offset, long docLength, Func<long, Span<byte>, int> readFunc, ITextDecoder decoder)
   {
     if (offset <= 0) return 0;
 
     const int ScanChunkSize = 4096;
     Span<byte> buf = stackalloc byte[ScanChunkSize];
+    int step = decoder.MinCharBytes;
 
     long search = offset;
     while (search > 0) {
@@ -117,10 +118,18 @@ public sealed class LineWrapEngine
       int bytesRead = readFunc(chunkStart, buf.Slice(0, chunkLen));
       if (bytesRead == 0) return 0;
 
-      // Scan backwards through this chunk for a newline
-      for (int i = bytesRead - 1; i >= 0; i--) {
-        if (buf[i] == 0x0A) {
-          return chunkStart + i + 1; // line starts after the LF
+      // Align scan start to character boundary for multi-byte encodings
+      int scanStart = bytesRead - step;
+      if (step > 1)
+        scanStart = scanStart / step * step;
+
+      // Scan backwards through this chunk for a LF newline
+      for (int i = scanStart; i >= 0; i -= step) {
+        if (decoder.IsNewline(buf.Slice(0, bytesRead), i, out int nlLen)) {
+          var (r, _) = decoder.DecodeRune(buf.Slice(0, bytesRead), i);
+          if (r.Value == '\n') {
+            return chunkStart + i + nlLen; // line starts after the LF
+          }
         }
       }
 
