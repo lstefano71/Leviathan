@@ -28,6 +28,7 @@ internal sealed class LeviathanTextView : View
   private long _cachedTopLineNumber = 1;
   private int _lastRenderedLineCount;
   private readonly ScrollBar _verticalScrollBar;
+  private bool _updatingScrollBar;
 
   private const int GutterWidth = 9; // "  12345 │"
 
@@ -52,7 +53,7 @@ internal sealed class LeviathanTextView : View
       VisibilityMode = ScrollBarVisibilityMode.Always,
     };
     _verticalScrollBar.ValueChanged += (_, e) => {
-      if (_state.Document is null) return;
+      if (_updatingScrollBar || _state.Document is null) return;
       long totalLines = Math.Max(1, _state.EstimatedTotalLines);
       long newOffset = (long)((double)e.NewValue / Math.Max(1, totalLines) * _state.Document.Length);
       newOffset = Math.Clamp(newOffset, 0, _state.Document.Length);
@@ -1114,9 +1115,11 @@ internal sealed class LeviathanTextView : View
     double fraction = doc.Length > 0 ? (double)_state.TextTopOffset / doc.Length : 0;
     int scrollPos = (int)(fraction * scrollTotal);
 
+    _updatingScrollBar = true;
     _verticalScrollBar.ScrollableContentSize = scrollTotal;
     _verticalScrollBar.VisibleContentSize = vpHeight;
     _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
+    _updatingScrollBar = false;
   }
 
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
