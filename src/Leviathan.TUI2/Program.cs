@@ -575,9 +575,15 @@ internal sealed class MainWindow : Window
       if (recent.Count > 0) {
         DrawCentered("Recent files:", normalAttr);
         y++;
+        // Left-align MRU entries at a fixed indent
+        int indent = Math.Max(2, (vpW / 2) - 30);
         for (int i = 0; i < Math.Min(9, recent.Count); i++) {
-          string entry = $"  [{i + 1}]  {recent[i]}";
-          DrawCentered(entry, mruAttr);
+          string entry = $"[{i + 1}]  {recent[i]}";
+          view.Move(indent, y);
+          view.SetAttribute(mruAttr);
+          foreach (char c in entry)
+            view.AddRune(c);
+          y++;
         }
       }
     };
