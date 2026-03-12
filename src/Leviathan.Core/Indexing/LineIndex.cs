@@ -26,6 +26,9 @@ public sealed class LineIndex
   /// <summary>Number of sparse index entries available.</summary>
   public int SparseEntryCount { get; private set; }
 
+  /// <summary>The sparse factor (number of newlines between stored entries).</summary>
+  public int SparseFactor => _sparseFactor;
+
   /// <summary>
   /// Constructs a line index. The sparse array stores every <paramref name="sparseFactor"/>th newline.
   /// </summary>
@@ -66,7 +69,7 @@ public sealed class LineIndex
     }
 
     // hi is the index of the last sparse entry <= byteOffset
-    long baseLine = (long)hi * _sparseFactor;
+    long baseLine = hi >= 0 ? (long)(hi + 1) * _sparseFactor : 0;
     return Math.Min(baseLine, _totalLineCount);
   }
 

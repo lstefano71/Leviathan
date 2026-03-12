@@ -30,6 +30,9 @@ public sealed class Document : IDisposable
   /// </summary>
   public string? FilePath => _fileSource?.FilePath;
 
+  /// <summary>The underlying memory-mapped file source, or null for new documents.</summary>
+  internal IO.MappedFileSource? FileSource => _fileSource;
+
   /// <summary>
   /// Opens an existing file for viewing/editing.
   /// </summary>

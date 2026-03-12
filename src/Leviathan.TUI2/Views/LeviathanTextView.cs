@@ -1,4 +1,5 @@
 using Leviathan.Core;
+using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 
@@ -155,8 +156,9 @@ internal sealed class LeviathanTextView : View
       return true;
     }
 
-    // Printable character input
-    if (!keyEvent.IsCtrl && !keyEvent.IsAlt) {
+    // Printable character input — skip function keys and other special keys
+    if (!keyEvent.IsCtrl && !keyEvent.IsAlt
+        && (keyEvent.KeyCode & KeyCode.SpecialMask) == 0) {
       char c = (char)(keyEvent.KeyCode & ~KeyCode.ShiftMask);
       if (c >= 0x20 && c < 0x7F) {
         InsertChar(c);
@@ -369,7 +371,7 @@ internal sealed class LeviathanTextView : View
     for (int i = rowsToDraw; i < vpHeight; i++)
       DrawEmptyLine(i, vpWidth);
 
-    _maxLineWidthInViewport = Math.Max(_maxLineWidthInViewport, frameMaxWidth);
+    _maxLineWidthInViewport = frameMaxWidth;
 
     // Update vertical scrollbar
     UpdateScrollBar(vpHeight, textAreaCols);
@@ -865,6 +867,14 @@ internal sealed class LeviathanTextView : View
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
 
+    // When word wrap is on, navigate by visual lines using the last rendered layout
+    if (_state.WordWrap && _lastRenderedLineCount > 0) {
+      MoveVerticalVisual(direction);
+      OnStateChanged();
+      return;
+    }
+
+    // No wrap: navigate by hard lines (original behavior)
     int bom = _state.BomLength;
 
     if (direction < 0) {
@@ -885,11 +895,92 @@ internal sealed class LeviathanTextView : View
       long lineStart = FindLineStart(_state.TextCursorOffset);
       long effectiveStart = lineStart < bom ? bom : lineStart;
       long col = _state.TextCursorOffset - effectiveStart;
-      long nextLineStart = lineEnd + _state.Decoder.MinCharBytes;
+      long nextLineStart = lineEnd + NewlineLengthAt(lineEnd);
       long nextLineEnd = FindLineEnd(nextLineStart);
       _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
     }
     OnStateChanged();
+  }
+
+  /// <summary>
+  /// Moves cursor up/down by one visual (wrapped) line using the last rendered layout.
+  /// </summary>
+  private void MoveVerticalVisual(int direction)
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return;
+
+    // Find which visual line the cursor is on
+    int cursorRow = -1;
+    for (int i = 0; i < _lastRenderedLineCount; i++) {
+      long vlStart = _visualLines[i].DocOffset;
+      long vlEnd = vlStart + _visualLines[i].ByteLength;
+      if (_state.TextCursorOffset >= vlStart && _state.TextCursorOffset < vlEnd) {
+        cursorRow = i;
+        break;
+      }
+      // Cursor at the very end of this line (and not at start of next)
+      if (_state.TextCursorOffset == vlEnd) {
+        bool nextLineStartsHere = (i + 1 < _lastRenderedLineCount) && _visualLines[i + 1].DocOffset == vlEnd;
+        if (!nextLineStartsHere) {
+          cursorRow = i;
+          break;
+        }
+      }
+    }
+
+    if (cursorRow < 0) {
+      // Cursor not in rendered lines — fall back to hard-line navigation
+      int bom = _state.BomLength;
+      if (direction < 0) {
+        long lineStart = FindLineStart(_state.TextCursorOffset);
+        if (lineStart <= bom) return;
+        long prevLineEnd = lineStart - 1;
+        long prevLineStart = FindLineStart(prevLineEnd);
+        long col = _state.TextCursorOffset - lineStart;
+        _state.TextCursorOffset = Math.Min(prevLineStart + col, prevLineEnd);
+      } else {
+        long lineEnd = FindLineEnd(_state.TextCursorOffset);
+        if (lineEnd >= doc.Length) return;
+        long lineStart = FindLineStart(_state.TextCursorOffset);
+        long col = _state.TextCursorOffset - lineStart;
+        long nextLineStart = lineEnd + NewlineLengthAt(lineEnd);
+        long nextLineEnd = FindLineEnd(nextLineStart);
+        _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
+      }
+      return;
+    }
+
+    // Compute the cursor's byte offset within the current visual line
+    VisualLine curVl = _visualLines[cursorRow];
+    long colOffset = _state.TextCursorOffset - curVl.DocOffset;
+
+    int targetRow = cursorRow + direction;
+
+    if (targetRow < 0) {
+      // Need to scroll up — move cursor to previous hard line
+      long lineStart = FindLineStart(_state.TextCursorOffset);
+      if (lineStart <= _state.BomLength && curVl.DocOffset == lineStart) return;
+      long prevLineEnd = Math.Max(0, lineStart - 1);
+      long prevLineStart = FindLineStart(prevLineEnd);
+      _state.TextCursorOffset = Math.Min(prevLineStart + colOffset, prevLineEnd);
+      return;
+    }
+
+    if (targetRow >= _lastRenderedLineCount) {
+      // Need to scroll down — move cursor to next content after last rendered line
+      VisualLine lastVl = _visualLines[_lastRenderedLineCount - 1];
+      long afterLast = lastVl.DocOffset + lastVl.ByteLength;
+      if (afterLast >= doc.Length) return;
+      _state.TextCursorOffset = Math.Min(afterLast + colOffset, doc.Length);
+      return;
+    }
+
+    // Move to the same byte offset within the target visual line
+    VisualLine targetVl = _visualLines[targetRow];
+    long newOffset = targetVl.DocOffset + Math.Min(colOffset, Math.Max(0, targetVl.ByteLength - 1));
+    _state.TextCursorOffset = Math.Clamp(newOffset, targetVl.DocOffset,
+        Math.Min(targetVl.DocOffset + targetVl.ByteLength, doc.Length));
   }
 
   private long FindLineStart(long offset)
@@ -901,11 +992,10 @@ internal sealed class LeviathanTextView : View
     byte[] buf = new byte[lookBack];
     doc.Read(offset - lookBack, buf);
 
-    ITextDecoder decoder = _state.Decoder;
-    int minChar = decoder.MinCharBytes;
+    int minChar = _state.Decoder.MinCharBytes;
 
     for (int i = lookBack - minChar; i >= 0; i -= minChar) {
-      if (decoder.IsNewline(buf, i, out _))
+      if (IsLF(buf, i, minChar))
         return offset - lookBack + i + minChar;
     }
     return offset - lookBack;
@@ -916,32 +1006,104 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return offset;
 
-    int lookAhead = (int)Math.Min(4096, doc.Length - offset);
+    int lookAhead = (int)Math.Min(8192, doc.Length - offset);
     if (lookAhead <= 0) return offset;
 
     byte[] buf = new byte[lookAhead];
     doc.Read(offset, buf);
 
-    ITextDecoder decoder = _state.Decoder;
-    int minChar = decoder.MinCharBytes;
+    int minChar = _state.Decoder.MinCharBytes;
 
     for (int i = 0; i + minChar <= lookAhead; i += minChar) {
-      if (decoder.IsNewline(buf, i, out _))
+      if (IsLF(buf, i, minChar)) {
+        // For CRLF, return position of \r (start of newline sequence)
+        if (minChar == 1 && i > 0 && buf[i - 1] == 0x0D)
+          return offset + i - 1;
+        if (minChar == 2 && i >= 2 && buf[i - 2] == 0x0D && buf[i - 1] == 0x00)
+          return offset + i - 2;
         return offset + i;
+      }
     }
     return Math.Min(offset + lookAhead, doc.Length);
+  }
+
+  /// <summary>Checks if position i in buf is a LF (0x0A) character, respecting encoding width.</summary>
+  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+  private static bool IsLF(byte[] buf, int i, int minChar)
+  {
+    if (minChar == 1)
+      return buf[i] == 0x0A;
+    // UTF-16LE: LF is 0x0A 0x00
+    return i + 1 < buf.Length && buf[i] == 0x0A && buf[i + 1] == 0x00;
+  }
+
+  /// <summary>Returns the byte length of the newline sequence at the given file offset (2 for CRLF, else minChar).</summary>
+  private int NewlineLengthAt(long offset)
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return _state.Decoder.MinCharBytes;
+
+    int minChar = _state.Decoder.MinCharBytes;
+    byte[] buf = new byte[minChar * 2];
+    int read = doc.Read(offset, buf.AsSpan(0, (int)Math.Min(buf.Length, doc.Length - offset)));
+
+    if (minChar == 1) {
+      if (read >= 2 && buf[0] == 0x0D && buf[1] == 0x0A) return 2;
+      return 1;
+    }
+    // UTF-16LE: CRLF = 0D 00 0A 00
+    if (read >= 4 && buf[0] == 0x0D && buf[1] == 0x00 && buf[2] == 0x0A && buf[3] == 0x00) return 4;
+    return minChar;
   }
 
   private void EnsureCursorVisible(int textAreaCols)
   {
     if (_state.TextCursorOffset < 0) return;
-    if (_state.TextCursorOffset < _state.TextTopOffset)
-      _state.TextTopOffset = FindLineStart(_state.TextCursorOffset);
+    Document? doc = _state.Document;
+    if (doc is null) return;
 
-    long visibleEnd = ComputeVisibleEnd(_state.TextTopOffset, _state.VisibleRows);
-    if (_state.TextCursorOffset > visibleEnd) {
+    // If cursor is before the viewport top, scroll up
+    if (_state.TextCursorOffset < _state.TextTopOffset) {
+      _state.TextTopOffset = FindLineStart(_state.TextCursorOffset);
+      return;
+    }
+
+    // Compute visual lines from top to check if cursor is visible
+    int vpHeight = _state.VisibleRows;
+    if (vpHeight <= 0) vpHeight = 24;
+    int maxCols = _state.WordWrap ? textAreaCols : int.MaxValue;
+    ITextDecoder decoder = _state.Decoder;
+
+    int readSize = Math.Max((vpHeight + 4) * 256, 16384);
+    readSize = (int)Math.Min(readSize, doc.Length - _state.TextTopOffset);
+    if (readSize <= 0) return;
+
+    int expandedRead = Math.Min(readSize * 4, 16 * 1024 * 1024);
+    expandedRead = (int)Math.Min(expandedRead, doc.Length - _state.TextTopOffset);
+    EnsureBuffer(expandedRead);
+    int bytesRead = doc.Read(_state.TextTopOffset, _readBuffer.AsSpan(0, expandedRead));
+    if (bytesRead == 0) return;
+
+    EnsureVisualLines(vpHeight + 64);
+    int lineCount = _wrapEngine.ComputeVisualLines(
+        _readBuffer.AsSpan(0, bytesRead), _state.TextTopOffset, maxCols, _state.WordWrap, _visualLines, decoder);
+
+    // Check if cursor falls within the first vpHeight visual lines
+    bool cursorVisible = false;
+    int rowsToCheck = Math.Min(vpHeight, lineCount);
+    for (int i = 0; i < rowsToCheck; i++) {
+      long vlStart = _visualLines[i].DocOffset;
+      long vlEnd = vlStart + _visualLines[i].ByteLength;
+      if (_state.TextCursorOffset >= vlStart && _state.TextCursorOffset <= vlEnd) {
+        cursorVisible = true;
+        break;
+      }
+    }
+
+    if (!cursorVisible) {
+      // Scroll so the cursor is roughly centered in the viewport
       long newTop = FindLineStart(_state.TextCursorOffset);
-      for (int i = 0; i < _state.VisibleRows / 2 && newTop > 0; i++) {
+      for (int i = 0; i < vpHeight / 2 && newTop > 0; i++) {
         long prev = FindLineStart(Math.Max(0, newTop - 1));
         if (prev >= newTop) break;
         newTop = prev;
@@ -978,59 +1140,68 @@ internal sealed class LeviathanTextView : View
     return text.Length;
   }
 
-  private long ComputeVisibleEnd(long startOffset, int lineCount)
-  {
-    Document? doc = _state.Document;
-    if (doc is null) return startOffset;
-
-    ITextDecoder decoder = _state.Decoder;
-    int linesFound = 0;
-    long pos = startOffset;
-    byte[] scanBuf = new byte[32768];
-
-    while (pos < doc.Length && linesFound < lineCount) {
-      int readLen = (int)Math.Min(scanBuf.Length, doc.Length - pos);
-      int read = doc.Read(pos, scanBuf.AsSpan(0, readLen));
-      if (read == 0) break;
-
-      int minChar = decoder.MinCharBytes;
-      for (int i = 0; i + minChar <= read; i += minChar) {
-        if (decoder.IsNewline(scanBuf, i, out _)) {
-          linesFound++;
-          if (linesFound >= lineCount)
-            return pos + i + minChar;
-        }
-      }
-      pos += read;
-    }
-    return pos;
-  }
 
   private long ComputeLineNumber(long offset)
   {
     Document? doc = _state.Document;
     if (doc is null) return 1;
 
+    // Use sparse line index when available
+    LineIndex? idx = _state.LineIndex;
+    if (idx is not null && idx.SparseEntryCount > 0) {
+      long baseLine = idx.EstimateLineForOffset(offset, doc.Length);
+
+      // Refine: count exact newlines from nearest sparse entry to offset
+      int sparseFactor = idx.SparseFactor;
+      int sparseIdx = (int)(baseLine / sparseFactor) - 1;
+      if (sparseIdx >= idx.SparseEntryCount)
+        sparseIdx = idx.SparseEntryCount - 1;
+
+      long scanFrom;
+      long lineNum;
+      if (sparseIdx >= 0) {
+        scanFrom = idx.GetSparseOffset(sparseIdx) + 1;
+        lineNum = (long)(sparseIdx + 1) * sparseFactor + 1;
+      } else {
+        scanFrom = 0;
+        lineNum = 1;
+      }
+
+      if (offset > scanFrom) {
+        long gap = offset - scanFrom;
+        if (gap <= 4 * 1024 * 1024) {
+          // Small enough to count exactly
+          lineNum += CountNewlines(scanFrom, offset);
+        }
+        // else: stick with the sparse estimate
+      }
+
+      _cachedTopOffset = offset;
+      _cachedTopLineNumber = lineNum;
+      return lineNum;
+    }
+
+    // Fallback: incremental count from cached position
     long from, to;
-    long lineNum;
+    long lineNumber;
     if (offset >= _cachedTopOffset) {
       from = _cachedTopOffset;
       to = offset;
-      lineNum = _cachedTopLineNumber;
+      lineNumber = _cachedTopLineNumber;
     } else {
       from = 0;
       to = offset;
-      lineNum = 1;
+      lineNumber = 1;
     }
 
     if (to - from > 10 * 1024 * 1024)
-      lineNum = Math.Max(1, (long)((double)offset / doc.Length * _state.EstimatedTotalLines));
+      lineNumber = Math.Max(1, (long)((double)offset / doc.Length * _state.EstimatedTotalLines));
     else
-      lineNum += CountNewlines(from, to);
+      lineNumber += CountNewlines(from, to);
 
     _cachedTopOffset = offset;
-    _cachedTopLineNumber = lineNum;
-    return lineNum;
+    _cachedTopLineNumber = lineNumber;
+    return lineNumber;
   }
 
   private long CountNewlines(long from, long to)
@@ -1038,19 +1209,17 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return 0;
 
-    ITextDecoder decoder = _state.Decoder;
     long count = 0;
     long pos = from;
-    byte[] buf = new byte[8192];
+    byte[] buf = new byte[65536];
 
     while (pos < to) {
       int readLen = (int)Math.Min(buf.Length, to - pos);
       int read = doc.Read(pos, buf.AsSpan(0, readLen));
       if (read == 0) break;
 
-      int minChar = decoder.MinCharBytes;
-      for (int i = 0; i + minChar <= read; i += minChar) {
-        if (decoder.IsNewline(buf, i, out _))
+      for (int i = 0; i < read; i++) {
+        if (buf[i] == 0x0A)
           count++;
       }
       pos += read;
@@ -1061,29 +1230,51 @@ internal sealed class LeviathanTextView : View
   private long FindOffsetOfLine(long targetLine)
   {
     Document? doc = _state.Document;
-    if (doc is null || targetLine <= 1) return 0;
+    if (doc is null || targetLine <= 1) return _state.BomLength;
 
-    ITextDecoder decoder = _state.Decoder;
-    long linesFound = 0;
-    long pos = 0;
-    byte[] buf = new byte[8192];
+    long newlinesNeeded = targetLine - 1;
 
-    while (pos < doc.Length && linesFound < targetLine - 1) {
+    // Try using the sparse line index for O(1) lookup + small scan
+    LineIndex? idx = _state.LineIndex;
+    long startOffset = 0;
+    long newlinesCounted = 0;
+
+    if (idx is not null && idx.SparseEntryCount > 0) {
+      int sparseFactor = idx.SparseFactor;
+      // Find largest sparse entry where (sparseIdx+1)*sparseFactor <= newlinesNeeded
+      int sparseIdx = (int)(newlinesNeeded / sparseFactor) - 1;
+      if (sparseIdx >= idx.SparseEntryCount)
+        sparseIdx = idx.SparseEntryCount - 1;
+      if (sparseIdx >= 0) {
+        startOffset = idx.GetSparseOffset(sparseIdx) + 1; // byte after the stored \n
+        newlinesCounted = (long)(sparseIdx + 1) * sparseFactor;
+      }
+    }
+
+    long remaining = newlinesNeeded - newlinesCounted;
+    if (remaining <= 0)
+      return Math.Min(startOffset, doc.Length);
+
+    // Linear scan from startOffset counting only \n (0x0A) bytes
+    long pos = startOffset;
+    byte[] buf = new byte[65536]; // 64KB buffer for better throughput
+    long found = 0;
+
+    while (pos < doc.Length && found < remaining) {
       int readLen = (int)Math.Min(buf.Length, doc.Length - pos);
       int read = doc.Read(pos, buf.AsSpan(0, readLen));
       if (read == 0) break;
 
-      int minChar = decoder.MinCharBytes;
-      for (int i = 0; i + minChar <= read; i += minChar) {
-        if (decoder.IsNewline(buf, i, out _)) {
-          linesFound++;
-          if (linesFound >= targetLine - 1)
-            return pos + i + minChar;
+      for (int i = 0; i < read; i++) {
+        if (buf[i] == 0x0A) {
+          found++;
+          if (found >= remaining)
+            return pos + i + 1; // byte after the \n
         }
       }
       pos += read;
     }
-    return pos;
+    return Math.Min(pos, doc.Length);
   }
 
   private static bool IsNewlineAt(ReadOnlySpan<byte> buf, int index, ITextDecoder decoder)
@@ -1190,6 +1381,11 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return;
 
+    // Update estimated total lines from indexer when available
+    LineIndex? lineIdx = _state.LineIndex;
+    if (lineIdx is not null && lineIdx.TotalLineCount > 0)
+      _state.EstimatedTotalLines = lineIdx.TotalLineCount;
+
     long totalLines = Math.Max(1, _state.EstimatedTotalLines);
     int scrollTotal = (int)Math.Min(totalLines, int.MaxValue - 1);
     double fraction = doc.Length > 0 ? (double)_state.TextTopOffset / doc.Length : 0;
@@ -1203,11 +1399,18 @@ internal sealed class LeviathanTextView : View
     _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
 
     // Horizontal (only meaningful when word wrap is off)
-    if (!_state.WordWrap && _maxLineWidthInViewport > textAreaCols) {
-      _horizontalScrollBar.ScrollableContentSize = _maxLineWidthInViewport;
-      _horizontalScrollBar.VisibleContentSize = textAreaCols;
-      _horizontalScrollBar.Value = Math.Clamp(_horizontalScrollOffset, 0,
-          Math.Max(0, _maxLineWidthInViewport - textAreaCols));
+    if (!_state.WordWrap) {
+      int effectiveWidth = Math.Max(_maxLineWidthInViewport, _horizontalScrollOffset + textAreaCols);
+      if (effectiveWidth > textAreaCols) {
+        _horizontalScrollBar.ScrollableContentSize = effectiveWidth;
+        _horizontalScrollBar.VisibleContentSize = textAreaCols;
+        _horizontalScrollBar.Value = Math.Clamp(_horizontalScrollOffset, 0,
+            Math.Max(0, effectiveWidth - textAreaCols));
+      } else {
+        _horizontalScrollBar.ScrollableContentSize = textAreaCols;
+        _horizontalScrollBar.VisibleContentSize = textAreaCols;
+        _horizontalScrollBar.Value = 0;
+      }
     } else {
       _horizontalScrollBar.ScrollableContentSize = textAreaCols;
       _horizontalScrollBar.VisibleContentSize = textAreaCols;

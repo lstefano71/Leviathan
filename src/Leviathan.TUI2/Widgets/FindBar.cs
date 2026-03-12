@@ -31,21 +31,14 @@ internal sealed class FindBar : PopoverImpl
     _findNext = findNext;
     _findPrev = findPrev;
 
-    Attribute barBg = new(new Color(StandardColor.White), new Color(40, 40, 60));
-
-    // Container: single-row bar at top-right
-    View bar = new() {
-      X = Pos.AnchorEnd(72),
+    // Container: bordered bar at top-right
+    FrameView bar = new() {
+      SchemeName = "Menu",
+      Title = "Find",
+      X = Pos.AnchorEnd(74),
       Y = 0,
-      Width = 72,
-      Height = 1,
-    };
-    bar.DrawingContent += (_, _) => {
-      bar.SetAttribute(barBg);
-      for (int c = 0; c < 72; c++) {
-        bar.Move(c, 0);
-        bar.AddRune(' ');
-      }
+      Width = 74,
+      Height = 3,
     };
 
     _queryField = new TextField() {
@@ -166,6 +159,10 @@ internal sealed class FindBar : PopoverImpl
     if (!Visible)
       return base.OnKeyDown(key);
 
+    // Let children (TextField) process the key first
+    if (base.OnKeyDown(key))
+      return true;
+
     // Ctrl+F when visible → hide
     if (key == Key.F.WithCtrl) {
       Visible = false;
@@ -173,9 +170,15 @@ internal sealed class FindBar : PopoverImpl
       return true;
     }
 
-    // Enter → start search with current query
+    // Enter → find next if search active with results, else start new search
     if (key == Key.Enter) {
-      RunSearch();
+      string query = _queryField.Text?.Trim() ?? "";
+      if (!string.IsNullOrEmpty(query) && query == _state.FindInput && _state.SearchResults.Count > 0) {
+        _findNext();
+      } else {
+        RunSearch();
+      }
+      UpdateStatus();
       key.Handled = true;
       return true;
     }
@@ -196,7 +199,7 @@ internal sealed class FindBar : PopoverImpl
       return true;
     }
 
-    return base.OnKeyDown(key);
+    return false;
   }
 
   private void RunSearch()
@@ -219,8 +222,9 @@ internal sealed class FindBar : PopoverImpl
 
   private void UpdateToggleColors()
   {
-    Attribute activeAttr = new(new Color(StandardColor.Black), new Color(208, 135, 46));
-    Attribute inactiveAttr = new(new Color(StandardColor.White), new Color(60, 60, 80));
+    Scheme scheme = GetScheme();
+    Attribute activeAttr = scheme.GetAttributeForRole(VisualRole.Highlight);
+    Attribute inactiveAttr = scheme.GetAttributeForRole(VisualRole.Normal);
 
     _caseButton.SetAttribute(_state.FindCaseSensitive ? activeAttr : inactiveAttr);
     _hexButton.SetAttribute(_state.FindHexMode ? activeAttr : inactiveAttr);

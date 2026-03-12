@@ -23,10 +23,8 @@ internal sealed class GotoBar : PopoverImpl
     _gotoOffset = gotoOffset;
     _gotoLine = gotoLine;
 
-    Attribute barNormal = new(new Color(StandardColor.White), new Color(40, 40, 60));
-    Attribute barHot = new(new Color(StandardColor.Yellow), new Color(40, 40, 60));
-    
     FrameView bar = new() {
+      SchemeName = "Dialog",
       Title = "Go To",
       X = 0,
       Y = 0,

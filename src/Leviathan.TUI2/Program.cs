@@ -50,6 +50,8 @@ internal sealed class MainWindow : Window
   private readonly LeviathanTextView _textView;
   private readonly CommandPalette _palette;
   private readonly StatusBar _statusBar;
+  private readonly Label _statusFileLabel;
+  private readonly Label _statusInfoLabel;
   private readonly FindBar _findBar;
   private readonly GotoBar _gotoBar;
   private readonly CommandPalettePopover _palettePopover;
@@ -95,12 +97,22 @@ internal sealed class MainWindow : Window
     _textView.Visible = state.ActiveView == ViewMode.Text;
 
     // ─── Status bar ───
-    _statusBar = new StatusBar([
-      new Shortcut(Key.F5, "Hex", () => SwitchView(ViewMode.Hex)),
-      new Shortcut(Key.F6, "Text", () => SwitchView(ViewMode.Text)),
-      new Shortcut(Key.O.WithCtrl, "Open", () => ShowOpenDialog()),
-      new Shortcut(Key.S.WithCtrl, "Save", () => SaveFile()),
-    ]);
+    _statusFileLabel = new Label() {
+      X = 0,
+      Y = 0,
+      Width = Dim.Percent(50),
+      Text = " Leviathan",
+    };
+
+    _statusInfoLabel = new Label() {
+      X = Pos.AnchorEnd(),
+      Y = 0,
+      Width = Dim.Auto(DimAutoStyle.Text),
+      Text = "",
+    };
+
+    _statusBar = new StatusBar();
+    _statusBar.Add(_statusFileLabel, _statusInfoLabel);
 
     // ─── Welcome view ───
     _welcomeView = BuildWelcomeView(menuBar);
@@ -434,6 +446,8 @@ internal sealed class MainWindow : Window
 
     CancellationTokenSource cts = new();
     _state.SearchCts = cts;
+    CancellationToken token = cts.Token;
+    Leviathan.Core.Document document = _state.Document;
 
     byte[]? pattern;
     if (_state.FindHexMode) {
@@ -441,6 +455,9 @@ internal sealed class MainWindow : Window
       if (pattern is null || pattern.Length == 0) {
         _state.SearchStatus = "Invalid hex pattern";
         _state.IsSearching = false;
+        if (ReferenceEquals(_state.SearchCts, cts))
+          _state.SearchCts = null;
+        cts.Dispose();
         UpdateStatusBar();
         return;
       }
@@ -452,11 +469,11 @@ internal sealed class MainWindow : Window
       try {
         List<SearchResult> results = [];
         bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
-        foreach (SearchResult r in SearchEngine.FindAll(_state.Document, pattern, caseSensitive)) {
-          if (cts.Token.IsCancellationRequested) break;
+        foreach (SearchResult r in SearchEngine.FindAll(document, pattern, caseSensitive)) {
+          if (token.IsCancellationRequested) break;
           results.Add(r);
         }
-        if (!cts.Token.IsCancellationRequested) {
+        if (!token.IsCancellationRequested && ReferenceEquals(_state.SearchCts, cts)) {
           _state.SearchResults.Clear();
           _state.SearchResults.AddRange(results);
           _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
@@ -472,6 +489,10 @@ internal sealed class MainWindow : Window
       } catch (OperationCanceledException) {
         _state.SearchStatus = "Search cancelled";
         _state.IsSearching = false;
+      } finally {
+        if (ReferenceEquals(_state.SearchCts, cts))
+          _state.SearchCts = null;
+        cts.Dispose();
       }
 
       // Schedule UI update on main thread
@@ -481,7 +502,7 @@ internal sealed class MainWindow : Window
         _hexView.SetNeedsDraw();
         _textView.SetNeedsDraw();
       });
-    }, cts.Token);
+    }, token);
   }
 
   private void FindNext()
@@ -618,10 +639,11 @@ internal sealed class MainWindow : Window
       }
 
       int y = 2;
-      Attribute titleAttr = new(new Color(208, 135, 46), new Color(StandardColor.Black));
-      Attribute normalAttr = new(new Color(StandardColor.White), new Color(StandardColor.Black));
-      Attribute hintAttr = new(new Color(100, 130, 160), new Color(StandardColor.Black));
-      Attribute mruAttr = new(new Color(StandardColor.Yellow), new Color(StandardColor.Black));
+      Attribute normalAttr = view.GetAttributeForRole(VisualRole.Normal);
+      Color bg = normalAttr.Background;
+      Attribute titleAttr = new(new Color(208, 135, 46), bg);
+      Attribute hintAttr = new(new Color(100, 130, 160), bg);
+      Attribute mruAttr = new(new Color(StandardColor.Yellow), bg);
 
       void DrawCentered(string text, Attribute attr)
       {
@@ -725,6 +747,8 @@ internal sealed class MainWindow : Window
   {
     if (_state.Document is null) {
       Title = "Leviathan — Large File Editor";
+      _statusFileLabel.Text = " Leviathan";
+      _statusInfoLabel.Text = "";
       return;
     }
 
@@ -736,6 +760,8 @@ internal sealed class MainWindow : Window
   {
     if (_state.CurrentFilePath is null) {
       Title = "Leviathan — Large File Editor";
+      _statusFileLabel.Text = " Leviathan";
+      _statusInfoLabel.Text = "";
       return;
     }
 
@@ -749,6 +775,12 @@ internal sealed class MainWindow : Window
         : _state.IsSearching ? " | Searching…" : "";
 
     Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+
+    // Status bar — left: file name with dirty indicator
+    _statusFileLabel.Text = $" {modified}{fileName}";
+
+    // Status bar — right: view mode, encoding, offset, size, search
+    _statusInfoLabel.Text = $"{viewName} | {encoding} | Offset: 0x{cursor:X} ({cursor}) | {FormatFileSize(_state.FileLength)}{searchInfo} ";
   }
 
   private static string FormatFileSize(long bytes)

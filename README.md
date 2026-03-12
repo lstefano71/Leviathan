@@ -1,6 +1,6 @@
 # Leviathan
 
-Leviathan is a native-AOT, immediate-mode hex + text editor designed for extremely large files (50 GB+). It focuses on minimal allocations and low-latency rendering so the UI and core can operate within strict performance constraints (sub-500 ms open time and zero GC allocations in the render loop).
+Leviathan is a native-AOT, immediate-mode hex + text editor designed for extremely large files (50 GB+). It focuses on minimal allocations and low-latency rendering so the UI and core operate within strict performance constraints (sub-500 ms open time and zero GC allocations in the render loop).
 
 ## Key features
 
@@ -14,9 +14,16 @@ Leviathan is a native-AOT, immediate-mode hex + text editor designed for extreme
 ## Projects
 
 - `src/Leviathan.Core` — Headless data engine (core editing, IO, indexing, text decoding)
+	- Key subfolders: `DataModel/` (piece table, `PieceTree`), `IO/` (`MappedFileSource`, `AppendBuffer`), `Indexing/` (`LineIndexer`, `LineIndex`), `Search/` (search engine), `Text/` (decoders, encoding utilities).
 - `src/Leviathan.UI` — GUI (ImGui + OpenGL render loop)
+	- UI has `HexView`, `TextView`, `AppWindow`, `Settings` and platform helpers (eg. `Windows/FindWindow.cs`). Includes `rd.xml` used for Native AOT configuration.
 - `src/Leviathan.TUI` — Terminal UI frontend
+	- TUI provides `AppState`, `TuiSettings`, ANSI rendering (`Rendering/AnsiBuilder.cs`) and controllers for file/hex/text views.
 - `tests/Leviathan.Core.Tests` — xUnit tests for the core library
+
+## Front-ends
+
+There are now three front-ends (GUI, TUI, and an experimental third frontend). Each front-end has its own set of problems and tradeoffs — expect UI-specific, terminal-specific, and experimental issues when testing or contributing.
 
 ## Build & test
 
@@ -56,19 +63,39 @@ dotnet publish src/Leviathan.UI/Leviathan.UI.csproj -c Release -r win-x64
 
 ## Architecture & important conventions
 
-- `Document` is the public facade over `MappedFileSource`, `AppendBuffer`, and `PieceTree`.
-- `MappedFileSource` exposes zero-copy reads via memory-mapped files.
-- `AppendBuffer` is an arena backed by `ArrayPool<byte>` to avoid GC pressure on inserts.
-- `PieceTree` is a red-black piece table using value types (`readonly record struct`) for pieces.
-- `LineIndexer` scans file data in background tasks and uses SIMD (AVX2/SSE2/NEON) cascades.
-- UI render hot path avoids heap allocations (use `stackalloc`, raw pointer APIs, UTF-8 literals).
-- AOT-friendly: avoid runtime reflection; use source-generated JSON contexts for serialization.
+`Document` is the public facade over `MappedFileSource`, `AppendBuffer`, and `PieceTree`.
+
+Core components (high level):
+
+- `MappedFileSource` — memory-mapped backing with zero-copy reads for large files.
+- `AppendBuffer` — arena allocator backed by `ArrayPool<byte>` for low-allocation edits.
+- `PieceTree` — red-black piece table using value types (`readonly record struct`) for pieces and O(log N) positional ops.
+- `LineIndexer` / `LineIndex` — background scanning with a SIMD cascade (AVX2 → SSE2/NEON → scalar) and sparse index checkpoints for fast scroll estimation.
+- `SearchEngine` — efficient searching over indexed content; returns `SearchResult` objects used by frontends.
+- `Text` subcomponents — encoding detection, multi-encoding decoders (`Utf8TextDecoder`, `Utf16LeTextDecoder`, `Windows1252TextDecoder`), and `Utf8Utils` helpers.
+
+UI & TUI notes:
+
+- UI hot path avoids heap allocations — code uses `stackalloc`, UTF-8 string literals, and raw ImGui/OpenGL draw calls.
+- TUI contains `AnsiBuilder` for terminal rendering and controllers for `HexView`/`TextView`.
+- `Windows/FindWindow.cs` contains platform helpers when running on Windows.
+
+Performance & AOT:
+
+- The codebase is AOT-aware: avoid runtime reflection and use source-generated JSON contexts for serialization when needed.
+- `rd.xml` in `src/Leviathan.UI` contains runtime directives to support Native AOT publishing.
 
 ## Code style and testing notes
 
 - Prefer explicit types over `var` in critical code; annotate hot-path methods with `[MethodImpl(MethodImplOptions.AggressiveInlining)]`.
 - Public APIs and important internal types should have XML docs.
 - Tests are xUnit-based; test naming: `MethodName_Condition_ExpectedResult`.
+
+Additional developer notes:
+
+- Keep hot-path code allocation-free and annotate with `[MethodImpl(MethodImplOptions.AggressiveInlining)]` where appropriate.
+- When changing performance-critical code, add micro-benchmarks or tests and run them locally before submitting PRs.
+- Use the existing test project to add coverage for core features (`Search`, `PieceTree`, `LineIndex`, decoders, etc.).
 
 ## Contribution
 

@@ -34,6 +34,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
     _gotoOffset = gotoOffset;
 
     FrameView panel = new() {
+      SchemeName = "Dialog",
       Title = "Command Palette",
       X = Pos.Center(),
       Y = 2,

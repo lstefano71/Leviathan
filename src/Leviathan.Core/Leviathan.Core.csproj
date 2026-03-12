@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Leviathan.Core.Tests" />
+    <InternalsVisibleTo Include="Leviathan.TUI2" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using Leviathan.Core;
+using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 
@@ -38,6 +39,12 @@ internal sealed class AppState
   // --- BOM ---
   /// <summary>Length of the BOM prefix in the current file (0 when none).</summary>
   public int BomLength { get; set; }
+
+  // --- Line index ---
+  /// <summary>Background line indexer for fast offset/line mapping.</summary>
+  public LineIndexer? Indexer { get; set; }
+  /// <summary>Sparse line index built by the background indexer.</summary>
+  public LineIndex? LineIndex => Indexer?.Index;
 
   // --- Scroll ---
   public int VisibleRows { get; set; } = 24;
@@ -102,6 +109,8 @@ internal sealed class AppState
   public void OpenFile(string path)
   {
     CancelSearch();
+    Indexer?.Dispose();
+    Indexer = null;
     Document?.Dispose();
     Document = new Document(path);
     CurrentFilePath = path;
@@ -121,6 +130,13 @@ internal sealed class AppState
     TextCursorOffset = bomLength;
     TextSelectionAnchor = -1;
     EstimatedTotalLines = Math.Max(1, Document.Length / 80);
+
+    // Start background line indexing
+    if (Document.FileSource is { } source) {
+      Indexer = new LineIndexer(source);
+      Indexer.StartScan();
+    }
+
     SearchResults.Clear();
     CurrentMatchIndex = -1;
     SearchStatus = "";
@@ -159,9 +175,9 @@ internal sealed class AppState
   /// </summary>
   public void CancelSearch()
   {
-    SearchCts?.Cancel();
-    SearchCts?.Dispose();
+    CancellationTokenSource? searchCts = SearchCts;
     SearchCts = null;
+    searchCts?.Cancel();
     IsSearching = false;
   }
 
