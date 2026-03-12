@@ -22,6 +22,7 @@ internal sealed class GotoBar : PopoverImpl
     _state = state;
     _gotoOffset = gotoOffset;
     _gotoLine = gotoLine;
+    Visible = false;
 
     FrameView bar = new() {
       SchemeName = "Dialog",
@@ -74,7 +75,7 @@ internal sealed class GotoBar : PopoverImpl
 
     // Ctrl+G when visible → hide
     if (key == Key.G.WithCtrl) {
-      Visible = false;
+      HidePopover();
       key.Handled = true;
       return true;
     }
@@ -101,7 +102,15 @@ internal sealed class GotoBar : PopoverImpl
           _gotoLine(lineNum);
       }
     }
-    Visible = false;
+    HidePopover();
+  }
+
+  private void HidePopover()
+  {
+    if (App?.Popovers is { } popovers)
+      popovers.Hide(this);
+    else
+      Visible = false;
   }
 
   private static bool TryParseOffset(string input, out long offset)

@@ -150,9 +150,16 @@ internal sealed class MainWindow : Window
   private void RegisterPopovers(object? sender, EventArgs args)
   {
     Initialized -= RegisterPopovers;
-    _app.Popovers?.Register(_findBar);
-    _app.Popovers?.Register(_gotoBar);
-    _app.Popovers?.Register(_palettePopover);
+    if (_app.Popovers is not { } popovers)
+      return;
+
+    popovers.Register(_findBar);
+    popovers.Register(_gotoBar);
+    popovers.Register(_palettePopover);
+
+    popovers.Hide(_findBar);
+    popovers.Hide(_gotoBar);
+    popovers.Hide(_palettePopover);
   }
 
   private MenuBar BuildMenuBar()

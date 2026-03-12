@@ -30,6 +30,7 @@ internal sealed class FindBar : PopoverImpl
     _startSearch = startSearch;
     _findNext = findNext;
     _findPrev = findPrev;
+    Visible = false;
 
     // Container: bordered bar at top-right
     FrameView bar = new() {
@@ -123,7 +124,7 @@ internal sealed class FindBar : PopoverImpl
       CanFocus = false,
     };
     _closeButton.Accepting += (_, _) => {
-      Visible = false;
+      HidePopover();
     };
 
     bar.Add(_queryField, _caseButton, _hexButton, _statusLabel, _prevButton, _nextButton, _closeButton);
@@ -165,7 +166,7 @@ internal sealed class FindBar : PopoverImpl
 
     // Ctrl+F when visible → hide
     if (key == Key.F.WithCtrl) {
-      Visible = false;
+      HidePopover();
       key.Handled = true;
       return true;
     }
@@ -228,5 +229,13 @@ internal sealed class FindBar : PopoverImpl
 
     _caseButton.SetAttribute(_state.FindCaseSensitive ? activeAttr : inactiveAttr);
     _hexButton.SetAttribute(_state.FindHexMode ? activeAttr : inactiveAttr);
+  }
+
+  private void HidePopover()
+  {
+    if (App?.Popovers is { } popovers)
+      popovers.Hide(this);
+    else
+      Visible = false;
   }
 }

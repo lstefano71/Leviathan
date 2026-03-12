@@ -205,7 +205,6 @@ internal sealed class LeviathanTextView : View
 
     int vpHeight = Viewport.Height;
     int vpWidth = Viewport.Width;
-    _state.VisibleRows = vpHeight;
 
     int textAreaCols = Math.Max(1, vpWidth - GutterWidth - 1); // -1 for vertical scrollbar
 
@@ -215,6 +214,12 @@ internal sealed class LeviathanTextView : View
       _horizontalScrollOffset = 0;
       _maxLineWidthInViewport = 0;
     }
+
+    // Reserve a row for the horizontal scrollbar so content doesn't draw under it
+    if (_horizontalScrollBar.Visible)
+      vpHeight = Math.Max(1, vpHeight - 1);
+
+    _state.VisibleRows = vpHeight;
 
     int frameMaxWidth = 0;
 
@@ -988,17 +993,29 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null || offset <= 0) return 0;
 
-    int lookBack = (int)Math.Min(4096, offset);
-    byte[] buf = new byte[lookBack];
-    doc.Read(offset - lookBack, buf);
-
     int minChar = _state.Decoder.MinCharBytes;
+    const int InitialChunk = 4096;
+    const int MaxChunk = 16 * 1024 * 1024;
 
-    for (int i = lookBack - minChar; i >= 0; i -= minChar) {
-      if (IsLF(buf, i, minChar))
-        return offset - lookBack + i + minChar;
+    long search = offset;
+    int chunkSize = InitialChunk;
+
+    while (search > 0) {
+      int chunkLen = (int)Math.Min(chunkSize, search);
+      long chunkStart = search - chunkLen;
+      byte[] buf = new byte[chunkLen];
+      doc.Read(chunkStart, buf);
+
+      for (int i = chunkLen - minChar; i >= 0; i -= minChar) {
+        if (IsLF(buf, i, minChar))
+          return chunkStart + i + minChar;
+      }
+
+      search = chunkStart;
+      if (chunkSize < MaxChunk) chunkSize = Math.Min(chunkSize * 2, MaxChunk);
     }
-    return offset - lookBack;
+
+    return 0;
   }
 
   private long FindLineEnd(long offset)
@@ -1006,25 +1023,50 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return offset;
 
-    int lookAhead = (int)Math.Min(8192, doc.Length - offset);
-    if (lookAhead <= 0) return offset;
-
-    byte[] buf = new byte[lookAhead];
-    doc.Read(offset, buf);
-
     int minChar = _state.Decoder.MinCharBytes;
+    const int InitialChunk = 8192;
+    const int MaxChunk = 16 * 1024 * 1024;
 
-    for (int i = 0; i + minChar <= lookAhead; i += minChar) {
-      if (IsLF(buf, i, minChar)) {
-        // For CRLF, return position of \r (start of newline sequence)
-        if (minChar == 1 && i > 0 && buf[i - 1] == 0x0D)
-          return offset + i - 1;
-        if (minChar == 2 && i >= 2 && buf[i - 2] == 0x0D && buf[i - 1] == 0x00)
-          return offset + i - 2;
-        return offset + i;
+    // crPrefix is the max bytes a CR can occupy before a LF (1 for UTF-8, 2 for UTF-16LE).
+    // On subsequent chunks we back up by this amount so CRLF spanning a boundary is detected.
+    int crPrefix = minChar;
+    long search = offset;
+    int chunkSize = InitialChunk;
+    bool firstChunk = true;
+
+    while (search < doc.Length) {
+      // Overlap with previous chunk to catch CRLF at boundary
+      long readStart = firstChunk ? search : Math.Max(offset, search - crPrefix);
+      int overlap = (int)(search - readStart);
+      int chunkLen = (int)Math.Min(chunkSize + overlap, doc.Length - readStart);
+      if (chunkLen <= 0) break;
+
+      byte[] buf = new byte[chunkLen];
+      doc.Read(readStart, buf);
+
+      // Start scanning past the overlap (which was already checked) unless it's the first chunk
+      int scanStart = firstChunk ? 0 : overlap;
+      // Align scan start to character boundary
+      if (minChar > 1)
+        scanStart = (scanStart + minChar - 1) / minChar * minChar;
+
+      for (int i = scanStart; i + minChar <= chunkLen; i += minChar) {
+        if (IsLF(buf, i, minChar)) {
+          // For CRLF, return position of \r (start of newline sequence)
+          if (minChar == 1 && i > 0 && buf[i - 1] == 0x0D)
+            return readStart + i - 1;
+          if (minChar == 2 && i >= 2 && buf[i - 2] == 0x0D && buf[i - 1] == 0x00)
+            return readStart + i - 2;
+          return readStart + i;
+        }
       }
+
+      search = readStart + chunkLen;
+      firstChunk = false;
+      if (chunkSize < MaxChunk) chunkSize = Math.Min(chunkSize * 2, MaxChunk);
     }
-    return Math.Min(offset + lookAhead, doc.Length);
+
+    return doc.Length;
   }
 
   /// <summary>Checks if position i in buf is a LF (0x0A) character, respecting encoding width.</summary>
@@ -1037,23 +1079,29 @@ internal sealed class LeviathanTextView : View
     return i + 1 < buf.Length && buf[i] == 0x0A && buf[i + 1] == 0x00;
   }
 
-  /// <summary>Returns the byte length of the newline sequence at the given file offset (2 for CRLF, else minChar).</summary>
+  /// <summary>Returns the byte length of the newline sequence at the given file offset (2 for CRLF, else minChar). Returns 0 if the byte at offset is not a newline.</summary>
   private int NewlineLengthAt(long offset)
   {
     Document? doc = _state.Document;
-    if (doc is null) return _state.Decoder.MinCharBytes;
+    if (doc is null) return 0;
 
     int minChar = _state.Decoder.MinCharBytes;
     byte[] buf = new byte[minChar * 2];
     int read = doc.Read(offset, buf.AsSpan(0, (int)Math.Min(buf.Length, doc.Length - offset)));
+    if (read < minChar) return 0;
 
     if (minChar == 1) {
-      if (read >= 2 && buf[0] == 0x0D && buf[1] == 0x0A) return 2;
-      return 1;
+      if (buf[0] == 0x0D && read >= 2 && buf[1] == 0x0A) return 2; // CRLF
+      if (buf[0] == 0x0A) return 1; // LF
+      if (buf[0] == 0x0D) return 1; // bare CR
+      return 0; // not a newline
     }
-    // UTF-16LE: CRLF = 0D 00 0A 00
-    if (read >= 4 && buf[0] == 0x0D && buf[1] == 0x00 && buf[2] == 0x0A && buf[3] == 0x00) return 4;
-    return minChar;
+
+    // UTF-16LE
+    if (read >= 4 && buf[0] == 0x0D && buf[1] == 0x00 && buf[2] == 0x0A && buf[3] == 0x00) return 4; // CRLF
+    if (read >= 2 && buf[0] == 0x0A && buf[1] == 0x00) return 2; // LF
+    if (read >= 2 && buf[0] == 0x0D && buf[1] == 0x00) return 2; // bare CR
+    return 0; // not a newline
   }
 
   private void EnsureCursorVisible(int textAreaCols)

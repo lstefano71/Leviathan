@@ -32,6 +32,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
     _state = state;
     _gotoLine = gotoLine;
     _gotoOffset = gotoOffset;
+    Visible = false;
 
     FrameView panel = new() {
       SchemeName = "Dialog",
@@ -161,7 +162,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
       // Enter -> confirm goto and dismiss
       if (key == Key.Enter) {
         _state.GotoPreviewOrigin = -1; // confirm: don't revert
-        Visible = false;
+        HidePopover();
         key.Handled = true;
         return true;
       }
@@ -193,7 +194,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
       // Enter -> execute selected command and hide
       if (key == Key.Enter) {
         PaletteCommand? cmd = _palette.GetSelected();
-        Visible = false;
+        HidePopover();
         cmd?.Execute();
         key.Handled = true;
         return true;
@@ -281,7 +282,15 @@ internal sealed class CommandPalettePopover : PopoverImpl
       }
       _state.GotoPreviewOrigin = -1;
     }
-    Visible = false;
+    HidePopover();
+  }
+
+  private void HidePopover()
+  {
+    if (App?.Popovers is { } popovers)
+      popovers.Hide(this);
+    else
+      Visible = false;
   }
 
   private void UpdateList()
