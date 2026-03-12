@@ -168,7 +168,11 @@ internal sealed class CommandPalettePopover : PopoverImpl
       // Arrow down -> navigate list
       if (key == Key.CursorDown) {
         _palette.MoveDown();
-        _listView.SelectedItem = _palette.SelectedIndex;
+        if (_palette.SelectedIndex >= 0) {
+          _listView.SelectedItem = _palette.SelectedIndex;
+        } else {
+          _listView.SelectedItem = null;
+        }
         key.Handled = true;
         return true;
       }
@@ -176,7 +180,11 @@ internal sealed class CommandPalettePopover : PopoverImpl
       // Arrow up -> navigate list
       if (key == Key.CursorUp) {
         _palette.MoveUp();
-        _listView.SelectedItem = _palette.SelectedIndex;
+        if (_palette.SelectedIndex >= 0) {
+          _listView.SelectedItem = _palette.SelectedIndex;
+        } else {
+          _listView.SelectedItem = null;
+        }
         key.Handled = true;
         return true;
       }
@@ -281,7 +289,12 @@ internal sealed class CommandPalettePopover : PopoverImpl
         .Select(c => $"[{c.Category}] {c.Name}  {c.Shortcut}")
         .ToList();
     _listView.SetSource(new ObservableCollection<string>(items));
-    _listView.SelectedItem = _palette.SelectedIndex;
+    if (items.Count == 0 || _palette.SelectedIndex < 0) {
+      _listView.SelectedItem = null;
+      return;
+    }
+
+    _listView.SelectedItem = Math.Clamp(_palette.SelectedIndex, 0, items.Count - 1);
   }
 
   private static bool TryParseOffset(string input, out long offset)

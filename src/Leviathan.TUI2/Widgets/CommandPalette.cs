@@ -100,7 +100,12 @@ internal sealed class CommandPalette
           .Where(c => FuzzyMatch(c, q))
           .ToList();
     }
-    _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, _filtered.Count - 1));
+    if (_filtered.Count == 0) {
+      _selectedIndex = -1;
+      return;
+    }
+
+    _selectedIndex = Math.Clamp(_selectedIndex, 0, _filtered.Count - 1);
   }
 
   private static bool FuzzyMatch(PaletteCommand cmd, string query)

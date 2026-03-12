@@ -473,8 +473,8 @@ internal sealed class LeviathanTextView : View
   /// <summary>Skips past \n and \r\n sequences when moving forward.</summary>
   private void SkipNewlinesForward(Document doc)
   {
+    Span<byte> peek = stackalloc byte[4];
     while (_state.TextCursorOffset < doc.Length) {
-      Span<byte> peek = stackalloc byte[4];
       int peekRead = doc.Read(_state.TextCursorOffset, peek);
       if (peekRead == 0) break;
       (Rune r, int rLen) = _state.Decoder.DecodeRune(peek[..peekRead], 0);
@@ -490,23 +490,24 @@ internal sealed class LeviathanTextView : View
   /// <summary>Skips back over \n and \r when moving backward.</summary>
   private void SkipNewlinesBackward(Document doc)
   {
+    Span<byte> prev = stackalloc byte[4];
+    Span<byte> check = stackalloc byte[4];
     while (_state.TextCursorOffset > 0) {
       int lookBack = (int)Math.Min(4, _state.TextCursorOffset);
-      Span<byte> prev = stackalloc byte[lookBack];
-      doc.Read(_state.TextCursorOffset - lookBack, prev);
+      Span<byte> prevSlice = prev[..lookBack];
+      doc.Read(_state.TextCursorOffset - lookBack, prevSlice);
 
       ITextDecoder decoder = _state.Decoder;
       int pos = 0;
       int lastRuneStart = 0;
       while (pos < lookBack) {
         lastRuneStart = pos;
-        (_, int l) = decoder.DecodeRune(prev, pos);
+        (_, int l) = decoder.DecodeRune(prevSlice, pos);
         if (l <= 0) { pos++; continue; }
         pos += l;
       }
 
       int prevRuneOffset = lookBack - lastRuneStart;
-      Span<byte> check = stackalloc byte[4];
       int checkRead = doc.Read(_state.TextCursorOffset - prevRuneOffset, check);
       if (checkRead == 0) break;
       (Rune r, int rLen) = decoder.DecodeRune(check[..checkRead], 0);
