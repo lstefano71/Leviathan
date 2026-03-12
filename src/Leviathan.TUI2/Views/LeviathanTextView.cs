@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 
@@ -98,29 +99,29 @@ internal sealed class LeviathanTextView : View
     if (_state.Document is null) return false;
 
     // Shift+arrow for selection
-    bool extend = keyEvent.HasShift;
+    bool extend = keyEvent.IsShift;
     if (extend) {
-      if (keyEvent.KeyCode is (KeyCode.CursorLeft | KeyCode.ShiftMask)) { MoveCursorLeft(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorRight | KeyCode.ShiftMask)) { MoveCursorRight(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorUp | KeyCode.ShiftMask)) { MoveCursorUp(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorDown | KeyCode.ShiftMask)) { MoveCursorDown(true); return true; }
+      if (keyEvent == Key.CursorLeft.WithShift) { MoveCursorLeft(true); return true; }
+      if (keyEvent == Key.CursorRight.WithShift) { MoveCursorRight(true); return true; }
+      if (keyEvent == Key.CursorUp.WithShift) { MoveCursorUp(true); return true; }
+      if (keyEvent == Key.CursorDown.WithShift) { MoveCursorDown(true); return true; }
     }
 
     // Enter = newline
-    if (keyEvent.KeyCode == KeyCode.Enter) {
+    if (keyEvent == Key.Enter) {
       InsertNewline();
       return true;
     }
 
     // Printable character input
-    if (!keyEvent.HasCtrl && !keyEvent.HasAlt) {
+    if (!keyEvent.IsCtrl && !keyEvent.IsAlt) {
       char c = (char)(keyEvent.KeyCode & ~KeyCode.ShiftMask);
       if (c >= 0x20 && c < 0x7F) {
         InsertChar(c);
         return true;
       }
       // Space
-      if (keyEvent.KeyCode == KeyCode.Space) {
+      if (keyEvent == Key.Space) {
         InsertChar(' ');
         return true;
       }
@@ -140,8 +141,8 @@ internal sealed class LeviathanTextView : View
     if (!HasFocus)
       SetFocus();
 
-    Point pos = mouse.Position!.Value;
-    ClickAtPosition(pos.Y, pos.X, extend: mouse.Flags.HasFlag(MouseFlags.ButtonShift));
+    var pos = mouse.Position!.Value;
+    ClickAtPosition(pos.Y, pos.X, extend: mouse.Flags.HasFlag(MouseFlags.Shift));
     return true;
   }
 
@@ -289,7 +290,8 @@ internal sealed class LeviathanTextView : View
 
       // Cursor at end of line (if cursor is at lineDocOffset + lineByteLen)
       long endOffset = lineDocOffset + lineByteLen;
-      if (_state.TextCursorOffset == endOffset && GutterWidth + text.Length < vpWidth) {
+      bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
+      if (_state.TextCursorOffset == endOffset && !nextLineStartsHere && GutterWidth + text.Length < vpWidth) {
         SetAttribute(cursorAttr);
         AddRune(' ');
       }
@@ -332,8 +334,8 @@ internal sealed class LeviathanTextView : View
     if (selStart >= 0 && charDocOffset >= selStart && charDocOffset <= selEnd)
       return selectionAttr;
 
-    if (activeMatch is not null &&
-        charDocOffset >= activeMatch.Offset && charDocOffset < activeMatch.Offset + activeMatch.Length)
+    if (activeMatch is { } match &&
+        charDocOffset >= match.Offset && charDocOffset < match.Offset + match.Length)
       return activeMatchAttr;
 
     for (int i = 0; i < visibleMatches.Count; i++) {

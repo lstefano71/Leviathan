@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 
@@ -78,10 +79,10 @@ internal sealed class LeviathanHexView : View
     KeyBindings.Add(Key.Delete, Command.DeleteCharRight);
 
     // Shift+nav for selection
-    KeyBindings.Add(Key.CursorLeft.WithShift, KeyBindingScope.Focused, [Command.Left]);
-    KeyBindings.Add(Key.CursorRight.WithShift, KeyBindingScope.Focused, [Command.Right]);
-    KeyBindings.Add(Key.CursorUp.WithShift, KeyBindingScope.Focused, [Command.Up]);
-    KeyBindings.Add(Key.CursorDown.WithShift, KeyBindingScope.Focused, [Command.Down]);
+    KeyBindings.Add(Key.CursorLeft.WithShift, [Command.Left]);
+    KeyBindings.Add(Key.CursorRight.WithShift, [Command.Right]);
+    KeyBindings.Add(Key.CursorUp.WithShift, [Command.Up]);
+    KeyBindings.Add(Key.CursorDown.WithShift, [Command.Down]);
 
     // Remove keys that conflict with menu/app
     KeyBindings.Remove(Key.Space);
@@ -103,12 +104,12 @@ internal sealed class LeviathanHexView : View
     if (_state.Document is null) return false;
 
     // Check for shift+arrow (selection extension)
-    bool extend = keyEvent.HasShift;
+    bool extend = keyEvent.IsShift;
     if (extend) {
-      if (keyEvent.KeyCode is (KeyCode.CursorLeft | KeyCode.ShiftMask)) { MoveLeft(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorRight | KeyCode.ShiftMask)) { MoveRight(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorUp | KeyCode.ShiftMask)) { MoveUp(true); return true; }
-      if (keyEvent.KeyCode is (KeyCode.CursorDown | KeyCode.ShiftMask)) { MoveDown(true); return true; }
+      if (keyEvent == Key.CursorLeft.WithShift) { MoveLeft(true); return true; }
+      if (keyEvent == Key.CursorRight.WithShift) { MoveRight(true); return true; }
+      if (keyEvent == Key.CursorUp.WithShift) { MoveUp(true); return true; }
+      if (keyEvent == Key.CursorDown.WithShift) { MoveDown(true); return true; }
     }
 
     // Hex digit input
@@ -143,8 +144,8 @@ internal sealed class LeviathanHexView : View
     if (!HasFocus)
       SetFocus();
 
-    Point pos = mouse.Position!.Value;
-    ClickAtPosition(pos.Y, pos.X, extend: mouse.Flags.HasFlag(MouseFlags.ButtonShift));
+    var pos = mouse.Position!.Value;
+    ClickAtPosition(pos.Y, pos.X, extend: mouse.Flags.HasFlag(MouseFlags.Shift));
     return true;
   }
 
@@ -312,8 +313,8 @@ internal sealed class LeviathanHexView : View
       return selectionAttr;
 
     // Active match highlight
-    if (activeMatch is not null &&
-        byteOffset >= activeMatch.Offset && byteOffset < activeMatch.Offset + activeMatch.Length)
+    if (activeMatch is { } match &&
+        byteOffset >= match.Offset && byteOffset < match.Offset + match.Length)
       return activeMatchAttr;
 
     // Regular match highlight

@@ -46,6 +46,9 @@ internal sealed class MainWindow : Window
   private readonly LeviathanTextView _textView;
   private readonly CommandPalette _palette;
   private readonly StatusBar _statusBar;
+  private readonly FindBar _findBar;
+  private readonly GotoBar _gotoBar;
+  private readonly CommandPalettePopover _palettePopover;
 
   internal MainWindow(
       IApplication app,
@@ -81,10 +84,10 @@ internal sealed class MainWindow : Window
     // ─── Status bar ───
     _statusBar = new StatusBar([
         new Shortcut(Key.F5, "Hex", null),
-            new Shortcut(Key.F6, "Text", null),
-            new Shortcut(Key.CtrlMask | Key.O, "Open", null),
-            new Shortcut(Key.CtrlMask | Key.S, "Save", null),
-        ]);
+        new Shortcut(Key.F6, "Text", null),
+        new Shortcut(Key.O.WithCtrl, "Open", null),
+        new Shortcut(Key.S.WithCtrl, "Save", null),
+    ]);
 
     Add(menuBar, _hexView, _textView, _statusBar);
 
@@ -95,8 +98,23 @@ internal sealed class MainWindow : Window
     // Register command palette commands
     RegisterCommands();
 
+    // ─── Popover overlays ───
+    _findBar = new FindBar(state, StartSearch, FindNext, FindPrevious);
+    _gotoBar = new GotoBar(state, o => _hexView.GotoOffset(o), l => _textView.GotoLine(l));
+    _palettePopover = new CommandPalettePopover(palette);
+    Initialized += RegisterPopovers;
+
     // ─── Application-level key bindings ───
     SetupAppKeyBindings();
+  }
+
+  /// <summary>Registers all popover overlays once the view is initialized.</summary>
+  private void RegisterPopovers(object? sender, EventArgs args)
+  {
+    Initialized -= RegisterPopovers;
+    _app.Popovers.Register(_findBar);
+    _app.Popovers.Register(_gotoBar);
+    _app.Popovers.Register(_palettePopover);
   }
 
   private MenuBar BuildMenuBar()
@@ -117,10 +135,10 @@ internal sealed class MainWindow : Window
                 new MenuItem("Encoding: _Windows-1252", null, () => SwitchEncoding(TextEncoding.Windows1252)),
             ]),
             new MenuBarItem("_Navigate", [
-                new MenuItem("_Go to Offset/Line...", "Jump to offset or line", () => ShowGotoDialog(), Key.G.WithCtrl),
+                new MenuItem("_Go to Offset/Line...", "Jump to offset or line", () => _gotoBar.ShowBar(), Key.G.WithCtrl),
             ]),
             new MenuBarItem("_Search", [
-                new MenuItem("_Find...", "Search in file", () => ShowFindDialog(), Key.F.WithCtrl),
+                new MenuItem("_Find...", "Search in file", () => _findBar.ShowBar(), Key.F.WithCtrl),
                 new MenuItem("Find _Next", "Go to next match", () => FindNext(), Key.F3),
                 new MenuItem("Find _Previous", "Go to previous match", () => FindPrevious(), Key.F3.WithShift),
             ]),
@@ -138,12 +156,11 @@ internal sealed class MainWindow : Window
     AddCommand(Command.Refresh, () => { SwitchView(ViewMode.Hex); return true; });
     KeyBindings.Add(Key.F5, Command.Refresh);
 
-    // Command palette
     KeyDown += (_, e) => {
-      if (e.KeyCode == (KeyCode.P | KeyCode.CtrlMask)) {
-        ShowCommandPalette();
+      if (e == Key.P.WithCtrl) {
+        _palettePopover.ShowPalette();
         e.Handled = true;
-      } else if (e.KeyCode == KeyCode.F6) {
+      } else if (e == Key.F6) {
         SwitchView(ViewMode.Text);
         e.Handled = true;
       }
@@ -243,7 +260,7 @@ internal sealed class MainWindow : Window
         App!,
         "Unsaved Changes",
         "You have unsaved changes. Save before proceeding?",
-        "Save", "Don't Save", "Cancel");
+        "Save", "Don't Save", "Cancel") ?? -1;
 
     switch (result) {
       case 0: // Save
@@ -258,116 +275,7 @@ internal sealed class MainWindow : Window
     }
   }
 
-  // ─── Go to dialog ───
-
-  private void ShowGotoDialog()
-  {
-    if (_state.Document is null) return;
-
-    Dialog gotoDialog = new() { Title = "Go to Offset/Line", Width = 50, Height = 8 };
-
-    Label label = new() {
-      Text = _state.ActiveView == ViewMode.Hex
-            ? "Hex offset (e.g. 0x1A3F or 6719):"
-            : "Line number:",
-      X = 1,
-      Y = 1,
-    };
-
-    TextField inputField = new() {
-      X = 1,
-      Y = 2,
-      Width = Dim.Fill(1),
-      Text = "",
-    };
-
-    gotoDialog.Add(label, inputField);
-    gotoDialog.AddButton(new Button() { Text = "_Cancel" });
-    gotoDialog.AddButton(new Button() { Text = "_Go", IsDefault = true });
-
-    _app.Run(gotoDialog);
-
-    if (!gotoDialog.Canceled) {
-      string input = inputField.Text?.Trim() ?? "";
-      if (_state.ActiveView == ViewMode.Hex) {
-        if (TryParseOffset(input, out long offset))
-          _hexView.GotoOffset(offset);
-      } else {
-        if (long.TryParse(input, out long lineNum))
-          _textView.GotoLine(lineNum);
-      }
-    }
-    gotoDialog.Dispose();
-  }
-
-  // ─── Find dialog ───
-
-  private void ShowFindDialog()
-  {
-    if (_state.Document is null) return;
-
-    Dialog findDialog = new() {
-      Title = "Find",
-      Width = 60,
-      Height = 10,
-    };
-
-    Label modeLabel = new() {
-      Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT",
-      X = 1,
-      Y = 1,
-    };
-
-    CheckBox hexModeCheck = new() {
-      Text = "_Hex mode",
-      X = 1,
-      Y = 2,
-      CheckedState = _state.FindHexMode ? CheckState.Checked : CheckState.UnChecked,
-    };
-    hexModeCheck.CheckedStateChanging += (_, e) => {
-      _state.FindHexMode = e.NewValue == CheckState.Checked;
-      modeLabel.Text = _state.FindHexMode ? "Mode: HEX" : "Mode: TEXT";
-    };
-
-    CheckBox caseSensitiveCheck = new() {
-      Text = "_Case sensitive",
-      X = Pos.Right(hexModeCheck) + 2,
-      Y = 2,
-      CheckedState = _state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked,
-    };
-    caseSensitiveCheck.CheckedStateChanging += (_, e) => {
-      _state.FindCaseSensitive = e.NewValue == CheckState.Checked;
-    };
-
-    Label queryLabel = new() {
-      Text = "Search for:",
-      X = 1,
-      Y = 3,
-    };
-
-    TextField queryField = new() {
-      X = 1,
-      Y = 4,
-      Width = Dim.Fill(1),
-      Text = _state.FindInput,
-    };
-
-    findDialog.Add(modeLabel, hexModeCheck, caseSensitiveCheck, queryLabel, queryField);
-    findDialog.AddButton(new Button() { Text = "_Cancel" });
-    findDialog.AddButton(new Button() { Text = "_Find", IsDefault = true });
-
-    _app.Run(findDialog);
-
-    if (!findDialog.Canceled) {
-      string query = queryField.Text?.Trim() ?? "";
-      if (!string.IsNullOrEmpty(query)) {
-        _state.FindInput = query;
-        _state.Settings.AddFindHistory(query);
-        StartSearch(query);
-      }
-    }
-    findDialog.Dispose();
-  }
+  // ─── Search ───
 
   private void StartSearch(string query)
   {
@@ -396,10 +304,13 @@ internal sealed class MainWindow : Window
       pattern = System.Text.Encoding.UTF8.GetBytes(query);
     }
 
-    SearchEngine engine = new(_state.Document);
     Task.Run(() => {
       try {
-        List<SearchResult> results = engine.Search(pattern, _state.FindCaseSensitive, cts.Token);
+        List<SearchResult> results = [];
+        foreach (SearchResult r in SearchEngine.FindAll(_state.Document, pattern)) {
+          if (cts.Token.IsCancellationRequested) break;
+          results.Add(r);
+        }
         if (!cts.Token.IsCancellationRequested) {
           _state.SearchResults.Clear();
           _state.SearchResults.AddRange(results);
@@ -421,6 +332,7 @@ internal sealed class MainWindow : Window
       // Schedule UI update on main thread
       Application.Invoke(() => {
         UpdateStatusBar();
+        _findBar.UpdateStatus();
         _hexView.SetNeedsDraw();
         _textView.SetNeedsDraw();
       });
@@ -508,79 +420,6 @@ internal sealed class MainWindow : Window
 
   // ─── Command palette ───
 
-  private void ShowCommandPalette()
-  {
-    _palette.Reset();
-
-    Dialog paletteDialog = new() {
-      Title = "Command Palette",
-      Width = Dim.Percent(60),
-      Height = Dim.Percent(50),
-    };
-
-    TextField queryField = new() {
-      X = 0,
-      Y = 0,
-      Width = Dim.Fill(),
-      Text = "",
-    };
-
-    ListView listView = new() {
-      X = 0,
-      Y = Pos.Bottom(queryField),
-      Width = Dim.Fill(),
-      Height = Dim.Fill(),
-    };
-
-    UpdatePaletteList(listView);
-
-    queryField.HasFocusChanged += (_, __) => {
-      // Keep focus on queryField
-    };
-
-    queryField.KeyDown += (_, e) => {
-      if (e.KeyCode == KeyCode.CursorDown) {
-        _palette.MoveDown();
-        listView.SelectedItem = _palette.SelectedIndex;
-        e.Handled = true;
-      } else if (e.KeyCode == KeyCode.CursorUp) {
-        _palette.MoveUp();
-        listView.SelectedItem = _palette.SelectedIndex;
-        e.Handled = true;
-      } else if (e.KeyCode == KeyCode.Enter) {
-        PaletteCommand? cmd = _palette.GetSelected();
-        paletteDialog.RequestStop();
-        cmd?.Execute();
-        e.Handled = true;
-      } else if (e.KeyCode == KeyCode.Esc) {
-        paletteDialog.RequestStop();
-        e.Handled = true;
-      }
-    };
-
-    // Update filtering as user types - check on each key event
-    queryField.KeyUp += (_, _) => {
-      string newQuery = queryField.Text?.ToString() ?? "";
-      if (newQuery != _palette.Query) {
-        _palette.Query = newQuery;
-        UpdatePaletteList(listView);
-      }
-    };
-
-    paletteDialog.Add(queryField, listView);
-    _app.Run(paletteDialog);
-    paletteDialog.Dispose();
-  }
-
-  private void UpdatePaletteList(ListView listView)
-  {
-    List<string> items = _palette.FilteredCommands
-        .Select(c => $"[{c.Category}] {c.Name}  {c.Shortcut}")
-        .ToList();
-    listView.SetSource(items);
-    listView.SelectedItem = _palette.SelectedIndex;
-  }
-
   private void RegisterCommands()
   {
     _palette.RegisterCommand("File", "Open File", "Ctrl+O", () => ShowOpenDialog());
@@ -590,8 +429,8 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
     _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
     _palette.RegisterCommand("View", "Toggle Word Wrap", "", () => ToggleWordWrap());
-    _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => ShowGotoDialog());
-    _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => ShowFindDialog());
+    _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => _gotoBar.ShowBar());
+    _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => _findBar.ShowBar());
     _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
     _palette.RegisterCommand("Search", "Find Previous", "Shift+F3", () => FindPrevious());
     _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
@@ -643,24 +482,6 @@ internal sealed class MainWindow : Window
   }
 
   // ─── Helpers ───
-
-  private static bool TryParseOffset(string input, out long offset)
-  {
-    offset = 0;
-    if (string.IsNullOrWhiteSpace(input)) return false;
-
-    input = input.Trim();
-    if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
-        input.StartsWith("0X", StringComparison.OrdinalIgnoreCase)) {
-      return long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
-    }
-
-    // Try hex if it contains hex chars
-    if (input.Any(c => c is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
-      return long.TryParse(input, System.Globalization.NumberStyles.HexNumber, null, out offset);
-
-    return long.TryParse(input, out offset);
-  }
 
   private static byte[]? ParseHexPattern(string text)
   {
