@@ -28,6 +28,8 @@ internal sealed class LeviathanTextView : View
   private long _cachedTopOffset;
   private long _cachedTopLineNumber = 1;
   private int _lastRenderedLineCount;
+  /// <summary>Remembered display column for Notepad-like vertical movement. -1 = not set.</summary>
+  private int _desiredColumn = -1;
   private readonly ScrollBar _verticalScrollBar;
   private readonly ScrollBar _horizontalScrollBar;
   private bool _updatingScrollBar;
@@ -360,12 +362,18 @@ internal sealed class LeviathanTextView : View
         AddRune(text[ci]);
       }
 
-      // Cursor at end of line (if cursor is at lineDocOffset + lineByteLen)
-      // or cursor on empty line (zero displayable chars, cursor == lineDocOffset)
+      // Cursor at end of line: either exactly at endOffset (last line / no next line)
+      // or in the newline-bytes area (after the last visible char, before endOffset).
+      // Also handles empty lines where cursor == lineDocOffset.
       long endOffset = lineDocOffset + lineByteLen;
       bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
       int endCol = GutterWidth + (text.Length - visibleStart);
-      bool cursorAtEnd = _state.TextCursorOffset == endOffset && !nextLineStartsHere;
+      bool cursorInNewlineArea = text.Length > 0
+          && _charByteOffsets.Count > 0
+          && _state.TextCursorOffset > lineDocOffset + _charByteOffsets[_charByteOffsets.Count - 1]
+          && _state.TextCursorOffset < endOffset;
+      bool cursorAtEnd = (_state.TextCursorOffset == endOffset && !nextLineStartsHere)
+          || cursorInNewlineArea;
       bool cursorOnEmptyLine = text.Length == 0 && _state.TextCursorOffset == lineDocOffset;
       if ((cursorAtEnd || cursorOnEmptyLine)
           && endCol < vpWidth - 1 && text.Length >= hOffset) {
@@ -436,6 +444,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null || _state.TextCursorOffset <= _state.BomLength) return;
 
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -471,6 +480,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null || _state.TextCursorOffset >= doc.Length) return;
 
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -620,6 +630,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null) return;
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -635,6 +646,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null) return;
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -644,6 +656,7 @@ internal sealed class LeviathanTextView : View
 
   internal void CtrlHome(bool extend)
   {
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -654,6 +667,7 @@ internal sealed class LeviathanTextView : View
   internal void CtrlEnd(bool extend)
   {
     if (_state.Document is null) return;
+    _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
@@ -665,6 +679,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null || lineNumber < 1) return;
+    _desiredColumn = -1;
     long offset = FindOffsetOfLine(lineNumber);
     _state.TextCursorOffset = offset;
     _state.TextSelectionAnchor = -1;
@@ -703,6 +718,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null) return;
+    _desiredColumn = -1;
     DeleteSelection();
 
     Span<byte> encoded = stackalloc byte[8];
@@ -718,6 +734,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null) return;
+    _desiredColumn = -1;
     DeleteSelection();
 
     ITextDecoder decoder = _state.Decoder;
@@ -736,6 +753,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return;
 
+    _desiredColumn = -1;
     if (_state.TextSelectionAnchor >= 0) { DeleteSelection(); OnStateChanged(); return; }
     if (_state.TextCursorOffset <= 0) return;
 
@@ -764,6 +782,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return;
 
+    _desiredColumn = -1;
     if (_state.TextSelectionAnchor >= 0) { DeleteSelection(); OnStateChanged(); return; }
     if (_state.TextCursorOffset >= doc.Length) return;
 
@@ -840,6 +859,7 @@ internal sealed class LeviathanTextView : View
   {
     Document? doc = _state.Document;
     if (doc is null) return;
+    _desiredColumn = -1;
     if (viewRow < 0 || viewRow >= _lastRenderedLineCount) return;
 
     VisualLine vl = _visualLines[viewRow];
@@ -919,30 +939,63 @@ internal sealed class LeviathanTextView : View
       return;
     }
 
-    // No wrap: navigate by hard lines (original behavior)
+    // No wrap: navigate by hard lines (original behavior) using display columns
     int bom = _state.BomLength;
+    ITextDecoder decoder = _state.Decoder;
 
     if (direction < 0) {
       long lineStart = FindLineStart(_state.TextCursorOffset);
       if (lineStart == 0 && _state.TextCursorOffset <= bom) return;
       if (lineStart == 0) lineStart = bom; // effective start on line 1
 
-      int minChar = _state.Decoder.MinCharBytes;
+      // Compute display column on current line
+      long lineEnd = FindLineEnd(_state.TextCursorOffset);
+      int curLineLen = (int)Math.Min(lineEnd - lineStart + NewlineLengthAt(lineEnd), int.MaxValue);
+      EnsureBuffer(curLineLen);
+      doc.Read(lineStart, _readBuffer.AsSpan(0, curLineLen));
+      int col;
+      if (_desiredColumn >= 0) {
+        col = _desiredColumn;
+      } else {
+        col = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, curLineLen), _state.TextCursorOffset - lineStart, decoder);
+        _desiredColumn = col;
+      }
+
+      int minChar = decoder.MinCharBytes;
       long prevLineEnd = lineStart - minChar;
       long prevLineStart = FindLineStart(prevLineEnd);
       long effectivePrevStart = prevLineStart < bom ? bom : prevLineStart;
 
-      long col = _state.TextCursorOffset - (FindLineStart(_state.TextCursorOffset) < bom ? bom : FindLineStart(_state.TextCursorOffset));
-      _state.TextCursorOffset = Math.Min(effectivePrevStart + col, prevLineEnd);
+      int prevLen = (int)Math.Min(prevLineEnd - effectivePrevStart + NewlineLengthAt(prevLineEnd), int.MaxValue);
+      EnsureBuffer(prevLen);
+      doc.Read(effectivePrevStart, _readBuffer.AsSpan(0, prevLen));
+      int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, prevLen), col, decoder);
+      _state.TextCursorOffset = Math.Min(effectivePrevStart + byteCol, prevLineEnd);
     } else {
       long lineEnd = FindLineEnd(_state.TextCursorOffset);
       if (lineEnd >= doc.Length) return;
       long lineStart = FindLineStart(_state.TextCursorOffset);
       long effectiveStart = lineStart < bom ? bom : lineStart;
-      long col = _state.TextCursorOffset - effectiveStart;
+
+      // Compute display column on current line
+      int curLineLen = (int)Math.Min(lineEnd - effectiveStart + NewlineLengthAt(lineEnd), int.MaxValue);
+      EnsureBuffer(curLineLen);
+      doc.Read(effectiveStart, _readBuffer.AsSpan(0, curLineLen));
+      int col;
+      if (_desiredColumn >= 0) {
+        col = _desiredColumn;
+      } else {
+        col = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, curLineLen), _state.TextCursorOffset - effectiveStart, decoder);
+        _desiredColumn = col;
+      }
+
       long nextLineStart = lineEnd + NewlineLengthAt(lineEnd);
       long nextLineEnd = FindLineEnd(nextLineStart);
-      _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
+      int nextLen = (int)Math.Min(nextLineEnd - nextLineStart + NewlineLengthAt(nextLineEnd), int.MaxValue);
+      EnsureBuffer(nextLen);
+      doc.Read(nextLineStart, _readBuffer.AsSpan(0, nextLen));
+      int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, nextLen), col, decoder);
+      _state.TextCursorOffset = Math.Min(nextLineStart + byteCol, nextLineEnd);
     }
     OnStateChanged();
   }
@@ -975,31 +1028,74 @@ internal sealed class LeviathanTextView : View
     }
 
     if (cursorRow < 0) {
-      // Cursor not in rendered lines — fall back to hard-line navigation
+      // Cursor not in rendered lines — fall back to hard-line navigation with display columns
       int bom = _state.BomLength;
       int minChar = _state.Decoder.MinCharBytes;
+      ITextDecoder dec = _state.Decoder;
       if (direction < 0) {
         long lineStart = FindLineStart(_state.TextCursorOffset);
         if (lineStart <= bom) return;
+        // Compute display column on current line
+        long lineEnd = FindLineEnd(_state.TextCursorOffset);
+        int curLineLen = (int)Math.Min(lineEnd - lineStart + NewlineLengthAt(lineEnd), int.MaxValue);
+        EnsureBuffer(curLineLen);
+        doc.Read(lineStart, _readBuffer.AsSpan(0, curLineLen));
+        int col;
+        if (_desiredColumn >= 0) {
+          col = _desiredColumn;
+        } else {
+          col = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, curLineLen), _state.TextCursorOffset - lineStart, dec);
+          _desiredColumn = col;
+        }
+
         long prevLineEnd = lineStart - minChar;
         long prevLineStart = FindLineStart(prevLineEnd);
-        long col = _state.TextCursorOffset - lineStart;
-        _state.TextCursorOffset = Math.Min(prevLineStart + col, prevLineEnd);
+        int prevLen = (int)Math.Min(prevLineEnd - prevLineStart + NewlineLengthAt(prevLineEnd), int.MaxValue);
+        EnsureBuffer(prevLen);
+        doc.Read(prevLineStart, _readBuffer.AsSpan(0, prevLen));
+        int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, prevLen), col, dec);
+        _state.TextCursorOffset = Math.Min(prevLineStart + byteCol, prevLineEnd);
       } else {
         long lineEnd = FindLineEnd(_state.TextCursorOffset);
         if (lineEnd >= doc.Length) return;
         long lineStart = FindLineStart(_state.TextCursorOffset);
-        long col = _state.TextCursorOffset - lineStart;
+        long effectiveStart = lineStart < bom ? bom : lineStart;
+        int curLineLen = (int)Math.Min(lineEnd - effectiveStart + NewlineLengthAt(lineEnd), int.MaxValue);
+        EnsureBuffer(curLineLen);
+        doc.Read(effectiveStart, _readBuffer.AsSpan(0, curLineLen));
+        int col;
+        if (_desiredColumn >= 0) {
+          col = _desiredColumn;
+        } else {
+          col = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, curLineLen), _state.TextCursorOffset - effectiveStart, dec);
+          _desiredColumn = col;
+        }
+
         long nextLineStart = lineEnd + NewlineLengthAt(lineEnd);
         long nextLineEnd = FindLineEnd(nextLineStart);
-        _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
+        int nextLen = (int)Math.Min(nextLineEnd - nextLineStart + NewlineLengthAt(nextLineEnd), int.MaxValue);
+        EnsureBuffer(nextLen);
+        doc.Read(nextLineStart, _readBuffer.AsSpan(0, nextLen));
+        int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, nextLen), col, dec);
+        _state.TextCursorOffset = Math.Min(nextLineStart + byteCol, nextLineEnd);
       }
       return;
     }
 
-    // Compute the cursor's byte offset within the current visual line
+    // Compute the cursor's display column within the current visual line
     VisualLine curVl = _visualLines[cursorRow];
-    long colOffset = _state.TextCursorOffset - curVl.DocOffset;
+    ITextDecoder decoder = _state.Decoder;
+    int displayCol;
+    if (_desiredColumn >= 0) {
+      displayCol = _desiredColumn;
+    } else {
+      int lineLen = (int)Math.Min(curVl.ByteLength, int.MaxValue);
+      EnsureBuffer(lineLen);
+      doc.Read(curVl.DocOffset, _readBuffer.AsSpan(0, lineLen));
+      long byteInLine = _state.TextCursorOffset - curVl.DocOffset;
+      displayCol = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, lineLen), byteInLine, decoder);
+      _desiredColumn = displayCol;
+    }
 
     int targetRow = cursorRow + direction;
 
@@ -1007,9 +1103,13 @@ internal sealed class LeviathanTextView : View
       // Need to scroll up — move cursor to previous hard line
       long lineStart = FindLineStart(_state.TextCursorOffset);
       if (lineStart <= _state.BomLength && curVl.DocOffset == lineStart) return;
-      long prevLineEnd = Math.Max(0, lineStart - _state.Decoder.MinCharBytes);
+      long prevLineEnd = Math.Max(0, lineStart - decoder.MinCharBytes);
       long prevLineStart = FindLineStart(prevLineEnd);
-      _state.TextCursorOffset = Math.Min(prevLineStart + colOffset, prevLineEnd);
+      int prevLen = (int)Math.Min(prevLineEnd - prevLineStart + NewlineLengthAt(prevLineEnd), int.MaxValue);
+      EnsureBuffer(prevLen);
+      doc.Read(prevLineStart, _readBuffer.AsSpan(0, prevLen));
+      int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, prevLen), displayCol, decoder);
+      _state.TextCursorOffset = prevLineStart + byteCol;
       return;
     }
 
@@ -1018,15 +1118,24 @@ internal sealed class LeviathanTextView : View
       VisualLine lastVl = _visualLines[_lastRenderedLineCount - 1];
       long afterLast = lastVl.DocOffset + lastVl.ByteLength;
       if (afterLast >= doc.Length) return;
-      _state.TextCursorOffset = Math.Min(afterLast + colOffset, doc.Length);
+      long nextLineEnd = FindLineEnd(afterLast);
+      int nextLen = (int)Math.Min(nextLineEnd - afterLast + NewlineLengthAt(nextLineEnd), int.MaxValue);
+      if (nextLen <= 0) nextLen = decoder.MinCharBytes;
+      EnsureBuffer(nextLen);
+      doc.Read(afterLast, _readBuffer.AsSpan(0, nextLen));
+      int byteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, nextLen), displayCol, decoder);
+      _state.TextCursorOffset = Math.Min(afterLast + byteCol, doc.Length);
       return;
     }
 
-    // Move to the same byte offset within the target visual line
+    // Move to the same display column on the target visual line
     VisualLine targetVl = _visualLines[targetRow];
-    long newOffset = targetVl.DocOffset + Math.Min(colOffset, Math.Max(0, targetVl.ByteLength - _state.Decoder.MinCharBytes));
-    _state.TextCursorOffset = Math.Clamp(newOffset, targetVl.DocOffset,
-        Math.Min(targetVl.DocOffset + targetVl.ByteLength, doc.Length));
+    int tLen = (int)Math.Min(targetVl.ByteLength, int.MaxValue);
+    EnsureBuffer(tLen);
+    doc.Read(targetVl.DocOffset, _readBuffer.AsSpan(0, tLen));
+    int targetByteCol = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, tLen), displayCol, decoder);
+    _state.TextCursorOffset = Math.Clamp(targetVl.DocOffset + targetByteCol,
+        targetVl.DocOffset, Math.Min(targetVl.DocOffset + targetVl.ByteLength, doc.Length));
   }
 
   private long FindLineStart(long offset)
@@ -1480,6 +1589,52 @@ internal sealed class LeviathanTextView : View
         yield return s[i];
       }
     }
+  }
+
+  // ─── Display-column ↔ byte-offset helpers ───
+
+  /// <summary>
+  /// Computes the 0-based display column for a byte offset within a visual line's raw bytes.
+  /// Skips BOM (U+FEFF), expands tabs, counts wide CJK chars as 2 columns.
+  /// <paramref name="byteOffsetInLine"/> is relative to the start of <paramref name="lineBytes"/>.
+  /// </summary>
+  private int ByteOffsetToDisplayColumn(ReadOnlySpan<byte> lineBytes, long byteOffsetInLine, ITextDecoder decoder)
+  {
+    int col = 0;
+    int pos = 0;
+    while (pos < lineBytes.Length && pos < byteOffsetInLine) {
+      (Rune rune, int len) = decoder.DecodeRune(lineBytes, pos);
+      if (len <= 0) { pos++; continue; }
+      int cp = rune.Value;
+      if (cp == '\n' || cp == '\r') break;
+      if (cp == 0xFEFF) { pos += len; continue; } // BOM — zero display width
+      col += Utf8Utils.RuneColumnWidth(rune, _state.TabWidth);
+      pos += len;
+    }
+    return col;
+  }
+
+  /// <summary>
+  /// Converts a 0-based display column to a byte offset within a visual line's raw bytes.
+  /// Returns the byte offset of the character at the target column, or the end of displayable
+  /// content if the line is shorter. <paramref name="lineBytes"/> starts at the visual line's DocOffset.
+  /// </summary>
+  private int DisplayColumnToByteOffset(ReadOnlySpan<byte> lineBytes, int targetColumn, ITextDecoder decoder)
+  {
+    int col = 0;
+    int pos = 0;
+    while (pos < lineBytes.Length) {
+      (Rune rune, int len) = decoder.DecodeRune(lineBytes, pos);
+      if (len <= 0) { pos++; continue; }
+      int cp = rune.Value;
+      if (cp == '\n' || cp == '\r') break;
+      if (cp == 0xFEFF) { pos += len; continue; } // BOM
+      if (col >= targetColumn) return pos;
+      col += Utf8Utils.RuneColumnWidth(rune, _state.TabWidth);
+      pos += len;
+    }
+    // Target column is beyond line content; return end of displayable content
+    return pos;
   }
 
   private void OnStateChanged()
