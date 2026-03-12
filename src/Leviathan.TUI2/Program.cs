@@ -125,7 +125,8 @@ internal sealed class MainWindow : Window
     // ─── Popover overlays ───
     _findBar = new FindBar(state, StartSearch, FindNext, FindPrevious);
     _gotoBar = new GotoBar(state, o => _hexView.GotoOffset(o), l => _textView.GotoLine(l));
-    _palettePopover = new CommandPalettePopover(palette);
+    _palettePopover = new CommandPalettePopover(palette, state,
+        l => _textView.GotoLine(l), o => _hexView.GotoOffset(o));
     Initialized += RegisterPopovers;
 
     // ─── Application-level key bindings ───
@@ -198,7 +199,7 @@ internal sealed class MainWindow : Window
                 _bprItem,
             ]),
             new MenuBarItem("_Navigate", [
-                new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _gotoBar.ShowBar()) { HelpText = "Jump to offset or line" },
+                new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _palettePopover.ShowGoto()) { HelpText = "Jump to offset or line" },
             ]),
             new MenuBarItem("_Search", [
                 new MenuItem("_Find...", Key.F.WithCtrl, () => _findBar.ShowBar()) { HelpText = "Search in file" },
@@ -222,6 +223,9 @@ internal sealed class MainWindow : Window
     KeyDown += (_, e) => {
       if (e == Key.P.WithCtrl) {
         _palettePopover.ShowPalette();
+        e.Handled = true;
+      } else if (e == Key.G.WithCtrl) {
+        _palettePopover.ShowGoto();
         e.Handled = true;
       } else if (e == Key.F6) {
         SwitchView(ViewMode.Text);
@@ -648,7 +652,7 @@ internal sealed class MainWindow : Window
           "", () => SetBytesPerRow(val));
     }
 
-    _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => _gotoBar.ShowBar());
+    _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => _palettePopover.ShowGoto());
     _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => _findBar.ShowBar());
     _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
     _palette.RegisterCommand("Search", "Find Previous", "Shift+F3", () => FindPrevious());

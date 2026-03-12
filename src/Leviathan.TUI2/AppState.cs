@@ -52,6 +52,12 @@ internal sealed class AppState
   public CancellationTokenSource? SearchCts { get; set; }
   public bool IsSearching { get; set; }
 
+  // --- Goto preview state ---
+  /// <summary>Cursor offset before goto preview started (-1 = no preview active).</summary>
+  public long GotoPreviewOrigin { get; set; } = -1;
+  /// <summary>Top offset before goto preview started.</summary>
+  public long GotoPreviewTopOrigin { get; set; }
+
   // --- Settings ---
   public TuiSettings Settings { get; set; } = TuiSettings.Load();
 

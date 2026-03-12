@@ -7,16 +7,19 @@ using Terminal.Gui.Views;
 namespace Leviathan.TUI2.Widgets;
 
 /// <summary>
-/// Non-modal find bar popover (VS Code-style). Stays visible while user navigates results.
-/// F3/Shift+F3 cycle matches; Enter starts a new search; Esc dismisses.
+/// Compact VS Code-style find bar: [text] [Aa] [Hx] 3/15 [◀] [▶] [✕]
+/// Single-row, anchored top-right. Enter searches forward, Esc dismisses.
 /// </summary>
 internal sealed class FindBar : PopoverImpl
 {
   private readonly AppState _state;
   private readonly TextField _queryField;
-  private readonly CheckBox _hexModeCheck;
-  private readonly CheckBox _caseSensitiveCheck;
+  private readonly Button _caseButton;
+  private readonly Button _hexButton;
   private readonly Label _statusLabel;
+  private readonly Button _prevButton;
+  private readonly Button _nextButton;
+  private readonly Button _closeButton;
   private readonly Action<string> _startSearch;
   private readonly Action _findNext;
   private readonly Action _findPrev;
@@ -28,59 +31,109 @@ internal sealed class FindBar : PopoverImpl
     _findNext = findNext;
     _findPrev = findPrev;
 
-    Attribute barNormal = new(new Color(StandardColor.White), new Color(40, 40, 60));
-    Attribute barHot = new(new Color(StandardColor.Yellow), new Color(40, 40, 60));
-    
+    Attribute barBg = new(new Color(StandardColor.White), new Color(40, 40, 60));
 
-    FrameView bar = new() {
-      Title = "Find",
-      X = 0,
+    // Container: single-row bar at top-right
+    View bar = new() {
+      X = Pos.AnchorEnd(72),
       Y = 0,
-      Width = Dim.Fill(),
-      Height = 4,
+      Width = 72,
+      Height = 1,
     };
-
-    Label searchLabel = new() {
-      Text = "Search: ",
-      X = 0,
-      Y = 0,
+    bar.DrawingContent += (_, _) => {
+      bar.SetAttribute(barBg);
+      for (int c = 0; c < 72; c++) {
+        bar.Move(c, 0);
+        bar.AddRune(' ');
+      }
     };
 
     _queryField = new TextField() {
-      X = Pos.Right(searchLabel),
+      X = 0,
       Y = 0,
-      Width = 40,
+      Width = 30,
       Text = state.FindInput ?? "",
     };
 
-    _hexModeCheck = new CheckBox() {
-      Text = "_Hex",
-      X = Pos.Right(_queryField) + 1,
+    _caseButton = new Button() {
+      X = Pos.Right(_queryField),
       Y = 0,
-      Value = state.FindHexMode ? CheckState.Checked : CheckState.UnChecked,
+      Width = 4,
+      Text = "Aa",
+      NoDecorations = true,
+      NoPadding = true,
+      CanFocus = false,
+    };
+    _caseButton.Accepting += (_, _) => {
+      _state.FindCaseSensitive = !_state.FindCaseSensitive;
+      UpdateToggleColors();
+      RerunSearch();
     };
 
-    _caseSensitiveCheck = new CheckBox() {
-      Text = "Match _Case",
-      X = Pos.Right(_hexModeCheck) + 1,
+    _hexButton = new Button() {
+      X = Pos.Right(_caseButton) + 1,
       Y = 0,
-      Value = state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked,
+      Width = 4,
+      Text = "Hx",
+      NoDecorations = true,
+      NoPadding = true,
+      CanFocus = false,
+    };
+    _hexButton.Accepting += (_, _) => {
+      _state.FindHexMode = !_state.FindHexMode;
+      UpdateToggleColors();
+      RerunSearch();
     };
 
     _statusLabel = new Label() {
-      X = Pos.Right(_caseSensitiveCheck) + 2,
+      X = Pos.Right(_hexButton) + 1,
       Y = 0,
-      Width = 30,
+      Width = 12,
       Text = "",
     };
 
-    Label hints = new() {
-      X = 0,
-      Y = 1,
-      Text = "Enter:Search  F3:Next  Shift+F3:Prev  Esc:Close",
+    _prevButton = new Button() {
+      X = Pos.Right(_statusLabel),
+      Y = 0,
+      Width = 3,
+      Text = "◀",
+      NoDecorations = true,
+      NoPadding = true,
+      CanFocus = false,
+    };
+    _prevButton.Accepting += (_, _) => {
+      _findPrev();
+      UpdateStatus();
     };
 
-    bar.Add(searchLabel, _queryField, _hexModeCheck, _caseSensitiveCheck, _statusLabel, hints);
+    _nextButton = new Button() {
+      X = Pos.Right(_prevButton) + 1,
+      Y = 0,
+      Width = 3,
+      Text = "▶",
+      NoDecorations = true,
+      NoPadding = true,
+      CanFocus = false,
+    };
+    _nextButton.Accepting += (_, _) => {
+      _findNext();
+      UpdateStatus();
+    };
+
+    _closeButton = new Button() {
+      X = Pos.Right(_nextButton) + 1,
+      Y = 0,
+      Width = 3,
+      Text = "✕",
+      NoDecorations = true,
+      NoPadding = true,
+      CanFocus = false,
+    };
+    _closeButton.Accepting += (_, _) => {
+      Visible = false;
+    };
+
+    bar.Add(_queryField, _caseButton, _hexButton, _statusLabel, _prevButton, _nextButton, _closeButton);
     Add(bar);
   }
 
@@ -88,8 +141,7 @@ internal sealed class FindBar : PopoverImpl
   internal void ShowBar()
   {
     _queryField.Text = _state.FindInput ?? "";
-    _hexModeCheck.Value = _state.FindHexMode ? CheckState.Checked : CheckState.UnChecked;
-    _caseSensitiveCheck.Value = _state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked;
+    UpdateToggleColors();
     UpdateStatus();
     App?.Popovers?.Show(this);
     _queryField.SetFocus();
@@ -123,14 +175,7 @@ internal sealed class FindBar : PopoverImpl
 
     // Enter → start search with current query
     if (key == Key.Enter) {
-      string query = _queryField.Text?.Trim() ?? "";
-      if (!string.IsNullOrEmpty(query)) {
-        _state.FindInput = query;
-        _state.FindHexMode = _hexModeCheck.Value == CheckState.Checked;
-        _state.FindCaseSensitive = _caseSensitiveCheck.Value == CheckState.Checked;
-        _state.Settings.AddFindHistory(query);
-        _startSearch(query);
-      }
+      RunSearch();
       key.Handled = true;
       return true;
     }
@@ -152,5 +197,32 @@ internal sealed class FindBar : PopoverImpl
     }
 
     return base.OnKeyDown(key);
+  }
+
+  private void RunSearch()
+  {
+    string query = _queryField.Text?.Trim() ?? "";
+    if (string.IsNullOrEmpty(query)) return;
+    _state.FindInput = query;
+    _state.Settings.AddFindHistory(query);
+    _startSearch(query);
+  }
+
+  private void RerunSearch()
+  {
+    string query = _queryField.Text?.Trim() ?? "";
+    if (!string.IsNullOrEmpty(query)) {
+      _state.FindInput = query;
+      _startSearch(query);
+    }
+  }
+
+  private void UpdateToggleColors()
+  {
+    Attribute activeAttr = new(new Color(StandardColor.Black), new Color(208, 135, 46));
+    Attribute inactiveAttr = new(new Color(StandardColor.White), new Color(60, 60, 80));
+
+    _caseButton.SetAttribute(_state.FindCaseSensitive ? activeAttr : inactiveAttr);
+    _hexButton.SetAttribute(_state.FindHexMode ? activeAttr : inactiveAttr);
   }
 }
