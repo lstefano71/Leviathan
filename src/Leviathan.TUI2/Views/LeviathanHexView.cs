@@ -198,6 +198,8 @@ internal sealed class LeviathanHexView : View
     Attribute nonPrintableAttr = new(new Color(StandardColor.DarkGray), new Color(StandardColor.Black));
     Attribute separatorAttr = new(new Color(StandardColor.DarkGray), new Color(StandardColor.Black));
 
+    Span<char> addrChars = stackalloc char[9];
+
     for (int row = 0; row < vpHeight; row++) {
       long rowOffset = _state.HexBaseOffset + (long)row * bpr;
       Move(0, row);
@@ -216,7 +218,6 @@ internal sealed class LeviathanHexView : View
 
       // Address column
       SetAttribute(addressAttr);
-      Span<char> addrChars = stackalloc char[9];
       FormatAddress(rowOffset, addrChars);
       foreach (char ac in addrChars)
         AddRune(ac);

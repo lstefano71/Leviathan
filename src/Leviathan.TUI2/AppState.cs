@@ -35,13 +35,17 @@ internal sealed class AppState
   public int TabWidth { get; set; } = 4;
   public long EstimatedTotalLines { get; set; }
 
+  // --- BOM ---
+  /// <summary>Length of the BOM prefix in the current file (0 when none).</summary>
+  public int BomLength { get; set; }
+
   // --- Scroll ---
   public int VisibleRows { get; set; } = 24;
 
   // --- Find state ---
   public string FindInput { get; set; } = "";
   public bool FindHexMode { get; set; }
-  public bool FindCaseSensitive { get; set; } = true;
+  public bool FindCaseSensitive { get; set; }
   public List<SearchResult> SearchResults { get; } = [];
   public int CurrentMatchIndex { get; set; } = -1;
   public string SearchStatus { get; set; } = "";
@@ -99,15 +103,16 @@ internal sealed class AppState
     int sampleSize = (int)Math.Min(8192, Document.Length);
     Span<byte> sample = stackalloc byte[sampleSize];
     Document.Read(0, sample);
-    (TextEncoding encoding, _) = EncodingDetector.Detect(sample);
+    (TextEncoding encoding, int bomLength) = EncodingDetector.Detect(sample);
     Decoder = CreateDecoder(encoding);
+    BomLength = bomLength;
 
     HexBaseOffset = 0;
     HexCursorOffset = 0;
     HexSelectionAnchor = -1;
     NibbleLow = false;
     TextTopOffset = 0;
-    TextCursorOffset = 0;
+    TextCursorOffset = bomLength;
     TextSelectionAnchor = -1;
     EstimatedTotalLines = Math.Max(1, Document.Length / 80);
     SearchResults.Clear();

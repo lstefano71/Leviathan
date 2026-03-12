@@ -48,7 +48,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
     };
 
     // Update filtering as user types
-    _queryField.KeyUp += (_, _) => {
+    _queryField.TextChanged += (_, _) => {
       string newQuery = _queryField.Text?.ToString() ?? "";
       if (newQuery != _palette.Query) {
         _palette.Query = newQuery;
@@ -66,7 +66,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
     _palette.Reset();
     _queryField.Text = "";
     UpdateList();
-    App?.Popovers.Show(this);
+    App?.Popovers?.Show(this);
     _queryField.SetFocus();
   }
 

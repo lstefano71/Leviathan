@@ -5,6 +5,8 @@ using Leviathan.TUI2.Views;
 using Leviathan.TUI2.Widgets;
 
 using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
+using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -25,7 +27,9 @@ if (args.Length > 0 && File.Exists(args[0]))
 
 // ─── Terminal.Gui lifecycle ───
 using IApplication app = Application.Create();
+#pragma warning disable IL2026, IL3050 // Terminal.Gui's Init uses reflection internally; assembly is trimmer-rooted
 app.Init();
+#pragma warning restore IL2026, IL3050
 
 using MainWindow mainWindow = new(app, state, hexView, textView, palette);
 app.Run(mainWindow);
@@ -49,6 +53,12 @@ internal sealed class MainWindow : Window
   private readonly FindBar _findBar;
   private readonly GotoBar _gotoBar;
   private readonly CommandPalettePopover _palettePopover;
+  private readonly View _welcomeView;
+  private MenuItem? _wordWrapItem;
+  private MenuItem? _encodingUtf8Item;
+  private MenuItem? _encodingUtf16LeItem;
+  private MenuItem? _encodingWin1252Item;
+  private readonly List<(int Value, MenuItem Item)> _bprItems = [];
 
   internal MainWindow(
       IApplication app,
@@ -64,6 +74,7 @@ internal sealed class MainWindow : Window
     _palette = palette;
 
     Title = "Leviathan — Large File Editor";
+    BorderStyle = LineStyle.None;
 
     // ─── Menu bar ───
     MenuBar menuBar = BuildMenuBar();
@@ -89,7 +100,16 @@ internal sealed class MainWindow : Window
         new Shortcut(Key.S.WithCtrl, "Save", null),
     ]);
 
-    Add(menuBar, _hexView, _textView, _statusBar);
+    // ─── Welcome view ───
+    _welcomeView = BuildWelcomeView(menuBar);
+
+    Add(menuBar, _welcomeView, _hexView, _textView, _statusBar);
+
+    // Show welcome if no file is open
+    bool hasFile = state.Document is not null;
+    _welcomeView.Visible = !hasFile;
+    _hexView.Visible = hasFile && state.ActiveView == ViewMode.Hex;
+    _textView.Visible = hasFile && state.ActiveView == ViewMode.Text;
 
     // Wire state-changed events to update status bar
     _hexView.StateChanged += UpdateStatusBar;
@@ -112,40 +132,64 @@ internal sealed class MainWindow : Window
   private void RegisterPopovers(object? sender, EventArgs args)
   {
     Initialized -= RegisterPopovers;
-    _app.Popovers.Register(_findBar);
-    _app.Popovers.Register(_gotoBar);
-    _app.Popovers.Register(_palettePopover);
+    _app.Popovers?.Register(_findBar);
+    _app.Popovers?.Register(_gotoBar);
+    _app.Popovers?.Register(_palettePopover);
   }
 
   private MenuBar BuildMenuBar()
   {
+    _wordWrapItem = new MenuItem(
+        _state.WordWrap ? "✓ _Word Wrap" : "  _Word Wrap",
+        "Toggle word wrap", () => ToggleWordWrap());
+
+    _encodingUtf8Item = new MenuItem(
+        _state.Decoder.Encoding == TextEncoding.Utf8 ? "● _UTF-8" : "  _UTF-8",
+        "", () => SwitchEncoding(TextEncoding.Utf8));
+    _encodingUtf16LeItem = new MenuItem(
+        _state.Decoder.Encoding == TextEncoding.Utf16Le ? "● UTF-_16 LE" : "  UTF-_16 LE",
+        "", () => SwitchEncoding(TextEncoding.Utf16Le));
+    _encodingWin1252Item = new MenuItem(
+        _state.Decoder.Encoding == TextEncoding.Windows1252 ? "● _Windows-1252" : "  _Windows-1252",
+        "", () => SwitchEncoding(TextEncoding.Windows1252));
+
+    // Bytes per row radio items
+    List<MenuItem> bprMenuItems = [];
+    foreach (int bpr in new[] { 0, 8, 16, 24, 32, 48, 64 }) {
+      int val = bpr;
+      string baseLabel = bpr == 0 ? "_Auto" : $"_{bpr}";
+      string prefix = _state.BytesPerRowSetting == bpr ? "● " : "  ";
+      MenuItem item = new(prefix + baseLabel, "", () => SetBytesPerRow(val));
+      _bprItems.Add((bpr, item));
+      bprMenuItems.Add(item);
+    }
+
     return new MenuBar([
         new MenuBarItem("_File", [
-                new MenuItem("_Open...", "Open a file", () => ShowOpenDialog(), Key.O.WithCtrl),
-                new MenuItem("_Save", "Save the file", () => SaveFile(), Key.S.WithCtrl),
+                new MenuItem("_Open...", Key.O.WithCtrl, () => ShowOpenDialog()) { HelpText = "Open a file" },
+                new MenuItem("_Save", Key.S.WithCtrl, () => SaveFile()) { HelpText = "Save the file" },
                 new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
-                new MenuItem("_Quit", "Exit Leviathan", () => GuardUnsavedChanges(() => _app.RequestStop()), Key.Q.WithCtrl),
+                new MenuItem("_Quit", Key.Q.WithCtrl, () => GuardUnsavedChanges(() => _app.RequestStop())) { HelpText = "Exit Leviathan" },
             ]),
             new MenuBarItem("_View", [
-                new MenuItem("_Hex View", "Switch to hex view", () => SwitchView(ViewMode.Hex), Key.F5),
-                new MenuItem("_Text View", "Switch to text view", () => SwitchView(ViewMode.Text), Key.F6),
-                new MenuItem("_Word Wrap", "Toggle word wrap", () => ToggleWordWrap()),
-                new MenuItem("Encoding: _UTF-8", null, () => SwitchEncoding(TextEncoding.Utf8)),
-                new MenuItem("Encoding: UTF-_16 LE", null, () => SwitchEncoding(TextEncoding.Utf16Le)),
-                new MenuItem("Encoding: _Windows-1252", null, () => SwitchEncoding(TextEncoding.Windows1252)),
+                new MenuItem("_Hex View", Key.F5, () => SwitchView(ViewMode.Hex)) { HelpText = "Switch to hex view" },
+                new MenuItem("_Text View", Key.F6, () => SwitchView(ViewMode.Text)) { HelpText = "Switch to text view" },
+                _wordWrapItem,
+                new MenuBarItem("_Encoding", [_encodingUtf8Item, _encodingUtf16LeItem, _encodingWin1252Item]),
+                new MenuBarItem("_Bytes/Row", [.. bprMenuItems]),
             ]),
             new MenuBarItem("_Navigate", [
-                new MenuItem("_Go to Offset/Line...", "Jump to offset or line", () => _gotoBar.ShowBar(), Key.G.WithCtrl),
+                new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _gotoBar.ShowBar()) { HelpText = "Jump to offset or line" },
             ]),
             new MenuBarItem("_Search", [
-                new MenuItem("_Find...", "Search in file", () => _findBar.ShowBar(), Key.F.WithCtrl),
-                new MenuItem("Find _Next", "Go to next match", () => FindNext(), Key.F3),
-                new MenuItem("Find _Previous", "Go to previous match", () => FindPrevious(), Key.F3.WithShift),
+                new MenuItem("_Find...", Key.F.WithCtrl, () => _findBar.ShowBar()) { HelpText = "Search in file" },
+                new MenuItem("Find _Next", Key.F3, () => FindNext()) { HelpText = "Go to next match" },
+                new MenuItem("Find _Previous", Key.F3.WithShift, () => FindPrevious()) { HelpText = "Go to previous match" },
             ]),
             new MenuBarItem("_Edit", [
-                new MenuItem("_Copy", "Copy selection", () => DoCopy(), Key.C.WithCtrl),
-                new MenuItem("_Paste", "Paste from clipboard", () => DoPaste(), Key.V.WithCtrl),
-                new MenuItem("Select _All", "Select entire file", () => DoSelectAll(), Key.A.WithCtrl),
+                new MenuItem("_Copy", Key.C.WithCtrl, () => DoCopy()) { HelpText = "Copy selection" },
+                new MenuItem("_Paste", Key.V.WithCtrl, () => DoPaste()) { HelpText = "Paste from clipboard" },
+                new MenuItem("Select _All", Key.A.WithCtrl, () => DoSelectAll()) { HelpText = "Select entire file" },
             ]),
         ]);
   }
@@ -164,6 +208,24 @@ internal sealed class MainWindow : Window
         SwitchView(ViewMode.Text);
         e.Handled = true;
       }
+
+      // MRU digit keys (1-9) when welcome screen is visible
+      if (_welcomeView.Visible && !e.Handled) {
+        int digit = e.KeyCode switch {
+          KeyCode.D1 => 0, KeyCode.D2 => 1, KeyCode.D3 => 2,
+          KeyCode.D4 => 3, KeyCode.D5 => 4, KeyCode.D6 => 5,
+          KeyCode.D7 => 6, KeyCode.D8 => 7, KeyCode.D9 => 8,
+          _ => -1
+        };
+        if (digit >= 0 && digit < _state.Settings.RecentFiles.Count) {
+          string path = _state.Settings.RecentFiles[digit];
+          if (File.Exists(path)) {
+            _state.OpenFile(path);
+            ShowFileViews();
+          }
+          e.Handled = true;
+        }
+      }
     };
   }
 
@@ -172,6 +234,7 @@ internal sealed class MainWindow : Window
   private void SwitchView(ViewMode mode)
   {
     _state.ActiveView = mode;
+    _welcomeView.Visible = false;
     _hexView.Visible = mode == ViewMode.Hex;
     _textView.Visible = mode == ViewMode.Text;
 
@@ -184,6 +247,18 @@ internal sealed class MainWindow : Window
     UpdateTitle();
   }
 
+  /// <summary>Hides the welcome screen and shows the file views.</summary>
+  private void ShowFileViews()
+  {
+    _welcomeView.Visible = false;
+    _hexView.Visible = _state.ActiveView == ViewMode.Hex;
+    _textView.Visible = _state.ActiveView == ViewMode.Text;
+    UpdateTitle();
+    UpdateStatusBar();
+    _hexView.SetNeedsDraw();
+    _textView.SetNeedsDraw();
+  }
+
   // ─── File operations ───
 
   private void ShowOpenDialog()
@@ -192,6 +267,8 @@ internal sealed class MainWindow : Window
       OpenDialog openDlg = new() {
         Title = "Open File",
         OpenMode = OpenMode.File,
+        Width = Dim.Percent(85),
+        Height = Dim.Percent(80),
       };
       _app.Run(openDlg);
 
@@ -199,10 +276,7 @@ internal sealed class MainWindow : Window
         string path = openDlg.FilePaths[0];
         if (File.Exists(path)) {
           _state.OpenFile(path);
-          UpdateTitle();
-          UpdateStatusBar();
-          _hexView.SetNeedsDraw();
-          _textView.SetNeedsDraw();
+          ShowFileViews();
         }
       }
       openDlg.Dispose();
@@ -230,6 +304,8 @@ internal sealed class MainWindow : Window
 
     SaveDialog saveDlg = new() {
       Title = "Save As",
+      Width = Dim.Percent(85),
+      Height = Dim.Percent(80),
     };
     _app.Run(saveDlg);
 
@@ -307,7 +383,8 @@ internal sealed class MainWindow : Window
     Task.Run(() => {
       try {
         List<SearchResult> results = [];
-        foreach (SearchResult r in SearchEngine.FindAll(_state.Document, pattern)) {
+        bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
+        foreach (SearchResult r in SearchEngine.FindAll(_state.Document, pattern, caseSensitive)) {
           if (cts.Token.IsCancellationRequested) break;
           results.Add(r);
         }
@@ -330,7 +407,7 @@ internal sealed class MainWindow : Window
       }
 
       // Schedule UI update on main thread
-      Application.Invoke(() => {
+      _app.Invoke(() => {
         UpdateStatusBar();
         _findBar.UpdateStatus();
         _hexView.SetNeedsDraw();
@@ -376,12 +453,12 @@ internal sealed class MainWindow : Window
         : _textView.CopySelection();
 
     if (text is not null)
-      Clipboard.TrySetClipboardData(text);
+      _app.Clipboard?.TrySetClipboardData(text);
   }
 
   private void DoPaste()
   {
-    if (Clipboard.TryGetClipboardData(out string? text) && text is not null) {
+    if (_app.Clipboard is { } clipboard && clipboard.TryGetClipboardData(out string? text) && text is not null) {
       if (_state.ActiveView == ViewMode.Hex)
         _hexView.Paste(text);
       else
@@ -404,6 +481,8 @@ internal sealed class MainWindow : Window
     _state.WordWrap = !_state.WordWrap;
     _state.Settings.WordWrap = _state.WordWrap;
     _state.Settings.Save();
+    if (_wordWrapItem is not null)
+      _wordWrapItem.Title = _state.WordWrap ? "✓ _Word Wrap" : "  _Word Wrap";
     _textView.SetNeedsDraw();
     UpdateStatusBar();
   }
@@ -413,9 +492,97 @@ internal sealed class MainWindow : Window
   private void SwitchEncoding(TextEncoding encoding)
   {
     _state.SwitchEncoding(encoding);
+    // Update radio states via title prefix
+    if (_encodingUtf8Item is not null)
+      _encodingUtf8Item.Title = encoding == TextEncoding.Utf8 ? "● _UTF-8" : "  _UTF-8";
+    if (_encodingUtf16LeItem is not null)
+      _encodingUtf16LeItem.Title = encoding == TextEncoding.Utf16Le ? "● UTF-_16 LE" : "  UTF-_16 LE";
+    if (_encodingWin1252Item is not null)
+      _encodingWin1252Item.Title = encoding == TextEncoding.Windows1252 ? "● _Windows-1252" : "  _Windows-1252";
     _hexView.SetNeedsDraw();
     _textView.SetNeedsDraw();
     UpdateStatusBar();
+  }
+
+  // ─── Bytes per row ───
+
+  private void SetBytesPerRow(int value)
+  {
+    _state.BytesPerRowSetting = value;
+    _state.Settings.BytesPerRow = value;
+    _state.Settings.Save();
+    // Update radio states via title prefix
+    foreach ((int bpr, MenuItem item) in _bprItems) {
+      string baseLabel = bpr == 0 ? "_Auto" : $"_{bpr}";
+      item.Title = (bpr == value ? "● " : "  ") + baseLabel;
+    }
+    _hexView.SetNeedsDraw();
+    UpdateStatusBar();
+  }
+
+  // ─── Welcome view ───
+
+  private View BuildWelcomeView(MenuBar menuBar)
+  {
+    View view = new() {
+      X = 0,
+      Y = Pos.Bottom(menuBar),
+      Width = Dim.Fill(),
+      Height = Dim.Fill(1),
+      CanFocus = true,
+    };
+
+    view.Initialized += (_, _) => {
+      view.SetNeedsDraw();
+    };
+
+    view.DrawingContent += (_, _) => {
+      view.SetAttributeForRole(VisualRole.Normal);
+      int vpW = view.Viewport.Width;
+      int vpH = view.Viewport.Height;
+
+      // Clear
+      for (int row = 0; row < vpH; row++) {
+        view.Move(0, row);
+        for (int c = 0; c < vpW; c++)
+          view.AddRune(' ');
+      }
+
+      int y = 2;
+      Attribute titleAttr = new(new Color(208, 135, 46), new Color(StandardColor.Black));
+      Attribute normalAttr = new(new Color(StandardColor.White), new Color(StandardColor.Black));
+      Attribute hintAttr = new(new Color(100, 130, 160), new Color(StandardColor.Black));
+      Attribute mruAttr = new(new Color(StandardColor.Yellow), new Color(StandardColor.Black));
+
+      void DrawCentered(string text, Attribute attr)
+      {
+        int x = Math.Max(0, (vpW - text.Length) / 2);
+        view.Move(x, y);
+        view.SetAttribute(attr);
+        foreach (char c in text)
+          view.AddRune(c);
+        y++;
+      }
+
+      DrawCentered("Leviathan", titleAttr);
+      DrawCentered("Large File Editor", titleAttr);
+      y++;
+      DrawCentered("Ctrl+O  Open file", hintAttr);
+      DrawCentered("Ctrl+P  Command palette", hintAttr);
+      y++;
+
+      List<string> recent = _state.Settings.RecentFiles;
+      if (recent.Count > 0) {
+        DrawCentered("Recent files:", normalAttr);
+        y++;
+        for (int i = 0; i < Math.Min(9, recent.Count); i++) {
+          string entry = $"  [{i + 1}]  {recent[i]}";
+          DrawCentered(entry, mruAttr);
+        }
+      }
+    };
+
+    return view;
   }
 
   // ─── Command palette ───
@@ -429,6 +596,11 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
     _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
     _palette.RegisterCommand("View", "Toggle Word Wrap", "", () => ToggleWordWrap());
+    _palette.RegisterCommand("View", "Auto Column Width", "", () => SetBytesPerRow(0));
+    foreach (int bpr in new[] { 8, 16, 24, 32, 48, 64 }) {
+      int val = bpr;
+      _palette.RegisterCommand("View", $"{bpr} Bytes/Row", "", () => SetBytesPerRow(val));
+    }
     _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => _gotoBar.ShowBar());
     _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => _findBar.ShowBar());
     _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
@@ -439,6 +611,13 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("Encoding", "UTF-8", "", () => SwitchEncoding(TextEncoding.Utf8));
     _palette.RegisterCommand("Encoding", "UTF-16 LE", "", () => SwitchEncoding(TextEncoding.Utf16Le));
     _palette.RegisterCommand("Encoding", "Windows-1252", "", () => SwitchEncoding(TextEncoding.Windows1252));
+
+    // MRU entries in the command palette
+    foreach (string recent in _state.Settings.RecentFiles) {
+      string path = recent;
+      _palette.RegisterCommand("File", $"Open: {Path.GetFileName(path)}", "", 
+          () => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); }));
+    }
   }
 
   // ─── Status bar & title ───

@@ -15,6 +15,7 @@ internal sealed class FindBar : PopoverImpl
   private readonly AppState _state;
   private readonly TextField _queryField;
   private readonly CheckBox _hexModeCheck;
+  private readonly CheckBox _caseSensitiveCheck;
   private readonly Label _statusLabel;
   private readonly Action<string> _startSearch;
   private readonly Action _findNext;
@@ -59,8 +60,15 @@ internal sealed class FindBar : PopoverImpl
       Value = state.FindHexMode ? CheckState.Checked : CheckState.UnChecked,
     };
 
+    _caseSensitiveCheck = new CheckBox() {
+      Text = "Match _Case",
+      X = Pos.Right(_hexModeCheck) + 1,
+      Y = 0,
+      Value = state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked,
+    };
+
     _statusLabel = new Label() {
-      X = Pos.Right(_hexModeCheck) + 2,
+      X = Pos.Right(_caseSensitiveCheck) + 2,
       Y = 0,
       Width = 30,
       Text = "",
@@ -72,7 +80,7 @@ internal sealed class FindBar : PopoverImpl
       Text = "Enter:Search  F3:Next  Shift+F3:Prev  Esc:Close",
     };
 
-    bar.Add(searchLabel, _queryField, _hexModeCheck, _statusLabel, hints);
+    bar.Add(searchLabel, _queryField, _hexModeCheck, _caseSensitiveCheck, _statusLabel, hints);
     Add(bar);
   }
 
@@ -81,8 +89,9 @@ internal sealed class FindBar : PopoverImpl
   {
     _queryField.Text = _state.FindInput ?? "";
     _hexModeCheck.Value = _state.FindHexMode ? CheckState.Checked : CheckState.UnChecked;
+    _caseSensitiveCheck.Value = _state.FindCaseSensitive ? CheckState.Checked : CheckState.UnChecked;
     UpdateStatus();
-    App?.Popovers.Show(this);
+    App?.Popovers?.Show(this);
     _queryField.SetFocus();
   }
 
@@ -118,6 +127,7 @@ internal sealed class FindBar : PopoverImpl
       if (!string.IsNullOrEmpty(query)) {
         _state.FindInput = query;
         _state.FindHexMode = _hexModeCheck.Value == CheckState.Checked;
+        _state.FindCaseSensitive = _caseSensitiveCheck.Value == CheckState.Checked;
         _state.Settings.AddFindHistory(query);
         _startSearch(query);
       }

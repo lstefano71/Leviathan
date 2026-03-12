@@ -64,7 +64,7 @@ internal sealed class GotoBar : PopoverImpl
         ? "Offset (hex e.g. 0x1A3F): "
         : "Line: ";
     _inputField.Text = "";
-    App?.Popovers.Show(this);
+    App?.Popovers?.Show(this);
     _inputField.SetFocus();
   }
 

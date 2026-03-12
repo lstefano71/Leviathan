@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace Leviathan.Core.Search;
 
@@ -17,7 +18,7 @@ public static class SearchEngine
   /// Yields all occurrences of <paramref name="pattern"/> in <paramref name="doc"/>.
   /// The search is synchronous; wrap in <c>Task.Run</c> for background execution.
   /// </summary>
-  public static IEnumerable<SearchResult> FindAll(Document doc, byte[] pattern)
+  public static IEnumerable<SearchResult> FindAll(Document doc, byte[] pattern, bool caseSensitive = true)
   {
     if (pattern.Length == 0 || doc.Length == 0) yield break;
     if (pattern.Length > doc.Length) yield break;
@@ -25,7 +26,11 @@ public static class SearchEngine
     int pLen = pattern.Length;
     int overlap = pLen - 1; // bytes carried over from the previous chunk
 
-    int[] badChar = BuildBadCharTable(pattern);
+    // For case-insensitive search, fold the pattern to lowercase
+    byte[] effectivePattern = caseSensitive ? pattern : FoldToLower(pattern);
+    int[] badChar = caseSensitive
+        ? BuildBadCharTable(effectivePattern)
+        : BuildBadCharTableCaseInsensitive(effectivePattern);
 
     // Buffer layout per chunk: [overlap from prev][ChunkSize new bytes]
     byte[] buffer = ArrayPool<byte>.Shared.Rent(ChunkSize + overlap);
@@ -51,7 +56,10 @@ public static class SearchEngine
 
         while (i <= end) {
           int j = pLen - 1;
-          while (j >= 0 && buffer[i + j] == pattern[j]) j--;
+          while (j >= 0 && (caseSensitive
+              ? buffer[i + j] == effectivePattern[j]
+              : ToLowerAscii(buffer[i + j]) == effectivePattern[j]))
+            j--;
 
           if (j < 0) {
             // Full match at buffer[i]
@@ -60,7 +68,8 @@ public static class SearchEngine
               yield return new SearchResult(matchOffset, pLen);
             i++;
           } else {
-            int skip = badChar[buffer[i + pLen - 1]];
+            byte b = caseSensitive ? buffer[i + pLen - 1] : ToLowerAscii(buffer[i + pLen - 1]);
+            int skip = badChar[b];
             i += skip > 0 ? skip : 1;
           }
         }
@@ -155,5 +164,41 @@ public static class SearchEngine
       table[pattern[i]] = pLen - 1 - i;
 
     return table;
+  }
+
+  /// <summary>
+  /// Case-insensitive bad-character table. Builds entries for both upper and lower
+  /// ASCII variants so that the skip table works correctly with folded lookups.
+  /// </summary>
+  private static int[] BuildBadCharTableCaseInsensitive(byte[] lowerPattern)
+  {
+    int pLen = lowerPattern.Length;
+    int[] table = new int[256];
+
+    for (int i = 0; i < 256; i++)
+      table[i] = pLen;
+
+    for (int i = 0; i < pLen - 1; i++) {
+      byte b = lowerPattern[i];
+      table[b] = pLen - 1 - i;
+      // Also set for the uppercase variant
+      if (b >= 0x61 && b <= 0x7A)
+        table[b - 0x20] = pLen - 1 - i;
+    }
+
+    return table;
+  }
+
+  /// <summary>Folds ASCII uppercase to lowercase.</summary>
+  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+  private static byte ToLowerAscii(byte b) => b >= 0x41 && b <= 0x5A ? (byte)(b + 0x20) : b;
+
+  /// <summary>Returns a copy of the pattern with ASCII bytes folded to lowercase.</summary>
+  private static byte[] FoldToLower(byte[] pattern)
+  {
+    byte[] result = new byte[pattern.Length];
+    for (int i = 0; i < pattern.Length; i++)
+      result[i] = ToLowerAscii(pattern[i]);
+    return result;
   }
 }

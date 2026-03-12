@@ -9,6 +9,7 @@ using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace Leviathan.TUI2.Views;
 
@@ -26,6 +27,7 @@ internal sealed class LeviathanTextView : View
   private long _cachedTopOffset;
   private long _cachedTopLineNumber = 1;
   private int _lastRenderedLineCount;
+  private readonly ScrollBar _verticalScrollBar;
 
   private const int GutterWidth = 9; // "  12345 │"
 
@@ -39,6 +41,25 @@ internal sealed class LeviathanTextView : View
     _state = state;
     CanFocus = true;
     ContentSizeTracksViewport = false;
+
+    // Vertical scrollbar
+    _verticalScrollBar = new ScrollBar() {
+      Orientation = Orientation.Vertical,
+      X = Pos.AnchorEnd(1),
+      Y = 0,
+      Width = 1,
+      Height = Dim.Fill(),
+      VisibilityMode = ScrollBarVisibilityMode.Always,
+    };
+    _verticalScrollBar.ValueChanged += (_, e) => {
+      if (_state.Document is null) return;
+      long totalLines = Math.Max(1, _state.EstimatedTotalLines);
+      long newOffset = (long)((double)e.NewValue / Math.Max(1, totalLines) * _state.Document.Length);
+      newOffset = Math.Clamp(newOffset, 0, _state.Document.Length);
+      _state.TextTopOffset = FindLineStart(newOffset);
+      SetNeedsDraw();
+    };
+    Add(_verticalScrollBar);
 
     SetupCommands();
     SetupKeyBindings();
@@ -307,6 +328,9 @@ internal sealed class LeviathanTextView : View
     for (int i = rowsToDraw; i < vpHeight; i++)
       DrawEmptyLine(i, vpWidth);
 
+    // Update vertical scrollbar
+    UpdateScrollBar(vpHeight);
+
     return true;
   }
 
@@ -373,6 +397,12 @@ internal sealed class LeviathanTextView : View
     }
     int stepBack = lookBack - lastRuneStart;
     _state.TextCursorOffset -= stepBack;
+
+    // Skip over newline characters so the cursor lands on visible content.
+    // Handles \n and \r\n: after stepping back onto \n, skip back over it
+    // (and over a preceding \r if present).
+    SkipNewlinesBackward(doc);
+
     OnStateChanged();
   }
 
@@ -389,10 +419,65 @@ internal sealed class LeviathanTextView : View
     int read = doc.Read(_state.TextCursorOffset, next);
     if (read == 0) return;
 
-    (_, int len) = _state.Decoder.DecodeRune(next[..read], 0);
+    ITextDecoder decoder = _state.Decoder;
+    (Rune rune, int len) = decoder.DecodeRune(next[..read], 0);
     if (len <= 0) len = 1;
     _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + len, doc.Length);
+
+    // Skip over newline characters so the cursor lands on the start of the next line.
+    // Handles \r\n: if we just advanced past \r, also skip the following \n.
+    SkipNewlinesForward(doc);
+
     OnStateChanged();
+  }
+
+  /// <summary>Skips past \n and \r\n sequences when moving forward.</summary>
+  private void SkipNewlinesForward(Document doc)
+  {
+    while (_state.TextCursorOffset < doc.Length) {
+      Span<byte> peek = stackalloc byte[4];
+      int peekRead = doc.Read(_state.TextCursorOffset, peek);
+      if (peekRead == 0) break;
+      (Rune r, int rLen) = _state.Decoder.DecodeRune(peek[..peekRead], 0);
+      if (rLen <= 0) break;
+      if (r.Value == '\n' || r.Value == '\r') {
+        _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + rLen, doc.Length);
+      } else {
+        break;
+      }
+    }
+  }
+
+  /// <summary>Skips back over \n and \r when moving backward.</summary>
+  private void SkipNewlinesBackward(Document doc)
+  {
+    while (_state.TextCursorOffset > 0) {
+      int lookBack = (int)Math.Min(4, _state.TextCursorOffset);
+      Span<byte> prev = stackalloc byte[lookBack];
+      doc.Read(_state.TextCursorOffset - lookBack, prev);
+
+      ITextDecoder decoder = _state.Decoder;
+      int pos = 0;
+      int lastRuneStart = 0;
+      while (pos < lookBack) {
+        lastRuneStart = pos;
+        (_, int l) = decoder.DecodeRune(prev, pos);
+        if (l <= 0) { pos++; continue; }
+        pos += l;
+      }
+
+      int prevRuneOffset = lookBack - lastRuneStart;
+      Span<byte> check = stackalloc byte[4];
+      int checkRead = doc.Read(_state.TextCursorOffset - prevRuneOffset, check);
+      if (checkRead == 0) break;
+      (Rune r, int rLen) = decoder.DecodeRune(check[..checkRead], 0);
+      if (rLen <= 0) break;
+      if (r.Value == '\n' || r.Value == '\r') {
+        _state.TextCursorOffset -= prevRuneOffset;
+      } else {
+        break;
+      }
+    }
   }
 
   internal void MoveCursorUp(bool extend) => MoveVertical(-1, extend);
@@ -447,7 +532,11 @@ internal sealed class LeviathanTextView : View
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
-    _state.TextCursorOffset = FindLineStart(_state.TextCursorOffset);
+    long lineStart = FindLineStart(_state.TextCursorOffset);
+    // On line 1, Home stops at BOM boundary, not byte 0
+    if (lineStart < _state.BomLength)
+      lineStart = _state.BomLength;
+    _state.TextCursorOffset = lineStart;
     OnStateChanged();
   }
 
@@ -467,7 +556,7 @@ internal sealed class LeviathanTextView : View
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
-    _state.TextCursorOffset = 0;
+    _state.TextCursorOffset = _state.BomLength;
     OnStateChanged();
   }
 
@@ -723,18 +812,26 @@ internal sealed class LeviathanTextView : View
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
 
+    int bom = _state.BomLength;
+
     if (direction < 0) {
       long lineStart = FindLineStart(_state.TextCursorOffset);
-      if (lineStart == 0) return;
+      if (lineStart == 0 && _state.TextCursorOffset <= bom) return;
+      if (lineStart == 0) lineStart = bom; // effective start on line 1
+
       long prevLineEnd = lineStart - 1;
       long prevLineStart = FindLineStart(prevLineEnd);
-      long col = _state.TextCursorOffset - lineStart;
-      _state.TextCursorOffset = Math.Min(prevLineStart + col, prevLineEnd);
+      // Effective start accounts for BOM on line 1
+      long effectivePrevStart = prevLineStart < bom ? bom : prevLineStart;
+
+      long col = _state.TextCursorOffset - (FindLineStart(_state.TextCursorOffset) < bom ? bom : FindLineStart(_state.TextCursorOffset));
+      _state.TextCursorOffset = Math.Min(effectivePrevStart + col, prevLineEnd);
     } else {
       long lineEnd = FindLineEnd(_state.TextCursorOffset);
       if (lineEnd >= doc.Length) return;
       long lineStart = FindLineStart(_state.TextCursorOffset);
-      long col = _state.TextCursorOffset - lineStart;
+      long effectiveStart = lineStart < bom ? bom : lineStart;
+      long col = _state.TextCursorOffset - effectiveStart;
       long nextLineStart = lineEnd + _state.Decoder.MinCharBytes;
       long nextLineEnd = FindLineEnd(nextLineStart);
       _state.TextCursorOffset = Math.Min(nextLineStart + col, nextLineEnd);
@@ -953,6 +1050,11 @@ internal sealed class LeviathanTextView : View
         pos += len;
         continue;
       }
+      // Skip BOM character (U+FEFF) — invisible zero-width no-break space
+      if (codePoint == 0xFEFF) {
+        pos += len;
+        continue;
+      }
       if (codePoint == '\t') {
         for (int i = 0; i < tabWidth; i++) {
           sb.Append(' ');
@@ -1000,6 +1102,21 @@ internal sealed class LeviathanTextView : View
   {
     SetNeedsDraw();
     StateChanged?.Invoke();
+  }
+
+  private void UpdateScrollBar(int vpHeight)
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return;
+
+    long totalLines = Math.Max(1, _state.EstimatedTotalLines);
+    int scrollTotal = (int)Math.Min(totalLines, int.MaxValue - 1);
+    double fraction = doc.Length > 0 ? (double)_state.TextTopOffset / doc.Length : 0;
+    int scrollPos = (int)(fraction * scrollTotal);
+
+    _verticalScrollBar.ScrollableContentSize = scrollTotal;
+    _verticalScrollBar.VisibleContentSize = vpHeight;
+    _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
   }
 
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
