@@ -30,7 +30,14 @@ public sealed class LineIndexer : IDisposable
   /// </summary>
   public void StartScan()
   {
-    _scanTask = Task.Run(() => ScanAll(_cts.Token), _cts.Token);
+    _scanTask = Task.Run(() =>
+    {
+      try {
+        ScanAll(_cts.Token);
+      } catch (OperationCanceledException) when (_cts.IsCancellationRequested) {
+        // expected during disposal / file switches / save restart
+      }
+    }, _cts.Token);
   }
 
   private unsafe void ScanAll(CancellationToken ct)
@@ -50,7 +57,9 @@ public sealed class LineIndexer : IDisposable
       remaining -= chunkLen;
     }
 
-    _index.MarkComplete();
+    if (!ct.IsCancellationRequested) {
+      _index.MarkComplete();
+    }
   }
 
   public void Dispose()
