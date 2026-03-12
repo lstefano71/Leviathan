@@ -18,11 +18,7 @@ internal sealed class TuiSettings
 
   public void AddRecent(string filePath)
   {
-    if (RecentFiles.Contains(filePath)) {
-      Save();
-      return;
-    }
-
+    RecentFiles.Remove(filePath);
     RecentFiles.Insert(0, filePath);
     if (RecentFiles.Count > MaxRecentFiles)
       RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);

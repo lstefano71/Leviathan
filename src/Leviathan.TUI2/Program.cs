@@ -60,6 +60,7 @@ internal sealed class MainWindow : Window
   private OptionSelector? _encodingSelector;
   private MenuItem? _bprItem;
   private OptionSelector? _bprSelector;
+  private MenuBarItem? _fileMenuBarItem;
 
   internal MainWindow(
       IApplication app,
@@ -95,10 +96,10 @@ internal sealed class MainWindow : Window
 
     // ─── Status bar ───
     _statusBar = new StatusBar([
-        new Shortcut(Key.F5, "Hex", null),
-        new Shortcut(Key.F6, "Text", null),
-        new Shortcut(Key.O.WithCtrl, "Open", null),
-        new Shortcut(Key.S.WithCtrl, "Save", null),
+      new Shortcut(Key.F5, "Hex", () => SwitchView(ViewMode.Hex)),
+      new Shortcut(Key.F6, "Text", () => SwitchView(ViewMode.Text)),
+      new Shortcut(Key.O.WithCtrl, "Open", () => ShowOpenDialog()),
+      new Shortcut(Key.S.WithCtrl, "Save", () => SaveFile()),
     ]);
 
     // ─── Welcome view ───
@@ -184,13 +185,10 @@ internal sealed class MainWindow : Window
         SetBytesPerRow(val);
     };
 
+    _fileMenuBarItem = new MenuBarItem("_File", BuildFileMenuItems()!);
+
     return new MenuBar([
-        new MenuBarItem("_File", [
-                new MenuItem("_Open...", Key.O.WithCtrl, () => ShowOpenDialog()) { HelpText = "Open a file" },
-                new MenuItem("_Save", Key.S.WithCtrl, () => SaveFile()) { HelpText = "Save the file" },
-                new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
-                new MenuItem("_Quit", Key.Q.WithCtrl, () => GuardUnsavedChanges(() => _app.RequestStop())) { HelpText = "Exit Leviathan" },
-            ]),
+        _fileMenuBarItem,
             new MenuBarItem("_View", [
                 new MenuItem("_Hex View", Key.F5, () => SwitchView(ViewMode.Hex)) { HelpText = "Switch to hex view" },
                 new MenuItem("_Text View", Key.F6, () => SwitchView(ViewMode.Text)) { HelpText = "Switch to text view" },
@@ -212,6 +210,40 @@ internal sealed class MainWindow : Window
                 new MenuItem("Select _All", Key.A.WithCtrl, () => DoSelectAll()) { HelpText = "Select entire file" },
             ]),
         ]);
+  }
+
+  /// <summary>Builds the File menu items including MRU entries.</summary>
+  private MenuItem?[] BuildFileMenuItems()
+  {
+    List<MenuItem?> items = [
+      new MenuItem("_Open...", Key.O.WithCtrl, () => ShowOpenDialog()) { HelpText = "Open a file" },
+      new MenuItem("_Save", Key.S.WithCtrl, () => SaveFile()) { HelpText = "Save the file" },
+      new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
+    ];
+
+    List<string> recent = _state.Settings.RecentFiles;
+    if (recent.Count > 0) {
+      items.Add(null); // separator
+      for (int i = 0; i < Math.Min(9, recent.Count); i++) {
+        string path = recent[i];
+        string fileName = Path.GetFileName(path);
+        string title = $"_{i + 1} {fileName}";
+        items.Add(new MenuItem(title, path, () => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); })));
+      }
+    }
+
+    items.Add(null); // separator before Quit
+    items.Add(new MenuItem("_Quit", Key.Q.WithCtrl, () => GuardUnsavedChanges(() => _app.RequestStop())) { HelpText = "Exit Leviathan" });
+
+    return items.ToArray();
+  }
+
+  /// <summary>Rebuilds the File menu to reflect updated MRU entries.</summary>
+  private void RefreshFileMenu()
+  {
+    if (_fileMenuBarItem is null) return;
+    _fileMenuBarItem.PopoverMenu?.Dispose();
+    _fileMenuBarItem.PopoverMenu = new PopoverMenu(BuildFileMenuItems()!);
   }
 
   private void SetupAppKeyBindings()
@@ -292,6 +324,7 @@ internal sealed class MainWindow : Window
     UpdateStatusBar();
     _hexView.SetNeedsDraw();
     _textView.SetNeedsDraw();
+    RefreshFileMenu();
   }
 
   // ─── File operations ───
@@ -611,9 +644,16 @@ internal sealed class MainWindow : Window
       if (recent.Count > 0) {
         DrawCentered("Recent files:", normalAttr);
         y++;
-        // Left-align MRU entries at a fixed indent
-        int indent = Math.Max(2, (vpW / 2) - 30);
-        for (int i = 0; i < Math.Min(9, recent.Count); i++) {
+        // Center the MRU block as a whole, left-align entries within it
+        int maxEntryWidth = 0;
+        int mruCount = Math.Min(9, recent.Count);
+        for (int i = 0; i < mruCount; i++) {
+          string entry = $"[{i + 1}]  {recent[i]}";
+          if (entry.Length > maxEntryWidth)
+            maxEntryWidth = entry.Length;
+        }
+        int indent = Math.Max(2, (vpW - maxEntryWidth) / 2);
+        for (int i = 0; i < mruCount; i++) {
           string entry = $"[{i + 1}]  {recent[i]}";
           view.Move(indent, y);
           view.SetAttribute(mruAttr);

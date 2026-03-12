@@ -209,10 +209,12 @@ internal sealed class LeviathanTextView : View
 
     // Update horizontal scrollbar visibility
     _horizontalScrollBar.Visible = !_state.WordWrap;
-    if (_state.WordWrap)
+    if (_state.WordWrap) {
       _horizontalScrollOffset = 0;
+      _maxLineWidthInViewport = 0;
+    }
 
-    _maxLineWidthInViewport = 0;
+    int frameMaxWidth = 0;
 
     EnsureCursorVisible(textAreaCols);
 
@@ -323,8 +325,8 @@ internal sealed class LeviathanTextView : View
       string text = DecodeLineToDisplay(lineBytes, decoder, _state.TabWidth, _charByteOffsets);
 
       // Track max line width for horizontal scrollbar
-      if (text.Length > _maxLineWidthInViewport)
-        _maxLineWidthInViewport = text.Length;
+      if (text.Length > frameMaxWidth)
+        frameMaxWidth = text.Length;
 
       // Apply horizontal scroll offset when word wrap is off
       int hOffset = _state.WordWrap ? 0 : _horizontalScrollOffset;
@@ -366,6 +368,8 @@ internal sealed class LeviathanTextView : View
     // Empty rows below content
     for (int i = rowsToDraw; i < vpHeight; i++)
       DrawEmptyLine(i, vpWidth);
+
+    _maxLineWidthInViewport = Math.Max(_maxLineWidthInViewport, frameMaxWidth);
 
     // Update vertical scrollbar
     UpdateScrollBar(vpHeight, textAreaCols);
@@ -617,6 +621,7 @@ internal sealed class LeviathanTextView : View
     long offset = FindOffsetOfLine(lineNumber);
     _state.TextCursorOffset = offset;
     _state.TextSelectionAnchor = -1;
+    ResetHorizontalExtent();
     OnStateChanged();
   }
 
@@ -625,7 +630,15 @@ internal sealed class LeviathanTextView : View
     if (_state.Document is null) return;
     _state.TextCursorOffset = Math.Clamp(offset, 0, _state.Document.Length);
     _state.TextSelectionAnchor = -1;
+    ResetHorizontalExtent();
     OnStateChanged();
+  }
+
+  /// <summary>Resets horizontal scroll state. Call on structural changes (word wrap toggle, goto, file open).</summary>
+  internal void ResetHorizontalExtent()
+  {
+    _maxLineWidthInViewport = 0;
+    _horizontalScrollOffset = 0;
   }
 
   internal void SelectAll()
