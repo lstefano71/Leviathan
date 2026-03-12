@@ -2,8 +2,36 @@ namespace Leviathan.TUI2.Widgets;
 
 /// <summary>
 /// Command palette entry: name, shortcut label, and action to execute.
+/// Supports dynamic names via <see cref="NameFunc"/> for check/radio indicators.
 /// </summary>
-internal sealed record PaletteCommand(string Category, string Name, string Shortcut, Action Execute);
+internal sealed class PaletteCommand
+{
+  /// <summary>Category grouping label (e.g. "View", "File").</summary>
+  internal string Category { get; }
+
+  /// <summary>Function that returns the display name (evaluated on each render for dynamic indicators).</summary>
+  internal Func<string> NameFunc { get; }
+
+  /// <summary>Current display name.</summary>
+  internal string Name => NameFunc();
+
+  /// <summary>Keyboard shortcut label (e.g. "Ctrl+O").</summary>
+  internal string Shortcut { get; }
+
+  /// <summary>Action to execute when the command is selected.</summary>
+  internal Action Execute { get; }
+
+  internal PaletteCommand(string category, string name, string shortcut, Action execute)
+      : this(category, () => name, shortcut, execute) { }
+
+  internal PaletteCommand(string category, Func<string> nameFunc, string shortcut, Action execute)
+  {
+    Category = category;
+    NameFunc = nameFunc;
+    Shortcut = shortcut;
+    Execute = execute;
+  }
+}
 
 /// <summary>
 /// Command palette state and logic for the VS Code-style Ctrl+P overlay.
@@ -29,6 +57,12 @@ internal sealed class CommandPalette
   internal void RegisterCommand(string category, string name, string shortcut, Action execute)
   {
     _allCommands.Add(new PaletteCommand(category, name, shortcut, execute));
+    FilterCommands();
+  }
+
+  internal void RegisterCommand(string category, Func<string> nameFunc, string shortcut, Action execute)
+  {
+    _allCommands.Add(new PaletteCommand(category, nameFunc, shortcut, execute));
     FilterCommands();
   }
 

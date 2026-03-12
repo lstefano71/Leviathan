@@ -55,10 +55,11 @@ internal sealed class MainWindow : Window
   private readonly CommandPalettePopover _palettePopover;
   private readonly View _welcomeView;
   private MenuItem? _wordWrapItem;
-  private MenuItem? _encodingUtf8Item;
-  private MenuItem? _encodingUtf16LeItem;
-  private MenuItem? _encodingWin1252Item;
-  private readonly List<(int Value, MenuItem Item)> _bprItems = [];
+  private CheckBox? _wordWrapCheckBox;
+  private MenuItem? _encodingItem;
+  private OptionSelector? _encodingSelector;
+  private MenuItem? _bprItem;
+  private OptionSelector? _bprSelector;
 
   internal MainWindow(
       IApplication app,
@@ -111,6 +112,9 @@ internal sealed class MainWindow : Window
     _hexView.Visible = hasFile && state.ActiveView == ViewMode.Hex;
     _textView.Visible = hasFile && state.ActiveView == ViewMode.Text;
 
+    // View-specific menu items
+    UpdateViewMenuVisibility(state.ActiveView);
+
     // Wire state-changed events to update status bar
     _hexView.StateChanged += UpdateStatusBar;
     _textView.StateChanged += UpdateStatusBar;
@@ -139,30 +143,45 @@ internal sealed class MainWindow : Window
 
   private MenuBar BuildMenuBar()
   {
-    _wordWrapItem = new MenuItem(
-        _state.WordWrap ? "✓ _Word Wrap" : "  _Word Wrap",
-        "Toggle word wrap", () => ToggleWordWrap());
+    // Word Wrap — CheckBox CommandView
+    _wordWrapCheckBox = new CheckBox { Title = "_Word Wrap", CanFocus = false };
+    _wordWrapCheckBox.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
+    _wordWrapItem = new MenuItem { Title = "_Word Wrap", HelpText = "Toggle word wrap" };
+    _wordWrapItem.CommandView = _wordWrapCheckBox;
+    _wordWrapItem.Action += () => {
+      if (_wordWrapCheckBox is not null)
+        ApplyWordWrap(_wordWrapCheckBox.Value == CheckState.Checked);
+    };
 
-    _encodingUtf8Item = new MenuItem(
-        _state.Decoder.Encoding == TextEncoding.Utf8 ? "● _UTF-8" : "  _UTF-8",
-        "", () => SwitchEncoding(TextEncoding.Utf8));
-    _encodingUtf16LeItem = new MenuItem(
-        _state.Decoder.Encoding == TextEncoding.Utf16Le ? "● UTF-_16 LE" : "  UTF-_16 LE",
-        "", () => SwitchEncoding(TextEncoding.Utf16Le));
-    _encodingWin1252Item = new MenuItem(
-        _state.Decoder.Encoding == TextEncoding.Windows1252 ? "● _Windows-1252" : "  _Windows-1252",
-        "", () => SwitchEncoding(TextEncoding.Windows1252));
+    // Encoding — OptionSelector CommandView
+    _encodingSelector = new OptionSelector {
+      Labels = ["UTF-8", "UTF-16 LE", "Windows-1252"],
+      Values = [0, 1, 2],
+      Value = (int)_state.Decoder.Encoding,
+      CanFocus = true,
+      Orientation = Orientation.Vertical,
+    };
+    _encodingItem = new MenuItem { Title = "_Encoding" };
+    _encodingItem.CommandView = _encodingSelector;
+    _encodingSelector.ValueChanged += (_, args) => {
+      if (args.NewValue is int val)
+        SwitchEncoding((TextEncoding)val);
+    };
 
-    // Bytes per row radio items
-    List<MenuItem> bprMenuItems = [];
-    foreach (int bpr in new[] { 0, 8, 16, 24, 32, 48, 64 }) {
-      int val = bpr;
-      string baseLabel = bpr == 0 ? "_Auto" : $"_{bpr}";
-      string prefix = _state.BytesPerRowSetting == bpr ? "● " : "  ";
-      MenuItem item = new(prefix + baseLabel, "", () => SetBytesPerRow(val));
-      _bprItems.Add((bpr, item));
-      bprMenuItems.Add(item);
-    }
+    // Bytes per Row — OptionSelector CommandView
+    _bprSelector = new OptionSelector {
+      Labels = ["Auto", "8", "16", "24", "32", "48", "64"],
+      Values = [0, 8, 16, 24, 32, 48, 64],
+      Value = _state.BytesPerRowSetting,
+      CanFocus = true,
+      Orientation = Orientation.Vertical,
+    };
+    _bprItem = new MenuItem { Title = "_Bytes/Row" };
+    _bprItem.CommandView = _bprSelector;
+    _bprSelector.ValueChanged += (_, args) => {
+      if (args.NewValue is int val)
+        SetBytesPerRow(val);
+    };
 
     return new MenuBar([
         new MenuBarItem("_File", [
@@ -175,8 +194,8 @@ internal sealed class MainWindow : Window
                 new MenuItem("_Hex View", Key.F5, () => SwitchView(ViewMode.Hex)) { HelpText = "Switch to hex view" },
                 new MenuItem("_Text View", Key.F6, () => SwitchView(ViewMode.Text)) { HelpText = "Switch to text view" },
                 _wordWrapItem,
-                new MenuBarItem("_Encoding", [_encodingUtf8Item, _encodingUtf16LeItem, _encodingWin1252Item]),
-                new MenuBarItem("_Bytes/Row", [.. bprMenuItems]),
+                _encodingItem,
+                _bprItem,
             ]),
             new MenuBarItem("_Navigate", [
                 new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _gotoBar.ShowBar()) { HelpText = "Jump to offset or line" },
@@ -237,6 +256,7 @@ internal sealed class MainWindow : Window
     _welcomeView.Visible = false;
     _hexView.Visible = mode == ViewMode.Hex;
     _textView.Visible = mode == ViewMode.Text;
+    UpdateViewMenuVisibility(mode);
 
     if (mode == ViewMode.Hex)
       _hexView.SetFocus();
@@ -247,12 +267,23 @@ internal sealed class MainWindow : Window
     UpdateTitle();
   }
 
+  /// <summary>Shows/hides menu items based on active view mode.</summary>
+  private void UpdateViewMenuVisibility(ViewMode mode)
+  {
+    if (_wordWrapItem is not null)
+      _wordWrapItem.Visible = mode == ViewMode.Text;
+    if (_bprItem is not null)
+      _bprItem.Visible = mode == ViewMode.Hex;
+    // Encoding is visible in both modes
+  }
+
   /// <summary>Hides the welcome screen and shows the file views.</summary>
   private void ShowFileViews()
   {
     _welcomeView.Visible = false;
     _hexView.Visible = _state.ActiveView == ViewMode.Hex;
     _textView.Visible = _state.ActiveView == ViewMode.Text;
+    UpdateViewMenuVisibility(_state.ActiveView);
     UpdateTitle();
     UpdateStatusBar();
     _hexView.SetNeedsDraw();
@@ -478,11 +509,18 @@ internal sealed class MainWindow : Window
 
   private void ToggleWordWrap()
   {
-    _state.WordWrap = !_state.WordWrap;
-    _state.Settings.WordWrap = _state.WordWrap;
+    bool newState = !_state.WordWrap;
+    ApplyWordWrap(newState);
+    // Sync the CheckBox if toggled from palette/keybind
+    if (_wordWrapCheckBox is not null)
+      _wordWrapCheckBox.Value = newState ? CheckState.Checked : CheckState.UnChecked;
+  }
+
+  private void ApplyWordWrap(bool enabled)
+  {
+    _state.WordWrap = enabled;
+    _state.Settings.WordWrap = enabled;
     _state.Settings.Save();
-    if (_wordWrapItem is not null)
-      _wordWrapItem.Title = _state.WordWrap ? "✓ _Word Wrap" : "  _Word Wrap";
     _textView.SetNeedsDraw();
     UpdateStatusBar();
   }
@@ -492,13 +530,9 @@ internal sealed class MainWindow : Window
   private void SwitchEncoding(TextEncoding encoding)
   {
     _state.SwitchEncoding(encoding);
-    // Update radio states via title prefix
-    if (_encodingUtf8Item is not null)
-      _encodingUtf8Item.Title = encoding == TextEncoding.Utf8 ? "● _UTF-8" : "  _UTF-8";
-    if (_encodingUtf16LeItem is not null)
-      _encodingUtf16LeItem.Title = encoding == TextEncoding.Utf16Le ? "● UTF-_16 LE" : "  UTF-_16 LE";
-    if (_encodingWin1252Item is not null)
-      _encodingWin1252Item.Title = encoding == TextEncoding.Windows1252 ? "● _Windows-1252" : "  _Windows-1252";
+    // Sync the OptionSelector if called from palette/keybind
+    if (_encodingSelector is not null)
+      _encodingSelector.Value = (int)encoding;
     _hexView.SetNeedsDraw();
     _textView.SetNeedsDraw();
     UpdateStatusBar();
@@ -511,11 +545,9 @@ internal sealed class MainWindow : Window
     _state.BytesPerRowSetting = value;
     _state.Settings.BytesPerRow = value;
     _state.Settings.Save();
-    // Update radio states via title prefix
-    foreach ((int bpr, MenuItem item) in _bprItems) {
-      string baseLabel = bpr == 0 ? "_Auto" : $"_{bpr}";
-      item.Title = (bpr == value ? "● " : "  ") + baseLabel;
-    }
+    // Sync the OptionSelector if called from palette/keybind
+    if (_bprSelector is not null)
+      _bprSelector.Value = value;
     _hexView.SetNeedsDraw();
     UpdateStatusBar();
   }
@@ -601,12 +633,21 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("File", "Quit", "Ctrl+Q", () => GuardUnsavedChanges(() => _app.RequestStop()));
     _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
     _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
-    _palette.RegisterCommand("View", "Toggle Word Wrap", "", () => ToggleWordWrap());
-    _palette.RegisterCommand("View", "Auto Column Width", "", () => SetBytesPerRow(0));
-    foreach (int bpr in new[] { 8, 16, 24, 32, 48, 64 }) {
+
+    // Word wrap — dynamic check indicator
+    _palette.RegisterCommand("View",
+        () => _state.WordWrap ? "✓ Word Wrap" : "  Word Wrap",
+        "", () => ToggleWordWrap());
+
+    // Bytes per row — dynamic radio indicators
+    foreach (int bpr in new[] { 0, 8, 16, 24, 32, 48, 64 }) {
       int val = bpr;
-      _palette.RegisterCommand("View", $"{bpr} Bytes/Row", "", () => SetBytesPerRow(val));
+      string label = bpr == 0 ? "Auto" : $"{bpr}";
+      _palette.RegisterCommand("Bytes/Row",
+          () => _state.BytesPerRowSetting == val ? $"● {label}" : $"  {label}",
+          "", () => SetBytesPerRow(val));
     }
+
     _palette.RegisterCommand("Navigate", "Go to Offset/Line", "Ctrl+G", () => _gotoBar.ShowBar());
     _palette.RegisterCommand("Search", "Find", "Ctrl+F", () => _findBar.ShowBar());
     _palette.RegisterCommand("Search", "Find Next", "F3", () => FindNext());
@@ -614,9 +655,17 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
     _palette.RegisterCommand("Edit", "Paste", "Ctrl+V", () => DoPaste());
     _palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () => DoSelectAll());
-    _palette.RegisterCommand("Encoding", "UTF-8", "", () => SwitchEncoding(TextEncoding.Utf8));
-    _palette.RegisterCommand("Encoding", "UTF-16 LE", "", () => SwitchEncoding(TextEncoding.Utf16Le));
-    _palette.RegisterCommand("Encoding", "Windows-1252", "", () => SwitchEncoding(TextEncoding.Windows1252));
+
+    // Encoding — dynamic radio indicators
+    _palette.RegisterCommand("Encoding",
+        () => _state.Decoder.Encoding == TextEncoding.Utf8 ? "● UTF-8" : "  UTF-8",
+        "", () => SwitchEncoding(TextEncoding.Utf8));
+    _palette.RegisterCommand("Encoding",
+        () => _state.Decoder.Encoding == TextEncoding.Utf16Le ? "● UTF-16 LE" : "  UTF-16 LE",
+        "", () => SwitchEncoding(TextEncoding.Utf16Le));
+    _palette.RegisterCommand("Encoding",
+        () => _state.Decoder.Encoding == TextEncoding.Windows1252 ? "● Windows-1252" : "  Windows-1252",
+        "", () => SwitchEncoding(TextEncoding.Windows1252));
 
     // MRU entries in the command palette
     foreach (string recent in _state.Settings.RecentFiles) {

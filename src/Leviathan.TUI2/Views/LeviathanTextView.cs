@@ -28,7 +28,10 @@ internal sealed class LeviathanTextView : View
   private long _cachedTopLineNumber = 1;
   private int _lastRenderedLineCount;
   private readonly ScrollBar _verticalScrollBar;
+  private readonly ScrollBar _horizontalScrollBar;
   private bool _updatingScrollBar;
+  private int _horizontalScrollOffset;
+  private int _maxLineWidthInViewport;
 
   private const int GutterWidth = 9; // "  12345 │"
 
@@ -61,6 +64,23 @@ internal sealed class LeviathanTextView : View
       SetNeedsDraw();
     };
     Add(_verticalScrollBar);
+
+    // Horizontal scrollbar (visible only when word wrap is off)
+    _horizontalScrollBar = new ScrollBar() {
+      Orientation = Orientation.Horizontal,
+      X = GutterWidth,
+      Y = Pos.AnchorEnd(1),
+      Width = Dim.Fill(1), // leave room for vertical scrollbar
+      Height = 1,
+      VisibilityMode = ScrollBarVisibilityMode.Always,
+      Visible = !_state.WordWrap,
+    };
+    _horizontalScrollBar.ValueChanged += (_, e) => {
+      if (_updatingScrollBar) return;
+      _horizontalScrollOffset = Math.Max(0, e.NewValue);
+      SetNeedsDraw();
+    };
+    Add(_horizontalScrollBar);
 
     SetupCommands();
     SetupKeyBindings();
@@ -185,7 +205,14 @@ internal sealed class LeviathanTextView : View
     int vpWidth = Viewport.Width;
     _state.VisibleRows = vpHeight;
 
-    int textAreaCols = Math.Max(1, vpWidth - GutterWidth);
+    int textAreaCols = Math.Max(1, vpWidth - GutterWidth - 1); // -1 for vertical scrollbar
+
+    // Update horizontal scrollbar visibility
+    _horizontalScrollBar.Visible = !_state.WordWrap;
+    if (_state.WordWrap)
+      _horizontalScrollOffset = 0;
+
+    _maxLineWidthInViewport = 0;
 
     EnsureCursorVisible(textAreaCols);
 
@@ -295,7 +322,16 @@ internal sealed class LeviathanTextView : View
       _charByteOffsets.Clear();
       string text = DecodeLineToDisplay(lineBytes, decoder, _state.TabWidth, _charByteOffsets);
 
-      for (int ci = 0; ci < text.Length && GutterWidth + ci < vpWidth; ci++) {
+      // Track max line width for horizontal scrollbar
+      if (text.Length > _maxLineWidthInViewport)
+        _maxLineWidthInViewport = text.Length;
+
+      // Apply horizontal scroll offset when word wrap is off
+      int hOffset = _state.WordWrap ? 0 : _horizontalScrollOffset;
+      int visibleStart = Math.Min(hOffset, text.Length);
+      int visibleEnd = text.Length;
+
+      for (int ci = visibleStart; ci < visibleEnd && GutterWidth + (ci - visibleStart) < vpWidth - 1; ci++) {
         long charDocOffset = lineDocOffset;
         if (ci < _charByteOffsets.Count)
           charDocOffset = lineDocOffset + _charByteOffsets[ci];
@@ -313,15 +349,17 @@ internal sealed class LeviathanTextView : View
       // Cursor at end of line (if cursor is at lineDocOffset + lineByteLen)
       long endOffset = lineDocOffset + lineByteLen;
       bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
-      if (_state.TextCursorOffset == endOffset && !nextLineStartsHere && GutterWidth + text.Length < vpWidth) {
+      int endCol = GutterWidth + (text.Length - visibleStart);
+      if (_state.TextCursorOffset == endOffset && !nextLineStartsHere
+          && endCol < vpWidth - 1 && text.Length >= hOffset) {
         SetAttribute(cursorAttr);
         AddRune(' ');
+        endCol++;
       }
 
       // Clear rest of line
       SetAttribute(normalAttr);
-      int drawn = GutterWidth + text.Length + (_state.TextCursorOffset == endOffset ? 1 : 0);
-      for (int c = drawn; c < vpWidth; c++)
+      for (int c = Math.Max(GutterWidth, endCol); c < vpWidth; c++)
         AddRune(' ');
     }
 
@@ -330,7 +368,7 @@ internal sealed class LeviathanTextView : View
       DrawEmptyLine(i, vpWidth);
 
     // Update vertical scrollbar
-    UpdateScrollBar(vpHeight);
+    UpdateScrollBar(vpHeight, textAreaCols);
 
     return true;
   }
@@ -896,6 +934,34 @@ internal sealed class LeviathanTextView : View
       }
       _state.TextTopOffset = newTop;
     }
+
+    // Horizontal auto-pan (only when word wrap is off)
+    if (!_state.WordWrap) {
+      int cursorCol = ComputeCursorColumn();
+      if (cursorCol < _horizontalScrollOffset)
+        _horizontalScrollOffset = Math.Max(0, cursorCol - 4);
+      else if (cursorCol >= _horizontalScrollOffset + textAreaCols)
+        _horizontalScrollOffset = cursorCol - textAreaCols + 4;
+    }
+  }
+
+  /// <summary>Computes the display column of the cursor within its line (0-based).</summary>
+  private int ComputeCursorColumn()
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return 0;
+
+    long lineStart = FindLineStart(_state.TextCursorOffset);
+    int lineLen = (int)Math.Min(_state.TextCursorOffset - lineStart, 8192);
+    if (lineLen <= 0) return 0;
+
+    Span<byte> buf = lineLen <= 1024 ? stackalloc byte[lineLen] : new byte[lineLen];
+    int read = doc.Read(lineStart, buf);
+    if (read == 0) return 0;
+
+    ReadOnlySpan<byte> lineBytes = buf[..Math.Min(read, lineLen)];
+    string text = DecodeLineToDisplay(lineBytes, _state.Decoder, _state.TabWidth, null);
+    return text.Length;
   }
 
   private long ComputeVisibleEnd(long startOffset, int lineCount)
@@ -1105,7 +1171,7 @@ internal sealed class LeviathanTextView : View
     StateChanged?.Invoke();
   }
 
-  private void UpdateScrollBar(int vpHeight)
+  private void UpdateScrollBar(int vpHeight, int textAreaCols)
   {
     Document? doc = _state.Document;
     if (doc is null) return;
@@ -1116,9 +1182,24 @@ internal sealed class LeviathanTextView : View
     int scrollPos = (int)(fraction * scrollTotal);
 
     _updatingScrollBar = true;
+
+    // Vertical
     _verticalScrollBar.ScrollableContentSize = scrollTotal;
     _verticalScrollBar.VisibleContentSize = vpHeight;
     _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
+
+    // Horizontal (only meaningful when word wrap is off)
+    if (!_state.WordWrap && _maxLineWidthInViewport > textAreaCols) {
+      _horizontalScrollBar.ScrollableContentSize = _maxLineWidthInViewport;
+      _horizontalScrollBar.VisibleContentSize = textAreaCols;
+      _horizontalScrollBar.Value = Math.Clamp(_horizontalScrollOffset, 0,
+          Math.Max(0, _maxLineWidthInViewport - textAreaCols));
+    } else {
+      _horizontalScrollBar.ScrollableContentSize = textAreaCols;
+      _horizontalScrollBar.VisibleContentSize = textAreaCols;
+      _horizontalScrollBar.Value = 0;
+    }
+
     _updatingScrollBar = false;
   }
 
