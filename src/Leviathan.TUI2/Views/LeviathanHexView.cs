@@ -116,11 +116,13 @@ internal sealed class LeviathanHexView : View
       if (keyEvent == Key.CursorDown.WithShift) { MoveDown(true); return true; }
     }
 
-    // Hex digit input
-    int digit = HexDigitFromKey(keyEvent);
-    if (digit >= 0) {
-      InputHexDigit(digit);
-      return true;
+    // Hex digit input — skip when Alt/Ctrl held so menu hotkeys & shortcuts propagate
+    if (!keyEvent.IsAlt && !keyEvent.IsCtrl) {
+      int digit = HexDigitFromKey(keyEvent);
+      if (digit >= 0) {
+        InputHexDigit(digit);
+        return true;
+      }
     }
 
     return false;

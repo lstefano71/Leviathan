@@ -95,3 +95,6 @@ AppWindow.Render → _renderCallback(deltaTime) → ImGui.Render() → ImGuiImpl
 ### Project boundaries
 - `Leviathan.Core` must remain UI-free. Never add a reference to `Leviathan.UI` or any GUI package from Core.
 - New Core sub-systems belong in a dedicated sub-folder matching the logical layer (`IO/`, `DataModel/`, `Indexing/`, `Text/`).
+
+### IMPORTANT: Documentation for the tools
+- documentation for Terminal.Gui2 is here: D:\Trash\Terminal.Gui\docfx\docs

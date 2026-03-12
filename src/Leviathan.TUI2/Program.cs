@@ -29,6 +29,9 @@ using IApplication app = Application.Create();
 app.Init();
 #pragma warning restore IL2026, IL3050
 
+// Disable the default Esc -> Quit binding
+app.Keyboard.KeyBindings.Remove(app.Keyboard.QuitKey);
+
 // Views must be created after app.Init() so Terminal.Gui's binding registries and
 // scheme infrastructure are fully initialised before the views' constructors run.
 LeviathanHexView hexView = new(state);
@@ -59,6 +62,7 @@ internal sealed class MainWindow : Window
   private readonly GotoBar _gotoBar;
   private readonly CommandPalettePopover _palettePopover;
   private readonly View _welcomeView;
+  private readonly MenuBar _menuBar;
   private MenuItem? _wordWrapItem;
   private CheckBox? _wordWrapCheckBox;
   private MenuItem? _encodingItem;
@@ -84,7 +88,8 @@ internal sealed class MainWindow : Window
     BorderStyle = LineStyle.None;
 
     // ─── Menu bar ───
-    MenuBar menuBar = BuildMenuBar();
+    _menuBar = BuildMenuBar();
+    MenuBar menuBar = _menuBar;
 
     // ─── Content views ───
     _hexView.X = 0;
@@ -319,6 +324,15 @@ internal sealed class MainWindow : Window
           }
           e.Handled = true;
         }
+      }
+
+      // Forward unhandled Alt+letter to the menu bar so its HotKey bindings fire.
+      // Terminal.Gui's HotKey dispatch (step D) should handle this automatically,
+      // but develop.5185 does not reliably route Alt+letter to sibling MenuBar
+      // when certain views (e.g. text view with scrollbar children) have focus.
+      if (!e.Handled && e.IsAlt && !e.IsCtrl) {
+        if (_menuBar.NewKeyDownEvent(e))
+          e.Handled = true;
       }
     };
   }
