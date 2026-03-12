@@ -53,10 +53,11 @@ internal sealed class AppState
   public string FindInput { get; set; } = "";
   public bool FindHexMode { get; set; }
   public bool FindCaseSensitive { get; set; }
-  public List<SearchResult> SearchResults { get; } = [];
+  public List<SearchResult> SearchResults { get; set; } = [];
   public int CurrentMatchIndex { get; set; } = -1;
   public string SearchStatus { get; set; } = "";
   public CancellationTokenSource? SearchCts { get; set; }
+  public Task? SearchTask { get; set; }
   public bool IsSearching { get; set; }
 
   // --- Goto preview state ---
@@ -137,7 +138,7 @@ internal sealed class AppState
       Indexer.StartScan();
     }
 
-    SearchResults.Clear();
+    SearchResults = [];
     CurrentMatchIndex = -1;
     SearchStatus = "";
 
@@ -146,17 +147,36 @@ internal sealed class AppState
 
   /// <summary>
   /// Attempts to save the document. Returns true on success, sets error message on failure.
+  /// Stops the background line indexer before saving (the mmap handle may be released)
+  /// and restarts it afterwards on the new file source.
   /// </summary>
   public bool TrySave(string path, out string? errorMessage)
   {
     errorMessage = null;
     if (Document is null) return false;
+
+    // Stop the indexer — SaveTo may dispose the MappedFileSource it is scanning.
+    Indexer?.Dispose();
+    Indexer = null;
+
     try {
       Document.SaveTo(path);
       CurrentFilePath = path;
       Settings.AddRecent(path);
+
+      // Restart indexing on the (possibly new) file source.
+      if (Document.FileSource is { } source) {
+        Indexer = new LineIndexer(source);
+        Indexer.StartScan();
+      }
+
       return true;
     } catch (Exception ex) {
+      // Best-effort: try to restart indexer even on failure.
+      if (Indexer is null && Document.FileSource is { } src) {
+        Indexer = new LineIndexer(src);
+        Indexer.StartScan();
+      }
       errorMessage = ex.Message;
       return false;
     }
@@ -171,13 +191,16 @@ internal sealed class AppState
   }
 
   /// <summary>
-  /// Cancels any in-progress search.
+  /// Cancels any in-progress search, waiting for the background task to finish.
   /// </summary>
   public void CancelSearch()
   {
     CancellationTokenSource? searchCts = SearchCts;
     SearchCts = null;
     searchCts?.Cancel();
+    try { SearchTask?.Wait(); } catch (AggregateException) { /* expected on cancellation */ }
+    SearchTask = null;
+    searchCts?.Dispose();
     IsSearching = false;
   }
 

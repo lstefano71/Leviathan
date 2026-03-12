@@ -16,6 +16,7 @@ public sealed class LineIndex
   private long _totalLineCount;
   private volatile bool _isComplete;
   private readonly int _sparseFactor;
+  private int _sparseEntryCount;
 
   /// <summary>Total number of hard line breaks found so far.</summary>
   public long TotalLineCount => Volatile.Read(ref _totalLineCount);
@@ -23,8 +24,8 @@ public sealed class LineIndex
   /// <summary>True when the background scan has finished.</summary>
   public bool IsComplete => _isComplete;
 
-  /// <summary>Number of sparse index entries available.</summary>
-  public int SparseEntryCount { get; private set; }
+  /// <summary>Number of sparse index entries available (thread-safe).</summary>
+  public int SparseEntryCount => Volatile.Read(ref _sparseEntryCount);
 
   /// <summary>The sparse factor (number of newlines between stored entries).</summary>
   public int SparseFactor => _sparseFactor;
@@ -102,7 +103,7 @@ public sealed class LineIndex
             int idx = (int)(linesSoFar / _sparseFactor) - 1;
             if (idx < _sparseOffsets.Length) {
               _sparseOffsets[idx] = baseOffset + pos + bit;
-              SparseEntryCount = Math.Max(SparseEntryCount, idx + 1);
+              Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
             }
           }
 
@@ -132,7 +133,7 @@ public sealed class LineIndex
             int idx = (int)(linesSoFar / _sparseFactor) - 1;
             if (idx < _sparseOffsets.Length) {
               _sparseOffsets[idx] = baseOffset + pos + bit;
-              SparseEntryCount = Math.Max(SparseEntryCount, idx + 1);
+              Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
             }
           }
 
@@ -152,7 +153,7 @@ public sealed class LineIndex
           int idx = (int)(linesSoFar / _sparseFactor) - 1;
           if (idx < _sparseOffsets.Length) {
             _sparseOffsets[idx] = baseOffset + pos;
-            SparseEntryCount = Math.Max(SparseEntryCount, idx + 1);
+            Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
           }
         }
       }

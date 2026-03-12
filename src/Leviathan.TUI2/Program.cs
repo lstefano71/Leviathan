@@ -479,7 +479,7 @@ internal sealed class MainWindow : Window
     if (_state.Document is null) return;
 
     _state.CancelSearch();
-    _state.SearchResults.Clear();
+    _state.SearchResults = [];
     _state.CurrentMatchIndex = -1;
     _state.SearchStatus = "Searching…";
     _state.IsSearching = true;
@@ -506,43 +506,51 @@ internal sealed class MainWindow : Window
       pattern = System.Text.Encoding.UTF8.GetBytes(query);
     }
 
-    Task.Run(() => {
+    _state.SearchTask = Task.Run(() => {
       try {
         List<SearchResult> results = [];
         bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
-        foreach (SearchResult r in SearchEngine.FindAll(document, pattern, caseSensitive)) {
+        foreach (SearchResult r in SearchEngine.FindAll(document, pattern, caseSensitive, token)) {
           if (token.IsCancellationRequested) break;
           results.Add(r);
         }
-        if (!token.IsCancellationRequested && ReferenceEquals(_state.SearchCts, cts)) {
-          _state.SearchResults.Clear();
-          _state.SearchResults.AddRange(results);
+
+        if (token.IsCancellationRequested) return;
+
+        // All shared state mutations + CTS cleanup happen on the UI thread
+        // so the ReferenceEquals guard and the nulling are atomic.
+        _app.Invoke(() => {
+          if (!ReferenceEquals(_state.SearchCts, cts)) return;
+          _state.SearchCts = null;
+
+          _state.SearchResults = results;
           _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
           _state.SearchStatus = results.Count > 0
               ? $"{results.Count} match{(results.Count > 1 ? "es" : "")}"
               : "No matches";
           _state.IsSearching = false;
 
-          // Navigate to first match
           if (results.Count > 0)
             NavigateToMatch(0);
-        }
+
+          UpdateStatusBar();
+          _findBar.UpdateStatus();
+          _hexView.SetNeedsDraw();
+          _textView.SetNeedsDraw();
+        });
       } catch (OperationCanceledException) {
-        _state.SearchStatus = "Search cancelled";
-        _state.IsSearching = false;
-      } finally {
-        if (ReferenceEquals(_state.SearchCts, cts))
+        _app.Invoke(() => {
+          if (!ReferenceEquals(_state.SearchCts, cts)) return;
           _state.SearchCts = null;
+
+          _state.SearchStatus = "Search cancelled";
+          _state.IsSearching = false;
+          UpdateStatusBar();
+          _findBar.UpdateStatus();
+        });
+      } finally {
         cts.Dispose();
       }
-
-      // Schedule UI update on main thread
-      _app.Invoke(() => {
-        UpdateStatusBar();
-        _findBar.UpdateStatus();
-        _hexView.SetNeedsDraw();
-        _textView.SetNeedsDraw();
-      });
     }, token);
   }
 
@@ -811,8 +819,9 @@ internal sealed class MainWindow : Window
     string viewName = _state.ActiveView == ViewMode.Hex ? "HEX" : "TEXT";
     string encoding = _state.Decoder.Encoding.ToString();
     long cursor = _state.CurrentCursorOffset;
-    string searchInfo = _state.SearchResults.Count > 0
-        ? $" | {_state.CurrentMatchIndex + 1}/{_state.SearchResults.Count} matches"
+    List<SearchResult> searchResults = _state.SearchResults;
+    string searchInfo = searchResults.Count > 0
+        ? $" | {_state.CurrentMatchIndex + 1}/{searchResults.Count} matches"
         : _state.IsSearching ? " | Searching…" : "";
 
     Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";

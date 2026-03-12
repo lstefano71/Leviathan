@@ -196,4 +196,38 @@ public class SearchTests
 
     Assert.Empty(result);
   }
+
+  // ── CancellationToken support ───────────────────────────────────────────
+
+  [Fact]
+  public void FindAll_CancelledToken_ThrowsOperationCanceled()
+  {
+    using var doc = MakeDoc([0xAA, 0x00, 0xAA, 0x00, 0xAA]);
+    using CancellationTokenSource cts = new();
+    cts.Cancel();
+
+    Assert.Throws<OperationCanceledException>(() =>
+        SearchEngine.FindAll(doc, [0xAA], ct: cts.Token).ToList());
+  }
+
+  [Fact]
+  public void FindAll_CancelDuringIteration_BreaksCleanly()
+  {
+    // Create a document with many matches
+    byte[] data = new byte[64 * 1024];
+    Array.Fill(data, (byte)0xAA);
+    using var doc = MakeDoc(data);
+    using CancellationTokenSource cts = new();
+
+    int count = 0;
+    foreach (SearchResult _ in SearchEngine.FindAll(doc, [0xAA], ct: cts.Token)) {
+      count++;
+      if (count >= 10) {
+        cts.Cancel();
+        break;
+      }
+    }
+
+    Assert.Equal(10, count);
+  }
 }

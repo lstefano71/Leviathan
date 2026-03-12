@@ -17,8 +17,11 @@ public static class SearchEngine
   /// <summary>
   /// Yields all occurrences of <paramref name="pattern"/> in <paramref name="doc"/>.
   /// The search is synchronous; wrap in <c>Task.Run</c> for background execution.
+  /// When a <paramref name="ct"/> is supplied, cancellation is checked per-chunk
+  /// (every ~4 MB) so the search can be stopped promptly even when matches are sparse.
   /// </summary>
-  public static IEnumerable<SearchResult> FindAll(Document doc, byte[] pattern, bool caseSensitive = true)
+  public static IEnumerable<SearchResult> FindAll(
+      Document doc, byte[] pattern, bool caseSensitive = true, CancellationToken ct = default)
   {
     if (pattern.Length == 0 || doc.Length == 0) yield break;
     if (pattern.Length > doc.Length) yield break;
@@ -40,6 +43,8 @@ public static class SearchEngine
       int prevLen = 0;     // how many overlap bytes are currently sitting in buffer[0..prevLen]
 
       while (docBase < doc.Length) {
+        ct.ThrowIfCancellationRequested();
+
         int toRead = (int)Math.Min(ChunkSize, doc.Length - docBase);
         int bytesRead = doc.Read(docBase, buffer.AsSpan(prevLen, toRead));
         if (bytesRead == 0) break;

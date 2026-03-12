@@ -270,10 +270,11 @@ internal sealed class LeviathanTextView : View
     // Search matches
     long viewStart = _state.TextTopOffset;
     long viewEnd = _state.TextTopOffset + bytesRead;
-    List<SearchResult> visibleMatches = CollectVisibleMatches(viewStart, viewEnd);
+    List<SearchResult> searchResults = _state.SearchResults;
+    List<SearchResult> visibleMatches = CollectVisibleMatches(searchResults, viewStart, viewEnd);
     int currentMatchIdx = _state.CurrentMatchIndex;
-    SearchResult? activeMatch = currentMatchIdx >= 0 && currentMatchIdx < _state.SearchResults.Count
-        ? _state.SearchResults[currentMatchIdx]
+    SearchResult? activeMatch = currentMatchIdx >= 0 && currentMatchIdx < searchResults.Count
+        ? searchResults[currentMatchIdx]
         : null;
 
     long currentLineNumber = ComputeLineNumber(_state.TextTopOffset);
@@ -1335,9 +1336,8 @@ internal sealed class LeviathanTextView : View
     return decoder.IsNewline(buf, index, out _);
   }
 
-  private List<SearchResult> CollectVisibleMatches(long viewStart, long viewEnd)
+  private static List<SearchResult> CollectVisibleMatches(List<SearchResult> results, long viewStart, long viewEnd)
   {
-    List<SearchResult> results = _state.SearchResults;
     List<SearchResult> visible = [];
     if (results.Count == 0) return visible;
 

@@ -70,4 +70,62 @@ public class LineIndexTests
 
     Assert.Equal(0, index.TotalLineCount);
   }
+
+  [Fact]
+  public unsafe void ScanChunk_Cancellation_StopsEarly()
+  {
+    // Create data with many newlines
+    var data = new byte[4096];
+    Array.Fill(data, (byte)0x0A);
+
+    var index = new LineIndex(sparseFactor: 10);
+    using CancellationTokenSource cts = new();
+
+    // Cancel immediately — ScanChunk should throw
+    cts.Cancel();
+    bool threw = false;
+    fixed (byte* ptr = data) {
+      try {
+        index.ScanChunk(ptr, data.Length, baseOffset: 0, cts.Token);
+      } catch (OperationCanceledException) {
+        threw = true;
+      }
+    }
+
+    Assert.True(threw, "ScanChunk should throw OperationCanceledException when token is cancelled");
+    // Should not have processed all newlines
+    Assert.True(index.TotalLineCount < data.Length);
+  }
+
+  [Fact]
+  public unsafe void ScanChunk_SparseEntryCount_ConsistentWithOffsets()
+  {
+    // Verify that when SparseEntryCount is N, entries 0..N-1 are valid
+    var data = new byte[8192];
+    int nlCount = 0;
+    for (int i = 0; i < data.Length; i++) {
+      if (i % 2 == 0) {
+        data[i] = 0x0A;
+        nlCount++;
+      } else {
+        data[i] = 0x41;
+      }
+    }
+
+    var index = new LineIndex(sparseFactor: 50);
+
+    fixed (byte* ptr = data) {
+      index.ScanChunk(ptr, data.Length, baseOffset: 1000, CancellationToken.None);
+    }
+
+    int entryCount = index.SparseEntryCount;
+    Assert.True(entryCount > 0);
+
+    // All entries should be within the data range
+    for (int i = 0; i < entryCount; i++) {
+      long offset = index.GetSparseOffset(i);
+      Assert.True(offset >= 1000, $"Entry {i} offset {offset} should be >= base 1000");
+      Assert.True(offset < 1000 + data.Length, $"Entry {i} offset {offset} should be < base + length");
+    }
+  }
 }
