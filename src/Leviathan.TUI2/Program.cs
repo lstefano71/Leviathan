@@ -396,6 +396,9 @@ internal sealed class MainWindow : Window
         Width = Dim.Percent(85),
         Height = Dim.Percent(80),
       };
+      openDlg.KeyDown += (_, e) => {
+        if (e.KeyCode == KeyCode.Esc) { openDlg.RequestStop(); e.Handled = true; }
+      };
       _app.Run(openDlg);
 
       if (!openDlg.Canceled && openDlg.FilePaths.Count > 0) {
@@ -432,6 +435,9 @@ internal sealed class MainWindow : Window
       Title = "Save As",
       Width = Dim.Percent(85),
       Height = Dim.Percent(80),
+    };
+    saveDlg.KeyDown += (_, e) => {
+      if (e.KeyCode == KeyCode.Esc) { saveDlg.RequestStop(); e.Handled = true; }
     };
     _app.Run(saveDlg);
 
@@ -508,7 +514,7 @@ internal sealed class MainWindow : Window
         return;
       }
     } else {
-      pattern = System.Text.Encoding.UTF8.GetBytes(query);
+      pattern = _state.Decoder.EncodeString(query);
     }
 
     _state.SearchTask = Task.Run(() => {

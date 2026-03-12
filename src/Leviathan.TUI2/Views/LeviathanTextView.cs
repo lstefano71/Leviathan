@@ -434,7 +434,7 @@ internal sealed class LeviathanTextView : View
   internal void MoveCursorLeft(bool extend)
   {
     Document? doc = _state.Document;
-    if (doc is null || _state.TextCursorOffset <= 0) return;
+    if (doc is null || _state.TextCursorOffset <= _state.BomLength) return;
 
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
@@ -455,6 +455,8 @@ internal sealed class LeviathanTextView : View
     }
     int stepBack = lookBack - lastRuneStart;
     _state.TextCursorOffset -= stepBack;
+    // Never step into the BOM
+    _state.TextCursorOffset = Math.Max(_state.TextCursorOffset, _state.BomLength);
 
     // Skip over newline characters so the cursor lands on visible content.
     // Handles \n and \r\n: after stepping back onto \n, skip back over it
@@ -489,53 +491,81 @@ internal sealed class LeviathanTextView : View
     OnStateChanged();
   }
 
-  /// <summary>Skips past \n and \r\n sequences when moving forward.</summary>
+  /// <summary>Skips past exactly one newline sequence (\n or \r\n) when moving forward.</summary>
   private void SkipNewlinesForward(Document doc)
   {
+    if (_state.TextCursorOffset >= doc.Length) return;
     Span<byte> peek = stackalloc byte[4];
-    while (_state.TextCursorOffset < doc.Length) {
-      int peekRead = doc.Read(_state.TextCursorOffset, peek);
-      if (peekRead == 0) break;
-      (Rune r, int rLen) = _state.Decoder.DecodeRune(peek[..peekRead], 0);
-      if (rLen <= 0) break;
-      if (r.Value == '\n' || r.Value == '\r') {
-        _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + rLen, doc.Length);
-      } else {
-        break;
+    int peekRead = doc.Read(_state.TextCursorOffset, peek);
+    if (peekRead == 0) return;
+    (Rune r, int rLen) = _state.Decoder.DecodeRune(peek[..peekRead], 0);
+    if (rLen <= 0) return;
+    if (r.Value == '\r') {
+      _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + rLen, doc.Length);
+      // Also skip a following \n
+      if (_state.TextCursorOffset < doc.Length) {
+        peekRead = doc.Read(_state.TextCursorOffset, peek);
+        if (peekRead > 0) {
+          (Rune r2, int rLen2) = _state.Decoder.DecodeRune(peek[..peekRead], 0);
+          if (rLen2 > 0 && r2.Value == '\n')
+            _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + rLen2, doc.Length);
+        }
       }
+    } else if (r.Value == '\n') {
+      _state.TextCursorOffset = Math.Min(_state.TextCursorOffset + rLen, doc.Length);
     }
   }
 
-  /// <summary>Skips back over \n and \r when moving backward.</summary>
+  /// <summary>Skips back over exactly one newline sequence (\n or \r\n) when moving backward.</summary>
   private void SkipNewlinesBackward(Document doc)
   {
-    Span<byte> prev = stackalloc byte[4];
-    Span<byte> check = stackalloc byte[4];
-    while (_state.TextCursorOffset > 0) {
-      int lookBack = (int)Math.Min(4, _state.TextCursorOffset);
-      Span<byte> prevSlice = prev[..lookBack];
-      doc.Read(_state.TextCursorOffset - lookBack, prevSlice);
+    if (_state.TextCursorOffset <= _state.BomLength) return;
+    Span<byte> buf = stackalloc byte[4];
+    ITextDecoder decoder = _state.Decoder;
 
-      ITextDecoder decoder = _state.Decoder;
-      int pos = 0;
-      int lastRuneStart = 0;
-      while (pos < lookBack) {
-        lastRuneStart = pos;
-        (_, int l) = decoder.DecodeRune(prevSlice, pos);
-        if (l <= 0) { pos++; continue; }
-        pos += l;
-      }
+    // Decode the rune immediately before the cursor
+    int lookBack = (int)Math.Min(4, _state.TextCursorOffset - _state.BomLength);
+    Span<byte> prevSlice = buf[..lookBack];
+    doc.Read(_state.TextCursorOffset - lookBack, prevSlice);
 
-      int prevRuneOffset = lookBack - lastRuneStart;
-      int checkRead = doc.Read(_state.TextCursorOffset - prevRuneOffset, check);
-      if (checkRead == 0) break;
-      (Rune r, int rLen) = decoder.DecodeRune(check[..checkRead], 0);
-      if (rLen <= 0) break;
-      if (r.Value == '\n' || r.Value == '\r') {
-        _state.TextCursorOffset -= prevRuneOffset;
-      } else {
-        break;
+    int pos = 0;
+    int lastRuneStart = 0;
+    while (pos < lookBack) {
+      lastRuneStart = pos;
+      (_, int l) = decoder.DecodeRune(prevSlice, pos);
+      if (l <= 0) { pos++; continue; }
+      pos += l;
+    }
+    int prevRuneOffset = lookBack - lastRuneStart;
+    int checkRead = doc.Read(_state.TextCursorOffset - prevRuneOffset, buf);
+    if (checkRead == 0) return;
+    (Rune r, int rLen) = decoder.DecodeRune(buf[..checkRead], 0);
+    if (rLen <= 0) return;
+
+    if (r.Value == '\n') {
+      _state.TextCursorOffset -= prevRuneOffset;
+      // Also skip a preceding \r (to handle \r\n as one sequence)
+      if (_state.TextCursorOffset > _state.BomLength) {
+        lookBack = (int)Math.Min(4, _state.TextCursorOffset - _state.BomLength);
+        prevSlice = buf[..lookBack];
+        doc.Read(_state.TextCursorOffset - lookBack, prevSlice);
+        pos = 0; lastRuneStart = 0;
+        while (pos < lookBack) {
+          lastRuneStart = pos;
+          (_, int l) = decoder.DecodeRune(prevSlice, pos);
+          if (l <= 0) { pos++; continue; }
+          pos += l;
+        }
+        prevRuneOffset = lookBack - lastRuneStart;
+        checkRead = doc.Read(_state.TextCursorOffset - prevRuneOffset, buf);
+        if (checkRead > 0) {
+          (Rune r2, int rLen2) = decoder.DecodeRune(buf[..checkRead], 0);
+          if (rLen2 > 0 && r2.Value == '\r')
+            _state.TextCursorOffset -= prevRuneOffset;
+        }
       }
+    } else if (r.Value == '\r') {
+      _state.TextCursorOffset -= prevRuneOffset;
     }
   }
 
