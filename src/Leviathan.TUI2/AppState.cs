@@ -132,9 +132,9 @@ internal sealed class AppState
     TextSelectionAnchor = -1;
     EstimatedTotalLines = Math.Max(1, Document.Length / 80);
 
-    // Start background line indexing
+    // Start background line indexing (encoding-aware for UTF-16 newline scanning)
     if (Document.FileSource is { } source) {
-      Indexer = new LineIndexer(source);
+      Indexer = new LineIndexer(source, Decoder.MinCharBytes);
       Indexer.StartScan();
     }
 
@@ -166,7 +166,7 @@ internal sealed class AppState
 
       // Restart indexing on the (possibly new) file source.
       if (Document.FileSource is { } source) {
-        Indexer = new LineIndexer(source);
+        Indexer = new LineIndexer(source, Decoder.MinCharBytes);
         Indexer.StartScan();
       }
 
@@ -174,7 +174,7 @@ internal sealed class AppState
     } catch (Exception ex) {
       // Best-effort: try to restart indexer even on failure.
       if (Indexer is null && Document.FileSource is { } src) {
-        Indexer = new LineIndexer(src);
+        Indexer = new LineIndexer(src, Decoder.MinCharBytes);
         Indexer.StartScan();
       }
       errorMessage = ex.Message;
@@ -183,11 +183,20 @@ internal sealed class AppState
   }
 
   /// <summary>
-  /// Switches encoding decoder at runtime.
+  /// Switches encoding decoder at runtime and restarts the line indexer
+  /// so that newline scanning uses the correct character width.
   /// </summary>
   public void SwitchEncoding(TextEncoding encoding)
   {
     Decoder = CreateDecoder(encoding);
+
+    // Restart the line indexer with the new encoding's character width.
+    Indexer?.Dispose();
+    Indexer = null;
+    if (Document?.FileSource is { } source) {
+      Indexer = new LineIndexer(source, Decoder.MinCharBytes);
+      Indexer.StartScan();
+    }
   }
 
   /// <summary>

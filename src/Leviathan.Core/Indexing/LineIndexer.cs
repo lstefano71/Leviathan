@@ -17,10 +17,11 @@ public sealed class LineIndexer : IDisposable
 
   public LineIndex Index => _index;
 
-  public LineIndexer(MappedFileSource source, int sparseFactor = 1000)
+  /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
+  public LineIndexer(MappedFileSource source, int charWidth = 1, int sparseFactor = 1000)
   {
     _source = source;
-    _index = new LineIndex(sparseFactor);
+    _index = new LineIndex(charWidth, sparseFactor);
     _cts = new CancellationTokenSource();
   }
 

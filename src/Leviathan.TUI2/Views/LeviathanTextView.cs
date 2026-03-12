@@ -307,7 +307,7 @@ internal sealed class LeviathanTextView : View
       if (lineByteLen < 0 || lineByteLen > bytesRead - lineStart)
         lineByteLen = Math.Max(0, bytesRead - lineStart);
 
-      bool isHardLine = lineStart == 0 || IsNewlineAt(data, lineStart - 1, decoder);
+      bool isHardLine = lineStart == 0 || IsNewlineAt(data, lineStart - decoder.MinCharBytes, decoder);
       if (isHardLine)
         currentLineNumber++;
 
@@ -361,10 +361,13 @@ internal sealed class LeviathanTextView : View
       }
 
       // Cursor at end of line (if cursor is at lineDocOffset + lineByteLen)
+      // or cursor on empty line (zero displayable chars, cursor == lineDocOffset)
       long endOffset = lineDocOffset + lineByteLen;
       bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
       int endCol = GutterWidth + (text.Length - visibleStart);
-      if (_state.TextCursorOffset == endOffset && !nextLineStartsHere
+      bool cursorAtEnd = _state.TextCursorOffset == endOffset && !nextLineStartsHere;
+      bool cursorOnEmptyLine = text.Length == 0 && _state.TextCursorOffset == lineDocOffset;
+      if ((cursorAtEnd || cursorOnEmptyLine)
           && endCol < vpWidth - 1 && text.Length >= hOffset) {
         SetAttribute(cursorAttr);
         AddRune(' ');
@@ -556,9 +559,10 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null || _state.TextTopOffset <= 0) return;
 
+    int minChar = _state.Decoder.MinCharBytes;
     long offset = _state.TextTopOffset;
     for (int i = 0; i < lines && offset > 0; i++) {
-      long prevLineEnd = Math.Max(0, offset - 1);
+      long prevLineEnd = Math.Max(0, offset - minChar);
       offset = FindLineStart(prevLineEnd);
     }
     _state.TextTopOffset = offset;
@@ -573,7 +577,8 @@ internal sealed class LeviathanTextView : View
     long offset = _state.TextTopOffset;
     for (int i = 0; i < lines && offset < doc.Length; i++) {
       long lineEnd = FindLineEnd(offset);
-      long nextStart = lineEnd + 1;
+      int nlLen = NewlineLengthAt(lineEnd);
+      long nextStart = lineEnd + (nlLen > 0 ? nlLen : 1);
       if (nextStart > doc.Length) nextStart = doc.Length;
       offset = nextStart;
     }
@@ -892,9 +897,9 @@ internal sealed class LeviathanTextView : View
       if (lineStart == 0 && _state.TextCursorOffset <= bom) return;
       if (lineStart == 0) lineStart = bom; // effective start on line 1
 
-      long prevLineEnd = lineStart - 1;
+      int minChar = _state.Decoder.MinCharBytes;
+      long prevLineEnd = lineStart - minChar;
       long prevLineStart = FindLineStart(prevLineEnd);
-      // Effective start accounts for BOM on line 1
       long effectivePrevStart = prevLineStart < bom ? bom : prevLineStart;
 
       long col = _state.TextCursorOffset - (FindLineStart(_state.TextCursorOffset) < bom ? bom : FindLineStart(_state.TextCursorOffset));
@@ -942,10 +947,11 @@ internal sealed class LeviathanTextView : View
     if (cursorRow < 0) {
       // Cursor not in rendered lines — fall back to hard-line navigation
       int bom = _state.BomLength;
+      int minChar = _state.Decoder.MinCharBytes;
       if (direction < 0) {
         long lineStart = FindLineStart(_state.TextCursorOffset);
         if (lineStart <= bom) return;
-        long prevLineEnd = lineStart - 1;
+        long prevLineEnd = lineStart - minChar;
         long prevLineStart = FindLineStart(prevLineEnd);
         long col = _state.TextCursorOffset - lineStart;
         _state.TextCursorOffset = Math.Min(prevLineStart + col, prevLineEnd);
@@ -971,7 +977,7 @@ internal sealed class LeviathanTextView : View
       // Need to scroll up — move cursor to previous hard line
       long lineStart = FindLineStart(_state.TextCursorOffset);
       if (lineStart <= _state.BomLength && curVl.DocOffset == lineStart) return;
-      long prevLineEnd = Math.Max(0, lineStart - 1);
+      long prevLineEnd = Math.Max(0, lineStart - _state.Decoder.MinCharBytes);
       long prevLineStart = FindLineStart(prevLineEnd);
       _state.TextCursorOffset = Math.Min(prevLineStart + colOffset, prevLineEnd);
       return;
@@ -988,7 +994,7 @@ internal sealed class LeviathanTextView : View
 
     // Move to the same byte offset within the target visual line
     VisualLine targetVl = _visualLines[targetRow];
-    long newOffset = targetVl.DocOffset + Math.Min(colOffset, Math.Max(0, targetVl.ByteLength - 1));
+    long newOffset = targetVl.DocOffset + Math.Min(colOffset, Math.Max(0, targetVl.ByteLength - _state.Decoder.MinCharBytes));
     _state.TextCursorOffset = Math.Clamp(newOffset, targetVl.DocOffset,
         Math.Min(targetVl.DocOffset + targetVl.ByteLength, doc.Length));
   }
@@ -1156,8 +1162,9 @@ internal sealed class LeviathanTextView : View
     if (!cursorVisible) {
       // Scroll so the cursor is roughly centered in the viewport
       long newTop = FindLineStart(_state.TextCursorOffset);
+      int minChar = _state.Decoder.MinCharBytes;
       for (int i = 0; i < vpHeight / 2 && newTop > 0; i++) {
-        long prev = FindLineStart(Math.Max(0, newTop - 1));
+        long prev = FindLineStart(Math.Max(0, newTop - minChar));
         if (prev >= newTop) break;
         newTop = prev;
       }
@@ -1213,7 +1220,7 @@ internal sealed class LeviathanTextView : View
       long scanFrom;
       long lineNum;
       if (sparseIdx >= 0) {
-        scanFrom = idx.GetSparseOffset(sparseIdx) + 1;
+        scanFrom = idx.GetSparseOffset(sparseIdx) + _state.Decoder.MinCharBytes;
         lineNum = (long)(sparseIdx + 1) * sparseFactor + 1;
       } else {
         scanFrom = 0;
@@ -1262,6 +1269,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null) return 0;
 
+    int minChar = _state.Decoder.MinCharBytes;
     long count = 0;
     long pos = from;
     byte[] buf = new byte[65536];
@@ -1271,9 +1279,18 @@ internal sealed class LeviathanTextView : View
       int read = doc.Read(pos, buf.AsSpan(0, readLen));
       if (read == 0) break;
 
-      for (int i = 0; i < read; i++) {
-        if (buf[i] == 0x0A)
-          count++;
+      if (minChar == 2) {
+        // UTF-16 LE: scan for 0x0A 0x00 at even byte offsets
+        int alignedLen = read & ~1; // ensure we process whole code units
+        for (int i = 0; i + 1 < alignedLen; i += 2) {
+          if (buf[i] == 0x0A && buf[i + 1] == 0x00)
+            count++;
+        }
+      } else {
+        for (int i = 0; i < read; i++) {
+          if (buf[i] == 0x0A)
+            count++;
+        }
       }
       pos += read;
     }
@@ -1285,6 +1302,7 @@ internal sealed class LeviathanTextView : View
     Document? doc = _state.Document;
     if (doc is null || targetLine <= 1) return _state.BomLength;
 
+    int minChar = _state.Decoder.MinCharBytes;
     long newlinesNeeded = targetLine - 1;
 
     // Try using the sparse line index for O(1) lookup + small scan
@@ -1299,7 +1317,7 @@ internal sealed class LeviathanTextView : View
       if (sparseIdx >= idx.SparseEntryCount)
         sparseIdx = idx.SparseEntryCount - 1;
       if (sparseIdx >= 0) {
-        startOffset = idx.GetSparseOffset(sparseIdx) + 1; // byte after the stored \n
+        startOffset = idx.GetSparseOffset(sparseIdx) + minChar; // byte after the stored LF code unit
         newlinesCounted = (long)(sparseIdx + 1) * sparseFactor;
       }
     }
@@ -1308,9 +1326,9 @@ internal sealed class LeviathanTextView : View
     if (remaining <= 0)
       return Math.Min(startOffset, doc.Length);
 
-    // Linear scan from startOffset counting only \n (0x0A) bytes
+    // Linear scan from startOffset counting LF code units
     long pos = startOffset;
-    byte[] buf = new byte[65536]; // 64KB buffer for better throughput
+    byte[] buf = new byte[65536];
     long found = 0;
 
     while (pos < doc.Length && found < remaining) {
@@ -1318,11 +1336,23 @@ internal sealed class LeviathanTextView : View
       int read = doc.Read(pos, buf.AsSpan(0, readLen));
       if (read == 0) break;
 
-      for (int i = 0; i < read; i++) {
-        if (buf[i] == 0x0A) {
-          found++;
-          if (found >= remaining)
-            return pos + i + 1; // byte after the \n
+      if (minChar == 2) {
+        // UTF-16 LE: scan for 0x0A 0x00 at even byte offsets
+        int alignedLen = read & ~1;
+        for (int i = 0; i + 1 < alignedLen; i += 2) {
+          if (buf[i] == 0x0A && buf[i + 1] == 0x00) {
+            found++;
+            if (found >= remaining)
+              return pos + i + 2; // byte after the LF code unit (2 bytes)
+          }
+        }
+      } else {
+        for (int i = 0; i < read; i++) {
+          if (buf[i] == 0x0A) {
+            found++;
+            if (found >= remaining)
+              return pos + i + 1; // byte after the \n
+          }
         }
       }
       pos += read;

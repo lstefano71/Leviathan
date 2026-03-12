@@ -373,6 +373,11 @@ internal sealed class MainWindow : Window
     _hexView.Visible = _state.ActiveView == ViewMode.Hex;
     _textView.Visible = _state.ActiveView == ViewMode.Text;
     UpdateViewMenuVisibility(_state.ActiveView);
+
+    // Sync encoding selector to the auto-detected (or current) encoding
+    if (_encodingSelector is not null)
+      _encodingSelector.Value = (int)_state.Decoder.Encoding;
+
     UpdateTitle();
     UpdateStatusBar();
     _hexView.SetNeedsDraw();
