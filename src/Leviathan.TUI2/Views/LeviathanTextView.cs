@@ -45,7 +45,13 @@ internal sealed class LeviathanTextView : View
   {
     _state = state;
     CanFocus = true;
-    ContentSizeTracksViewport = false;
+
+    // Same reason as LeviathanHexView: do NOT set ContentSizeTracksViewport = false.
+    // This view manages its own scroll position via _state.TextTopOffset and
+    // explicit ScrollBar children whose Value/Visible are set directly in
+    // UpdateScrollBar().  Activating Terminal.Gui's built-in scroll management
+    // (via ContentSizeTracksViewport or ScrollBarVisibilityMode.Always) triggers
+    // the DoDrawAdornments → Margin.VerticalScrollBar NRE in develop build 5185.
 
     // Vertical scrollbar
     _verticalScrollBar = new ScrollBar() {
@@ -54,7 +60,6 @@ internal sealed class LeviathanTextView : View
       Y = 0,
       Width = 1,
       Height = Dim.Fill(),
-      VisibilityMode = ScrollBarVisibilityMode.Always,
     };
     _verticalScrollBar.ValueChanged += (_, e) => {
       if (_updatingScrollBar || _state.Document is null) return;
@@ -73,7 +78,6 @@ internal sealed class LeviathanTextView : View
       Y = Pos.AnchorEnd(1),
       Width = Dim.Fill(1), // leave room for vertical scrollbar
       Height = 1,
-      VisibilityMode = ScrollBarVisibilityMode.Always,
       Visible = !_state.WordWrap,
     };
     _horizontalScrollBar.ValueChanged += (_, e) => {

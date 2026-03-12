@@ -34,9 +34,13 @@ internal sealed class LeviathanHexView : View
     _state = state;
     CanFocus = true;
 
-    // Scrolling setup
-    ContentSizeTracksViewport = false;
-    ViewportSettings |= ViewportSettingsFlags.AllowYGreaterThanContentHeight;
+    // Do NOT set ContentSizeTracksViewport = false or ViewportSettings flags:
+    // both activate Terminal.Gui's built-in scroll-overflow management which,
+    // in develop build 5185, accesses Margin.VerticalScrollBar on adornment
+    // views (where Margin.Padding == null) and throws NullReferenceException
+    // from DoDrawAdornments.  This view owns its own scroll position entirely
+    // via _state.HexBaseOffset, so Terminal.Gui's scroll infrastructure is
+    // not needed and must not be activated.
 
     SetupCommands();
     SetupKeyBindings();

@@ -11,10 +11,8 @@ using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
-// ─── Application state ───
+// ─── Application state (no Terminal.Gui dependency) ───
 AppState state = new();
-LeviathanHexView hexView = new(state);
-LeviathanTextView textView = new(state);
 CommandPalette palette = new();
 
 // Apply persisted settings
@@ -30,6 +28,11 @@ using IApplication app = Application.Create();
 #pragma warning disable IL2026, IL3050 // Terminal.Gui's Init uses reflection internally; assembly is trimmer-rooted
 app.Init();
 #pragma warning restore IL2026, IL3050
+
+// Views must be created after app.Init() so Terminal.Gui's binding registries and
+// scheme infrastructure are fully initialised before the views' constructors run.
+LeviathanHexView hexView = new(state);
+LeviathanTextView textView = new(state);
 
 using MainWindow mainWindow = new(app, state, hexView, textView, palette);
 app.Run(mainWindow);
@@ -165,10 +168,16 @@ internal sealed class MainWindow : Window
   private MenuBar BuildMenuBar()
   {
     // Word Wrap — CheckBox CommandView
-    _wordWrapCheckBox = new CheckBox { Title = "_Word Wrap", CanFocus = false };
-    _wordWrapCheckBox.Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked;
-    _wordWrapItem = new MenuItem { Title = "_Word Wrap", HelpText = "Toggle word wrap" };
-    _wordWrapItem.CommandView = _wordWrapCheckBox;
+    _wordWrapCheckBox = new CheckBox {
+      Title = "_Word Wrap",
+      CanFocus = false,
+      Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked
+    };
+    _wordWrapItem = new MenuItem {
+      Title = "_Word Wrap",
+      HelpText = "Toggle word wrap",
+      CommandView = _wordWrapCheckBox
+    };
     _wordWrapItem.Action += () => {
       if (_wordWrapCheckBox is not null)
         ApplyWordWrap(_wordWrapCheckBox.Value == CheckState.Checked);
@@ -182,8 +191,10 @@ internal sealed class MainWindow : Window
       CanFocus = true,
       Orientation = Orientation.Vertical,
     };
-    _encodingItem = new MenuItem { Title = "_Encoding" };
-    _encodingItem.CommandView = _encodingSelector;
+    _encodingItem = new MenuItem {
+      Title = "_Encoding",
+      CommandView = _encodingSelector
+    };
     _encodingSelector.ValueChanged += (_, args) => {
       if (args.NewValue is int val)
         SwitchEncoding((TextEncoding)val);
@@ -197,8 +208,10 @@ internal sealed class MainWindow : Window
       CanFocus = true,
       Orientation = Orientation.Vertical,
     };
-    _bprItem = new MenuItem { Title = "_Bytes/Row" };
-    _bprItem.CommandView = _bprSelector;
+    _bprItem = new MenuItem {
+      Title = "_Bytes/Row",
+      CommandView = _bprSelector
+    };
     _bprSelector.ValueChanged += (_, args) => {
       if (args.NewValue is int val)
         SetBytesPerRow(val);
@@ -232,9 +245,9 @@ internal sealed class MainWindow : Window
   }
 
   /// <summary>Builds the File menu items including MRU entries.</summary>
-  private MenuItem?[] BuildFileMenuItems()
+  private View[] BuildFileMenuItems()
   {
-    List<MenuItem?> items = [
+    List<View> items = [
       new MenuItem("_Open...", Key.O.WithCtrl, () => ShowOpenDialog()) { HelpText = "Open a file" },
       new MenuItem("_Save", Key.S.WithCtrl, () => SaveFile()) { HelpText = "Save the file" },
       new MenuItem("Save _As...", "Save to a new path", () => ShowSaveAsDialog()),
@@ -242,16 +255,16 @@ internal sealed class MainWindow : Window
 
     List<string> recent = _state.Settings.RecentFiles;
     if (recent.Count > 0) {
-      items.Add(null); // separator
+      items.Add(new Line()); // separator
       for (int i = 0; i < Math.Min(9, recent.Count); i++) {
         string path = recent[i];
         string fileName = Path.GetFileName(path);
         string title = $"_{i + 1} {fileName}";
-        items.Add(new MenuItem(title, path, () => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); })));
+        items.Add(new MenuItem(title, path, () => _app.Invoke(() => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); }))));
       }
     }
 
-    items.Add(null); // separator before Quit
+    items.Add(new Line()); // separator before Quit
     items.Add(new MenuItem("_Quit", Key.Q.WithCtrl, () => GuardUnsavedChanges(() => _app.RequestStop())) { HelpText = "Exit Leviathan" });
 
     return items.ToArray();
@@ -261,7 +274,8 @@ internal sealed class MainWindow : Window
   private void RefreshFileMenu()
   {
     if (_fileMenuBarItem is null) return;
-    _fileMenuBarItem.PopoverMenu?.Dispose();
+    // Don't Dispose the old PopoverMenu — Terminal.Gui may still reference it
+    // during its dismissal lifecycle. The old instance will be GC'd naturally.
     _fileMenuBarItem.PopoverMenu = new PopoverMenu(BuildFileMenuItems()!);
   }
 
@@ -286,9 +300,15 @@ internal sealed class MainWindow : Window
       // MRU digit keys (1-9) when welcome screen is visible
       if (_welcomeView.Visible && !e.Handled) {
         int digit = e.KeyCode switch {
-          KeyCode.D1 => 0, KeyCode.D2 => 1, KeyCode.D3 => 2,
-          KeyCode.D4 => 3, KeyCode.D5 => 4, KeyCode.D6 => 5,
-          KeyCode.D7 => 6, KeyCode.D8 => 7, KeyCode.D9 => 8,
+          KeyCode.D1 => 0,
+          KeyCode.D2 => 1,
+          KeyCode.D3 => 2,
+          KeyCode.D4 => 3,
+          KeyCode.D5 => 4,
+          KeyCode.D6 => 5,
+          KeyCode.D7 => 6,
+          KeyCode.D8 => 7,
+          KeyCode.D9 => 8,
           _ => -1
         };
         if (digit >= 0 && digit < _state.Settings.RecentFiles.Count) {
@@ -743,8 +763,8 @@ internal sealed class MainWindow : Window
     // MRU entries in the command palette
     foreach (string recent in _state.Settings.RecentFiles) {
       string path = recent;
-      _palette.RegisterCommand("File", $"Open: {Path.GetFileName(path)}", "", 
-          () => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); }));
+      _palette.RegisterCommand("File", $"Open: {Path.GetFileName(path)}", "",
+          () => _app.Invoke(() => GuardUnsavedChanges(() => { _state.OpenFile(path); ShowFileViews(); })));
     }
   }
 
