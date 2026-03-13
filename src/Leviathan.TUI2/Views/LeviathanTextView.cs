@@ -651,14 +651,117 @@ internal sealed class LeviathanTextView : View
 
   internal void PageUp(bool extend)
   {
+    if (_state.WordWrap && _lastRenderedLineCount > 0) {
+      PageVerticalVisual(-1, extend);
+      return;
+    }
     for (int i = 0; i < _state.VisibleRows; i++)
       MoveVertical(-1, extend);
   }
 
   internal void PageDown(bool extend)
   {
+    if (_state.WordWrap && _lastRenderedLineCount > 0) {
+      PageVerticalVisual(1, extend);
+      return;
+    }
     for (int i = 0; i < _state.VisibleRows; i++)
       MoveVertical(1, extend);
+  }
+
+  /// <summary>
+  /// Page up/down with word wrap: scrolls the viewport by one page of visual lines
+  /// and places the cursor on the same relative row.
+  /// </summary>
+  private void PageVerticalVisual(int direction, bool extend)
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return;
+
+    if (!extend) _state.TextSelectionAnchor = -1;
+    else if (_state.TextSelectionAnchor < 0)
+      _state.TextSelectionAnchor = _state.TextCursorOffset;
+
+    int vpHeight = _state.VisibleRows;
+    if (vpHeight <= 0) vpHeight = 24;
+    int maxCols = _lastTextAreaCols > 0 ? _lastTextAreaCols : 80;
+    ITextDecoder decoder = _state.Decoder;
+
+    // Find cursor's current row within the viewport
+    int cursorRow = -1;
+    for (int i = 0; i < _lastRenderedLineCount; i++) {
+      long vlStart = _visualLines[i].DocOffset;
+      long vlEnd = vlStart + _visualLines[i].ByteLength;
+      if (_state.TextCursorOffset >= vlStart && _state.TextCursorOffset < vlEnd) {
+        cursorRow = i;
+        break;
+      }
+      if (_state.TextCursorOffset == vlEnd) {
+        bool nextStartsHere = (i + 1 < _lastRenderedLineCount) && _visualLines[i + 1].DocOffset == vlEnd;
+        if (!nextStartsHere) { cursorRow = i; break; }
+      }
+    }
+    if (cursorRow < 0) cursorRow = 0;
+
+    // Compute the cursor's display column
+    int displayCol;
+    if (_desiredColumn >= 0) {
+      displayCol = _desiredColumn;
+    } else {
+      if (cursorRow < _lastRenderedLineCount) {
+        VisualLine curVl = _visualLines[cursorRow];
+        int curLen = (int)Math.Min(curVl.ByteLength, int.MaxValue);
+        EnsureBuffer(curLen);
+        doc.Read(curVl.DocOffset, _readBuffer.AsSpan(0, curLen));
+        displayCol = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, curLen),
+            _state.TextCursorOffset - curVl.DocOffset, decoder);
+      } else {
+        displayCol = 0;
+      }
+      _desiredColumn = displayCol;
+    }
+
+    // Scroll the viewport by vpHeight visual lines
+    long newTop = _state.TextTopOffset;
+    if (direction > 0) {
+      for (int i = 0; i < vpHeight && newTop < doc.Length; i++) {
+        if (FindNextVisualLine(newTop, maxCols, out VisualLine nextVl)) {
+          long next = nextVl.DocOffset + nextVl.ByteLength;
+          if (next <= newTop) break;
+          newTop = next;
+        } else break;
+      }
+      newTop = Math.Min(newTop, doc.Length);
+    } else {
+      for (int i = 0; i < vpHeight && newTop > _state.BomLength; i++) {
+        if (FindPreviousVisualLine(newTop, maxCols, out VisualLine prevVl))
+          newTop = prevVl.DocOffset;
+        else break;
+      }
+    }
+
+    _state.TextTopOffset = newTop;
+
+    // Re-render visual lines from the new top to place cursor on the same relative row
+    int readSize = Math.Max((vpHeight + 4) * 256, 16384);
+    readSize = (int)Math.Min(readSize, doc.Length - _state.TextTopOffset);
+    if (readSize > 0) {
+      EnsureBuffer(readSize);
+      int bytesRead = doc.Read(_state.TextTopOffset, _readBuffer.AsSpan(0, readSize));
+      if (bytesRead > 0) {
+        EnsureVisualLines(vpHeight + 64);
+        int lineCount = _wrapEngine.ComputeVisualLines(
+            _readBuffer.AsSpan(0, bytesRead), _state.TextTopOffset, maxCols, true, _visualLines, decoder);
+        _lastRenderedLineCount = lineCount;
+
+        int targetRow = Math.Min(cursorRow, lineCount - 1);
+        if (targetRow < 0) targetRow = 0;
+        if (targetRow < lineCount)
+          PlaceCursorOnVisualLine(_visualLines[targetRow], displayCol);
+      }
+    }
+
+    OnStateChanged();
   }
 
   internal void ScrollUp(int lines)
