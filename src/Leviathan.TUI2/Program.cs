@@ -4,6 +4,8 @@ using Leviathan.TUI2;
 using Leviathan.TUI2.Views;
 using Leviathan.TUI2.Widgets;
 
+using System.Reflection;
+
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
@@ -466,45 +468,151 @@ internal sealed class MainWindow : Window
 
   private void ShowKeyboardShortcuts()
   {
-    string message =
-        "Global\n" +
-        "  F1          Help\n" +
-        "  Ctrl+O      Open file\n" +
-        "  Ctrl+S      Save\n" +
-        "  Ctrl+Q      Quit\n" +
-        "  Ctrl+P      Command palette\n" +
-        "  Ctrl+G      Go to offset/line\n" +
-        "  Ctrl+F      Find\n" +
-        "  F3          Find next\n" +
-        "  Shift+F3    Find previous\n" +
-        "  F5 / F6     Hex / Text view\n" +
-        "\n" +
-        "Navigation and editing\n" +
-        "  Arrow keys          Move cursor\n" +
-        "  Shift+Arrow keys    Select while moving\n" +
-        "  PageUp/PageDown     Scroll by page\n" +
-        "  Home/End            Start/end of line or row\n" +
-        "  Ctrl+Home/End       Start/end of file\n" +
-        "  Backspace/Delete    Delete before/at cursor\n" +
-        "  Ctrl+C / Ctrl+V     Copy / Paste\n" +
-        "  Ctrl+A              Select all\n" +
-        "  Enter               Insert newline (Text view)";
-    MessageBox.Query(App!, "Keyboard Shortcuts", message, "OK");
+    string[] lines = BuildKeyboardShortcutsTable().Split('\n', StringSplitOptions.None);
+
+    Window shortcutsWindow = new() {
+      Title = "Keyboard Shortcuts",
+      Width = Dim.Percent(72),
+      Height = Dim.Percent(78),
+    };
+
+    View content = new() {
+      X = 1,
+      Y = 1,
+      Width = Dim.Fill(2),
+      Height = Dim.Fill(2),
+      CanFocus = false,
+    };
+
+    content.DrawingContent += (_, _) => {
+      content.SetAttributeForRole(VisualRole.Normal);
+      int viewportWidth = content.Viewport.Width;
+      int viewportHeight = content.Viewport.Height;
+
+      for (int row = 0; row < viewportHeight; row++) {
+        content.Move(0, row);
+        for (int column = 0; column < viewportWidth; column++)
+          content.AddRune(' ');
+      }
+
+      int rowCount = Math.Min(lines.Length, viewportHeight);
+      for (int row = 0; row < rowCount; row++) {
+        string line = lines[row];
+        int columnCount = Math.Min(line.Length, viewportWidth);
+        content.Move(0, row);
+        for (int column = 0; column < columnCount; column++)
+          content.AddRune(line[column]);
+      }
+    };
+
+    shortcutsWindow.KeyDown += (_, e) => {
+      if (e.KeyCode is KeyCode.Esc or KeyCode.Enter || e == Key.F1) {
+        shortcutsWindow.RequestStop();
+        e.Handled = true;
+      }
+    };
+
+    shortcutsWindow.Add(content);
+    _app.Run(shortcutsWindow);
+    shortcutsWindow.Dispose();
+  }
+
+  private static string BuildKeyboardShortcutsTable()
+  {
+    (string Section, string Shortcut, string Description)[] rows = [
+      ("Global", "F1", "Help"),
+      ("Global", "Ctrl+O", "Open file"),
+      ("Global", "Ctrl+S", "Save"),
+      ("Global", "Ctrl+Q", "Quit"),
+      ("Global", "Ctrl+P", "Command palette"),
+      ("Global", "Ctrl+G", "Go to offset/line"),
+      ("Global", "Ctrl+F", "Find"),
+      ("Global", "F3", "Find next"),
+      ("Global", "Shift+F3", "Find previous"),
+      ("Global", "F5 / F6", "Hex / Text view"),
+      ("Navigation and editing", "Arrow keys", "Move cursor"),
+      ("Navigation and editing", "Shift+Arrow keys", "Select while moving"),
+      ("Navigation and editing", "PageUp/PageDown", "Scroll by page"),
+      ("Navigation and editing", "Home/End", "Start/end of line or row"),
+      ("Navigation and editing", "Ctrl+Home/End", "Start/end of file"),
+      ("Navigation and editing", "Backspace/Delete", "Delete before/at cursor"),
+      ("Navigation and editing", "Ctrl+C / Ctrl+V", "Copy / Paste"),
+      ("Navigation and editing", "Ctrl+A", "Select all"),
+      ("Navigation and editing", "Enter", "Insert newline (Text view)"),
+    ];
+
+    const string shortcutHeader = "Shortcut";
+    const string descriptionHeader = "Description";
+
+    int shortcutWidth = shortcutHeader.Length;
+    int descriptionWidth = descriptionHeader.Length;
+
+    foreach ((string _, string shortcut, string description) in rows) {
+      if (shortcut.Length > shortcutWidth)
+        shortcutWidth = shortcut.Length;
+      if (description.Length > descriptionWidth)
+        descriptionWidth = description.Length;
+    }
+
+    List<string> lines = [];
+    string? currentSection = null;
+
+    foreach ((string section, string shortcut, string description) in rows) {
+      if (!string.Equals(currentSection, section, StringComparison.Ordinal)) {
+        if (lines.Count > 0)
+          lines.Add(string.Empty);
+
+        lines.Add(section);
+        lines.Add($"{shortcutHeader.PadRight(shortcutWidth)}  {descriptionHeader}");
+        lines.Add($"{new string('-', shortcutWidth)}  {new string('-', descriptionWidth)}");
+        currentSection = section;
+      }
+
+      lines.Add($"{shortcut.PadRight(shortcutWidth)}  {description}");
+    }
+
+    lines.Add(string.Empty);
+    lines.Add("Press Enter, Esc, or F1 to close.");
+
+    return string.Join('\n', lines);
   }
 
   private void ShowAboutDialog()
   {
-    Version? version = typeof(MainWindow).Assembly.GetName().Version;
-    string versionText = version is null ? "unknown" : version.ToString();
+    Assembly assembly = typeof(MainWindow).Assembly;
+    string informationalVersion = ThisAssembly.AssemblyInformationalVersion;
+    int metadataSep = informationalVersion.IndexOf('+');
+    string versionText = metadataSep > 0 ? informationalVersion[..metadataSep] : informationalVersion;
+    if (string.IsNullOrWhiteSpace(versionText))
+      versionText = "unknown";
+    string commitText = ThisAssembly.GitCommitId;
+    if (commitText.Length > 12)
+      commitText = commitText[..12];
+    if (string.IsNullOrWhiteSpace(commitText))
+      commitText = "unknown";
+    string buildDateText = ReadAssemblyMetadata(assembly, "BuildDateUtc");
     string terminalGuiVersion = typeof(Window).Assembly.GetName().Version?.ToString() ?? "unknown";
     string message =
         "Leviathan TUI2\n" +
         "Large file editor\n" +
         $"\nVersion: {versionText}\n" +
+        $"Commit: {commitText}\n" +
+        $"Build date (UTC): {buildDateText}\n" +
         $"Terminal.Gui: {terminalGuiVersion}\n" +
         $".NET: {Environment.Version}\n" +
         "\nBuilt for fast navigation and editing of very large files.";
     MessageBox.Query(App!, "About Leviathan", message, "OK");
+  }
+
+  private static string ReadAssemblyMetadata(Assembly assembly, string key)
+  {
+    foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>()) {
+      if (string.Equals(metadata.Key, key, StringComparison.Ordinal)
+          && !string.IsNullOrWhiteSpace(metadata.Value))
+        return metadata.Value!;
+    }
+
+    return "unknown";
   }
 
   private void GuardUnsavedChanges(Action action)

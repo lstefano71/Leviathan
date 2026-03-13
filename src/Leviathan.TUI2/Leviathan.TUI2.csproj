@@ -11,6 +11,7 @@
     <Platforms>AnyCPU;x64</Platforms>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <BuildDateUtc>$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</BuildDateUtc>
   </PropertyGroup>
 
   <!-- Root all Terminal.Gui types so the AOT trimmer does not strip
@@ -20,11 +21,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="BuildDateUtc" Value="$(BuildDateUtc)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Leviathan.Core\Leviathan.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Terminal.Gui" Version="2.0.0-develop.5185" />
+    <PackageReference Include="Nerdbank.GitVersioning" Version="3.8.118" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>
