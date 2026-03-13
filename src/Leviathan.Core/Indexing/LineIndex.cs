@@ -100,6 +100,8 @@ public sealed class LineIndex
   {
     long linesSoFar = Volatile.Read(ref _totalLineCount);
     long pos = 0;
+    bool canCancel = ct.CanBeCanceled;
+    int cancelCheckCounter = 0;
 
     // Use Vector256 path when available (AVX2)
     if (Vector256.IsHardwareAccelerated && length >= 32) {
@@ -107,15 +109,17 @@ public sealed class LineIndex
       long vectorEnd = length - 32;
 
       while (pos <= vectorEnd) {
-        ct.ThrowIfCancellationRequested();
+        if (canCancel && (cancelCheckCounter++ & 0xFF) == 0)
+          ct.ThrowIfCancellationRequested();
 
         var chunk = Vector256.Load(data + pos);
         var cmp = Vector256.Equals(chunk, needle);
         uint mask = cmp.ExtractMostSignificantBits();
+        long chunkBaseOffset = baseOffset + pos;
 
         while (mask != 0) {
           int bit = BitOperations.TrailingZeroCount(mask);
-          RecordNewline(ref linesSoFar, baseOffset + pos + bit);
+          RecordNewline(ref linesSoFar, chunkBaseOffset + bit);
           mask &= mask - 1;
         }
 
@@ -128,15 +132,17 @@ public sealed class LineIndex
       long vectorEnd = length - 16;
 
       while (pos <= vectorEnd) {
-        ct.ThrowIfCancellationRequested();
+        if (canCancel && (cancelCheckCounter++ & 0xFF) == 0)
+          ct.ThrowIfCancellationRequested();
 
         var chunk = Vector128.Load(data + pos);
         var cmp = Vector128.Equals(chunk, needle);
         uint mask = cmp.ExtractMostSignificantBits();
+        long chunkBaseOffset = baseOffset + pos;
 
         while (mask != 0) {
           int bit = BitOperations.TrailingZeroCount(mask);
-          RecordNewline(ref linesSoFar, baseOffset + pos + bit);
+          RecordNewline(ref linesSoFar, chunkBaseOffset + bit);
           mask &= mask - 1;
         }
 
@@ -146,6 +152,9 @@ public sealed class LineIndex
 
     // Scalar tail
     for (; pos < length; pos++) {
+      if (canCancel && (cancelCheckCounter++ & 0x3FF) == 0)
+        ct.ThrowIfCancellationRequested();
+
       if (data[pos] == 0x0A)
         RecordNewline(ref linesSoFar, baseOffset + pos);
     }

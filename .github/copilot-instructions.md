@@ -92,6 +92,10 @@ AppWindow.Render → _renderCallback(deltaTime) → ImGui.Render() → ImGuiImpl
 - Mirror the zero-allocation style in tests where practical (`stackalloc` in assertions).
 - `CreateTempFile` helper + `try/finally` for any test that needs a real file on disk.
 
+### Performance Optimization
+- For performance optimization tasks, run the profiler first to summarize CPU bottlenecks.
+- Recommend fixes based on profiling results and baseline/re-run benchmarks for validation.
+
 ### Project boundaries
 - `Leviathan.Core` must remain UI-free. Never add a reference to `Leviathan.UI` or any GUI package from Core.
 - New Core sub-systems belong in a dedicated sub-folder matching the logical layer (`IO/`, `DataModel/`, `Indexing/`, `Text/`).
