@@ -33,6 +33,8 @@ internal sealed class LeviathanTextView : View
   private readonly ScrollBar _verticalScrollBar;
   private readonly ScrollBar _horizontalScrollBar;
   private bool _updatingScrollBar;
+  private int _userScrollFrames;
+  private int _userHScrollFrames;
   private int _horizontalScrollOffset;
   private int _maxLineWidthInViewport;
   /// <summary>Reusable buffer for navigation visual-line computation (separate from _visualLines).</summary>
@@ -72,7 +74,12 @@ internal sealed class LeviathanTextView : View
       long totalLines = Math.Max(1, _state.EstimatedTotalLines);
       long newOffset = (long)((double)e.NewValue / Math.Max(1, totalLines) * _state.Document.Length);
       newOffset = Math.Clamp(newOffset, 0, _state.Document.Length);
-      _state.TextTopOffset = FindLineStart(newOffset);
+      long newTop = FindLineStart(newOffset);
+      _state.TextTopOffset = newTop;
+      _state.TextCursorOffset = Math.Max(newTop, _state.BomLength);
+      _state.TextSelectionAnchor = -1;
+      _desiredColumn = -1;
+      _userScrollFrames = 2;
       SetNeedsDraw();
     };
     Add(_verticalScrollBar);
@@ -89,6 +96,7 @@ internal sealed class LeviathanTextView : View
     _horizontalScrollBar.ValueChanged += (_, e) => {
       if (_updatingScrollBar) return;
       _horizontalScrollOffset = Math.Max(0, e.NewValue);
+      _userHScrollFrames = 2;
       SetNeedsDraw();
     };
     Add(_horizontalScrollBar);
@@ -1537,8 +1545,8 @@ internal sealed class LeviathanTextView : View
       }
     }
 
-    // Horizontal auto-pan (only when word wrap is off)
-    if (!_state.WordWrap) {
+    // Horizontal auto-pan (only when word wrap is off and not user-scrollbar-scrolling)
+    if (!_state.WordWrap && _userHScrollFrames <= 0) {
       int cursorCol = ComputeCursorColumn();
       if (cursorCol < _horizontalScrollOffset)
         _horizontalScrollOffset = Math.Max(0, cursorCol - 4);
@@ -2111,10 +2119,14 @@ internal sealed class LeviathanTextView : View
 
     _updatingScrollBar = true;
 
-    // Vertical
+    // Vertical — skip Value reset while the user is actively scrollbar-scrolling
+    // to avoid ±1 px handle jitter from the lossy offset↔scrollPos round-trip.
     _verticalScrollBar.ScrollableContentSize = scrollTotal;
     _verticalScrollBar.VisibleContentSize = vpHeight;
-    _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
+    if (_userScrollFrames > 0)
+      _userScrollFrames--;
+    else
+      _verticalScrollBar.Value = Math.Clamp(scrollPos, 0, Math.Max(0, scrollTotal - vpHeight));
 
     // Horizontal (only meaningful when word wrap is off)
     if (!_state.WordWrap) {
@@ -2122,17 +2134,22 @@ internal sealed class LeviathanTextView : View
       if (effectiveWidth > textAreaCols) {
         _horizontalScrollBar.ScrollableContentSize = effectiveWidth;
         _horizontalScrollBar.VisibleContentSize = textAreaCols;
-        _horizontalScrollBar.Value = Math.Clamp(_horizontalScrollOffset, 0,
-            Math.Max(0, effectiveWidth - textAreaCols));
+        if (_userHScrollFrames > 0)
+          _userHScrollFrames--;
+        else
+          _horizontalScrollBar.Value = Math.Clamp(_horizontalScrollOffset, 0,
+              Math.Max(0, effectiveWidth - textAreaCols));
       } else {
         _horizontalScrollBar.ScrollableContentSize = textAreaCols;
         _horizontalScrollBar.VisibleContentSize = textAreaCols;
-        _horizontalScrollBar.Value = 0;
+        if (_userHScrollFrames > 0) _userHScrollFrames--;
+        else _horizontalScrollBar.Value = 0;
       }
     } else {
       _horizontalScrollBar.ScrollableContentSize = textAreaCols;
       _horizontalScrollBar.VisibleContentSize = textAreaCols;
       _horizontalScrollBar.Value = 0;
+      _userHScrollFrames = 0;
     }
 
     _updatingScrollBar = false;
