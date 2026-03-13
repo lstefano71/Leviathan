@@ -35,6 +35,7 @@ internal sealed class LeviathanTextView : View
   private bool _updatingScrollBar;
   private int _userScrollFrames;
   private int _userHScrollFrames;
+  private bool _horizontalScrollVisible;
   private int _horizontalScrollOffset;
   private int _maxLineWidthInViewport;
   /// <summary>Reusable buffer for navigation visual-line computation (separate from _visualLines).</summary>
@@ -67,14 +68,25 @@ internal sealed class LeviathanTextView : View
       X = Pos.AnchorEnd(1),
       Y = 0,
       Width = 1,
-      Height = Dim.Fill(),
+      Height = Dim.Fill(_state.WordWrap ? 0 : 1),
     };
     _verticalScrollBar.ValueChanged += (_, e) => {
       if (_updatingScrollBar || _state.Document is null) return;
+      Document doc = _state.Document;
       long totalLines = Math.Max(1, _state.EstimatedTotalLines);
-      long newOffset = (long)((double)e.NewValue / Math.Max(1, totalLines) * _state.Document.Length);
-      newOffset = Math.Clamp(newOffset, 0, _state.Document.Length);
-      long newTop = FindLineStart(newOffset);
+
+      // Use line-based lookup when sparse index is available, byte-proportional fallback otherwise
+      long newTop;
+      LineIndex? idx = _state.LineIndex;
+      if (idx is not null && idx.SparseEntryCount > 0) {
+        long targetLine = (long)e.NewValue + 1;
+        newTop = FindOffsetOfLine(targetLine);
+      } else {
+        long newOffset = (long)((double)e.NewValue / Math.Max(1, totalLines) * doc.Length);
+        newOffset = Math.Clamp(newOffset, 0, doc.Length);
+        newTop = FindLineStart(newOffset);
+      }
+      newTop = Math.Clamp(newTop, 0, doc.Length);
       _state.TextTopOffset = newTop;
       _state.TextCursorOffset = Math.Max(newTop, _state.BomLength);
       _state.TextSelectionAnchor = -1;
@@ -93,6 +105,7 @@ internal sealed class LeviathanTextView : View
       Height = 1,
       Visible = !_state.WordWrap,
     };
+    _horizontalScrollVisible = _horizontalScrollBar.Visible;
     _horizontalScrollBar.ValueChanged += (_, e) => {
       if (_updatingScrollBar) return;
       _horizontalScrollOffset = Math.Max(0, e.NewValue);
@@ -227,15 +240,20 @@ internal sealed class LeviathanTextView : View
     int textAreaCols = Math.Max(1, vpWidth - GutterWidth - 1); // -1 for vertical scrollbar
     _lastTextAreaCols = textAreaCols;
 
-    // Update horizontal scrollbar visibility
-    _horizontalScrollBar.Visible = !_state.WordWrap;
+    // Update horizontal scrollbar visibility + keep vertical bar geometry in sync.
+    bool showHorizontalScroll = !_state.WordWrap;
+    if (_horizontalScrollVisible != showHorizontalScroll) {
+      _horizontalScrollVisible = showHorizontalScroll;
+      _horizontalScrollBar.Visible = showHorizontalScroll;
+      _verticalScrollBar.Height = showHorizontalScroll ? Dim.Fill(1) : Dim.Fill();
+    }
     if (_state.WordWrap) {
       _horizontalScrollOffset = 0;
       _maxLineWidthInViewport = 0;
     }
 
     // Reserve a row for the horizontal scrollbar so content doesn't draw under it
-    if (_horizontalScrollBar.Visible)
+    if (showHorizontalScroll)
       vpHeight = Math.Max(1, vpHeight - 1);
 
     _state.VisibleRows = vpHeight;
@@ -872,12 +890,17 @@ internal sealed class LeviathanTextView : View
 
   internal void CtrlEnd(bool extend)
   {
-    if (_state.Document is null) return;
+    Document? doc = _state.Document;
+    if (doc is null) return;
     _desiredColumn = -1;
     if (!extend) _state.TextSelectionAnchor = -1;
     else if (_state.TextSelectionAnchor < 0)
       _state.TextSelectionAnchor = _state.TextCursorOffset;
-    _state.TextCursorOffset = _state.Document.Length;
+    _state.TextCursorOffset = doc.Length;
+    if (!_state.WordWrap) {
+      int vpHeight = _state.VisibleRows > 0 ? _state.VisibleRows : 24;
+      _state.TextTopOffset = ComputeBottomAlignedTopOffset(vpHeight);
+    }
     OnStateChanged();
   }
 
@@ -1391,6 +1414,23 @@ internal sealed class LeviathanTextView : View
     }
 
     return 0;
+  }
+
+  private long ComputeBottomAlignedTopOffset(int visibleRows)
+  {
+    Document? doc = _state.Document;
+    if (doc is null) return 0;
+    if (visibleRows <= 1) return FindLineStart(doc.Length);
+
+    int minChar = _state.Decoder.MinCharBytes;
+    long top = FindLineStart(doc.Length);
+    for (int i = 1; i < visibleRows && top > 0; i++) {
+      long prevLineEnd = Math.Max(0, top - minChar);
+      long prev = FindLineStart(prevLineEnd);
+      if (prev >= top) break;
+      top = prev;
+    }
+    return top;
   }
 
   private long FindLineEnd(long offset)
@@ -2114,8 +2154,12 @@ internal sealed class LeviathanTextView : View
 
     long totalLines = Math.Max(1, _state.EstimatedTotalLines);
     int scrollTotal = (int)Math.Min(totalLines, int.MaxValue - 1);
-    double fraction = doc.Length > 0 ? (double)_state.TextTopOffset / doc.Length : 0;
-    int scrollPos = (int)(fraction * scrollTotal);
+
+    // Use line-based position instead of byte-fraction so the handle
+    // accurately reflects the logical line position (important when line
+    // lengths vary — byte-fraction undershoots near the end of such files).
+    long currentLine = ComputeLineNumber(_state.TextTopOffset);
+    int scrollPos = (int)Math.Clamp(currentLine - 1, 0, scrollTotal);
 
     _updatingScrollBar = true;
 
