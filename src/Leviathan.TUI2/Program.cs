@@ -246,6 +246,10 @@ internal sealed class MainWindow : Window
                 new MenuItem("_Paste", Key.V.WithCtrl, () => DoPaste()) { HelpText = "Paste from clipboard" },
                 new MenuItem("Select _All", Key.A.WithCtrl, () => DoSelectAll()) { HelpText = "Select entire file" },
             ]),
+            new MenuBarItem("_Help", [
+                new MenuItem("_Keyboard Shortcuts", Key.F1, () => ShowKeyboardShortcuts()) { HelpText = "Show key combinations" },
+                new MenuItem("_About", "About Leviathan", () => ShowAboutDialog()),
+            ]),
         ]);
   }
 
@@ -299,6 +303,9 @@ internal sealed class MainWindow : Window
         e.Handled = true;
       } else if (e == Key.F6) {
         SwitchView(ViewMode.Text);
+        e.Handled = true;
+      } else if (e == Key.F1) {
+        ShowKeyboardShortcuts();
         e.Handled = true;
       }
 
@@ -455,6 +462,49 @@ internal sealed class MainWindow : Window
   private void ShowSaveErrorDialog(string message)
   {
     MessageBox.ErrorQuery(App!, "Save Error", message, "OK");
+  }
+
+  private void ShowKeyboardShortcuts()
+  {
+    string message =
+        "Global\n" +
+        "  F1          Help\n" +
+        "  Ctrl+O      Open file\n" +
+        "  Ctrl+S      Save\n" +
+        "  Ctrl+Q      Quit\n" +
+        "  Ctrl+P      Command palette\n" +
+        "  Ctrl+G      Go to offset/line\n" +
+        "  Ctrl+F      Find\n" +
+        "  F3          Find next\n" +
+        "  Shift+F3    Find previous\n" +
+        "  F5 / F6     Hex / Text view\n" +
+        "\n" +
+        "Navigation and editing\n" +
+        "  Arrow keys          Move cursor\n" +
+        "  Shift+Arrow keys    Select while moving\n" +
+        "  PageUp/PageDown     Scroll by page\n" +
+        "  Home/End            Start/end of line or row\n" +
+        "  Ctrl+Home/End       Start/end of file\n" +
+        "  Backspace/Delete    Delete before/at cursor\n" +
+        "  Ctrl+C / Ctrl+V     Copy / Paste\n" +
+        "  Ctrl+A              Select all\n" +
+        "  Enter               Insert newline (Text view)";
+    MessageBox.Query(App!, "Keyboard Shortcuts", message, "OK");
+  }
+
+  private void ShowAboutDialog()
+  {
+    Version? version = typeof(MainWindow).Assembly.GetName().Version;
+    string versionText = version is null ? "unknown" : version.ToString();
+    string terminalGuiVersion = typeof(Window).Assembly.GetName().Version?.ToString() ?? "unknown";
+    string message =
+        "Leviathan TUI2\n" +
+        "Large file editor\n" +
+        $"\nVersion: {versionText}\n" +
+        $"Terminal.Gui: {terminalGuiVersion}\n" +
+        $".NET: {Environment.Version}\n" +
+        "\nBuilt for fast navigation and editing of very large files.";
+    MessageBox.Query(App!, "About Leviathan", message, "OK");
   }
 
   private void GuardUnsavedChanges(Action action)
@@ -781,6 +831,8 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("Edit", "Copy", "Ctrl+C", () => DoCopy());
     _palette.RegisterCommand("Edit", "Paste", "Ctrl+V", () => DoPaste());
     _palette.RegisterCommand("Edit", "Select All", "Ctrl+A", () => DoSelectAll());
+    _palette.RegisterCommand("Help", "Keyboard Shortcuts", "F1", () => ShowKeyboardShortcuts());
+    _palette.RegisterCommand("Help", "About", "", () => ShowAboutDialog());
 
     // Encoding — dynamic radio indicators
     _palette.RegisterCommand("Encoding",
