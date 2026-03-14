@@ -38,12 +38,14 @@ app.Keyboard.KeyBindings.Remove(app.Keyboard.QuitKey);
 // scheme infrastructure are fully initialised before the views' constructors run.
 LeviathanHexView hexView = new(state);
 LeviathanTextView textView = new(state);
+LeviathanCsvView csvView = new(state);
 
-using MainWindow mainWindow = new(app, state, hexView, textView, palette);
+using MainWindow mainWindow = new(app, state, hexView, textView, csvView, palette);
 app.Run(mainWindow);
 
 // Clean up
 state.CancelSearch();
+state.CsvRowIndexer?.Dispose();
 state.Document?.Dispose();
 
 // ═══════════════════════════════════════════════════════════════════
@@ -56,6 +58,7 @@ internal sealed class MainWindow : Window
   private readonly AppState _state;
   private readonly LeviathanHexView _hexView;
   private readonly LeviathanTextView _textView;
+  private readonly LeviathanCsvView _csvView;
   private readonly CommandPalette _palette;
   private readonly StatusBar _statusBar;
   private readonly Label _statusFileLabel;
@@ -65,12 +68,14 @@ internal sealed class MainWindow : Window
   private readonly CommandPalettePopover _palettePopover;
   private readonly View _welcomeView;
   private readonly MenuBar _menuBar;
+  private CsvSettingsBar? _csvSettingsBar;
   private MenuItem? _wordWrapItem;
   private CheckBox? _wordWrapCheckBox;
   private MenuItem? _encodingItem;
   private OptionSelector? _encodingSelector;
   private MenuItem? _bprItem;
   private OptionSelector? _bprSelector;
+  private MenuItem? _csvSettingsItem;
   private MenuBarItem? _fileMenuBarItem;
 
   internal MainWindow(
@@ -78,12 +83,14 @@ internal sealed class MainWindow : Window
       AppState state,
       LeviathanHexView hexView,
       LeviathanTextView textView,
+      LeviathanCsvView csvView,
       CommandPalette palette)
   {
     _app = app;
     _state = state;
     _hexView = hexView;
     _textView = textView;
+    _csvView = csvView;
     _palette = palette;
 
     Title = "Leviathan — Large File Editor";
@@ -106,6 +113,12 @@ internal sealed class MainWindow : Window
     _textView.Height = Dim.Fill(1);
     _textView.Visible = state.ActiveView == ViewMode.Text;
 
+    _csvView.X = 0;
+    _csvView.Y = Pos.Bottom(menuBar);
+    _csvView.Width = Dim.Fill();
+    _csvView.Height = Dim.Fill(1);
+    _csvView.Visible = state.ActiveView == ViewMode.Csv;
+
     // ─── Status bar ───
     _statusFileLabel = new Label() {
       X = 0,
@@ -127,13 +140,14 @@ internal sealed class MainWindow : Window
     // ─── Welcome view ───
     _welcomeView = BuildWelcomeView(menuBar);
 
-    Add(menuBar, _welcomeView, _hexView, _textView, _statusBar);
+    Add(menuBar, _welcomeView, _hexView, _textView, _csvView, _statusBar);
 
     // Show welcome if no file is open
     bool hasFile = state.Document is not null;
     _welcomeView.Visible = !hasFile;
     _hexView.Visible = hasFile && state.ActiveView == ViewMode.Hex;
     _textView.Visible = hasFile && state.ActiveView == ViewMode.Text;
+    _csvView.Visible = hasFile && state.ActiveView == ViewMode.Csv;
 
     // View-specific menu items
     UpdateViewMenuVisibility(state.ActiveView);
@@ -141,6 +155,7 @@ internal sealed class MainWindow : Window
     // Wire state-changed events to update status bar
     _hexView.StateChanged += UpdateStatusBar;
     _textView.StateChanged += UpdateStatusBar;
+    _csvView.StateChanged += UpdateStatusBar;
 
     // Register command palette commands
     RegisterCommands();
@@ -150,6 +165,10 @@ internal sealed class MainWindow : Window
     _gotoBar = new GotoBar(state, o => _hexView.GotoOffset(o), l => _textView.GotoLine(l));
     _palettePopover = new CommandPalettePopover(palette, state,
         l => _textView.GotoLine(l), o => _hexView.GotoOffset(o));
+    _csvSettingsBar = new CsvSettingsBar(state, () => {
+      _csvView.SetNeedsDraw();
+      UpdateStatusBar();
+    });
     Initialized += RegisterPopovers;
 
     // ─── Application-level key bindings ───
@@ -166,10 +185,14 @@ internal sealed class MainWindow : Window
     popovers.Register(_findBar);
     popovers.Register(_gotoBar);
     popovers.Register(_palettePopover);
+    if (_csvSettingsBar is not null)
+      popovers.Register(_csvSettingsBar);
 
     popovers.Hide(_findBar);
     popovers.Hide(_gotoBar);
     popovers.Hide(_palettePopover);
+    if (_csvSettingsBar is not null)
+      popovers.Hide(_csvSettingsBar);
   }
 
   private MenuBar BuildMenuBar()
@@ -231,9 +254,11 @@ internal sealed class MainWindow : Window
             new MenuBarItem("_View", [
                 new MenuItem("_Hex View", Key.F5, () => SwitchView(ViewMode.Hex)) { HelpText = "Switch to hex view" },
                 new MenuItem("_Text View", Key.F6, () => SwitchView(ViewMode.Text)) { HelpText = "Switch to text view" },
+                new MenuItem("_CSV View", Key.F7, () => SwitchView(ViewMode.Csv)) { HelpText = "Switch to CSV view" },
                 _wordWrapItem,
                 _encodingItem,
                 _bprItem,
+                (_csvSettingsItem = new MenuItem("CSV _Settings...", "", () => ShowCsvSettings()) { HelpText = "Configure CSV dialect", Visible = false }),
             ]),
             new MenuBarItem("_Navigate", [
                 new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _palettePopover.ShowGoto()) { HelpText = "Jump to offset or line" },
@@ -247,6 +272,7 @@ internal sealed class MainWindow : Window
                 new MenuItem("_Copy", Key.C.WithCtrl, () => DoCopy()) { HelpText = "Copy selection" },
                 new MenuItem("_Paste", Key.V.WithCtrl, () => DoPaste()) { HelpText = "Paste from clipboard" },
                 new MenuItem("Select _All", Key.A.WithCtrl, () => DoSelectAll()) { HelpText = "Select entire file" },
+                new MenuItem("_Delete Row(s)", Key.Delete, () => DoDeleteCsvRows()) { HelpText = "Delete selected CSV row(s)" },
             ]),
             new MenuBarItem("_Help", [
                 new MenuItem("_Keyboard Shortcuts", Key.F1, () => ShowKeyboardShortcuts()) { HelpText = "Show key combinations" },
@@ -306,6 +332,12 @@ internal sealed class MainWindow : Window
       } else if (e == Key.F6) {
         SwitchView(ViewMode.Text);
         e.Handled = true;
+      } else if (e == Key.F7) {
+        SwitchView(ViewMode.Csv);
+        e.Handled = true;
+      } else if (e == Key.F2 && _state.ActiveView == ViewMode.Csv) {
+        ShowCsvRecordDetail();
+        e.Handled = true;
       } else if (e == Key.F1) {
         ShowKeyboardShortcuts();
         e.Handled = true;
@@ -354,12 +386,18 @@ internal sealed class MainWindow : Window
     _welcomeView.Visible = false;
     _hexView.Visible = mode == ViewMode.Hex;
     _textView.Visible = mode == ViewMode.Text;
+    _csvView.Visible = mode == ViewMode.Csv;
     UpdateViewMenuVisibility(mode);
+
+    if (mode == ViewMode.Csv && _state.CsvRowIndexer is null)
+      _state.InitCsvView();
 
     if (mode == ViewMode.Hex)
       _hexView.SetFocus();
-    else
+    else if (mode == ViewMode.Text)
       _textView.SetFocus();
+    else
+      _csvView.SetFocus();
 
     UpdateStatusBar();
     UpdateTitle();
@@ -372,6 +410,8 @@ internal sealed class MainWindow : Window
       _wordWrapItem.Visible = mode == ViewMode.Text;
     if (_bprItem is not null)
       _bprItem.Visible = mode == ViewMode.Hex;
+    if (_csvSettingsItem is not null)
+      _csvSettingsItem.Visible = mode == ViewMode.Csv;
     // Encoding is visible in both modes
   }
 
@@ -379,8 +419,21 @@ internal sealed class MainWindow : Window
   private void ShowFileViews()
   {
     _welcomeView.Visible = false;
+
+    // Auto-detect CSV files and switch to CSV view
+    if (_state.CurrentFilePath is not null)
+    {
+      string ext = Path.GetExtension(_state.CurrentFilePath).ToLowerInvariant();
+      if (ext is ".csv" or ".tsv" or ".tab")
+      {
+        _state.ActiveView = ViewMode.Csv;
+        _state.InitCsvView();
+      }
+    }
+
     _hexView.Visible = _state.ActiveView == ViewMode.Hex;
     _textView.Visible = _state.ActiveView == ViewMode.Text;
+    _csvView.Visible = _state.ActiveView == ViewMode.Csv;
     UpdateViewMenuVisibility(_state.ActiveView);
 
     // Sync encoding selector to the auto-detected (or current) encoding
@@ -391,7 +444,11 @@ internal sealed class MainWindow : Window
     UpdateStatusBar();
     _hexView.SetNeedsDraw();
     _textView.SetNeedsDraw();
+    _csvView.SetNeedsDraw();
     RefreshFileMenu();
+
+    if (_state.ActiveView == ViewMode.Csv)
+      _csvView.SetFocus();
   }
 
   // ─── File operations ───
@@ -755,9 +812,11 @@ internal sealed class MainWindow : Window
 
   private void DoCopy()
   {
-    string? text = _state.ActiveView == ViewMode.Hex
-        ? _hexView.CopySelection()
-        : _textView.CopySelection();
+    string? text = _state.ActiveView switch {
+      ViewMode.Hex => _hexView.CopySelection(),
+      ViewMode.Csv => _csvView.CopySelection(),
+      _ => _textView.CopySelection()
+    };
 
     if (text is not null)
       _app.Clipboard?.TrySetClipboardData(text);
@@ -765,6 +824,7 @@ internal sealed class MainWindow : Window
 
   private void DoPaste()
   {
+    if (_state.ActiveView == ViewMode.Csv) return; // CSV is read-only for paste
     if (_app.Clipboard is { } clipboard && clipboard.TryGetClipboardData(out string? text) && text is not null) {
       if (_state.ActiveView == ViewMode.Hex)
         _hexView.Paste(text);
@@ -777,8 +837,33 @@ internal sealed class MainWindow : Window
   {
     if (_state.ActiveView == ViewMode.Hex)
       _hexView.SelectAll();
-    else
+    else if (_state.ActiveView == ViewMode.Text)
       _textView.SelectAll();
+    // CSV: no select-all for now (rows only)
+  }
+
+  private void DoDeleteCsvRows()
+  {
+    if (_state.ActiveView != ViewMode.Csv) return;
+    _csvView.DeleteSelectedRows();
+  }
+
+  private void ShowCsvSettings()
+  {
+    if (_csvSettingsBar is null || _app.Popovers is null) return;
+    _csvSettingsBar.Refresh();
+    _app.Popovers.Show(_csvSettingsBar);
+  }
+
+  private void ShowCsvRecordDetail()
+  {
+    if (_state.ActiveView != ViewMode.Csv) return;
+    (string Name, string Value)[] details = _csvView.ReadRecordDetails(_state.CsvCursorRow);
+    if (details.Length == 0) return;
+
+    CsvRecordDetailDialog dialog = new(_state.CsvCursorRow, details);
+    _app.Run(dialog);
+    dialog.Dispose();
   }
 
   // ─── Word wrap ───
@@ -917,6 +1002,8 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("File", "Quit", "Ctrl+Q", () => GuardUnsavedChanges(() => _app.RequestStop()));
     _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
     _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
+    _palette.RegisterCommand("View", "CSV View", "F7", () => SwitchView(ViewMode.Csv));
+    _palette.RegisterCommand("View", "CSV Settings...", "", () => ShowCsvSettings());
 
     // Word wrap — dynamic check indicator
     _palette.RegisterCommand("View",
@@ -987,7 +1074,11 @@ internal sealed class MainWindow : Window
 
     string fileName = Path.GetFileName(_state.CurrentFilePath);
     string modified = _state.IsModified ? "● " : "";
-    string viewName = _state.ActiveView == ViewMode.Hex ? "HEX" : "TEXT";
+    string viewName = _state.ActiveView switch {
+      ViewMode.Hex => "HEX",
+      ViewMode.Csv => "CSV",
+      _ => "TEXT"
+    };
     string encoding = _state.Decoder.Encoding.ToString();
     long cursor = _state.CurrentCursorOffset;
     List<SearchResult> searchResults = _state.SearchResults;
@@ -995,13 +1086,27 @@ internal sealed class MainWindow : Window
         ? $" | {_state.CurrentMatchIndex + 1}/{searchResults.Count} matches"
         : _state.IsSearching ? " | Searching…" : "";
 
-    Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+    if (_state.ActiveView == ViewMode.Csv)
+    {
+      long totalRows = _state.CsvRowIndex?.TotalRowCount ?? 0;
+      if (_state.CsvDialect.HasHeader && totalRows > 0) totalRows--;
+      string csvInfo = $"Row {_state.CsvCursorRow + 1}/{totalRows} | Col {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
+      char sep = (char)_state.CsvDialect.Separator;
+      string sepName = sep switch { ',' => "Comma", '\t' => "Tab", '|' => "Pipe", ';' => "Semicolon", _ => $"'{sep}'" };
+      Title = $"{modified}{fileName} — {viewName} | {csvInfo} | Sep: {sepName} | {FormatFileSize(_state.FileLength)}";
+      _statusFileLabel.Text = $" {modified}{fileName}";
+      _statusInfoLabel.Text = $"{viewName} | {csvInfo} | Sep: {sepName} | {FormatFileSize(_state.FileLength)} ";
+    }
+    else
+    {
+      Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
 
-    // Status bar — left: file name with dirty indicator
-    _statusFileLabel.Text = $" {modified}{fileName}";
+      // Status bar — left: file name with dirty indicator
+      _statusFileLabel.Text = $" {modified}{fileName}";
 
-    // Status bar — right: view mode, encoding, offset, size, search
-    _statusInfoLabel.Text = $"{viewName} | {encoding} | Offset: 0x{cursor:X} ({cursor}) | {FormatFileSize(_state.FileLength)}{searchInfo} ";
+      // Status bar — right: view mode, encoding, offset, size, search
+      _statusInfoLabel.Text = $"{viewName} | {encoding} | Offset: 0x{cursor:X} ({cursor}) | {FormatFileSize(_state.FileLength)}{searchInfo} ";
+    }
   }
 
   private static string FormatFileSize(long bytes)

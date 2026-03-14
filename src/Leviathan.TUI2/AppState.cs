@@ -1,4 +1,5 @@
 using Leviathan.Core;
+using Leviathan.Core.Csv;
 using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
@@ -65,6 +66,30 @@ internal sealed class AppState
   public long GotoPreviewOrigin { get; set; } = -1;
   /// <summary>Top offset before goto preview started.</summary>
   public long GotoPreviewTopOrigin { get; set; }
+
+  // --- CSV view state ---
+  /// <summary>Active CSV dialect (separator, quote, escape, header).</summary>
+  public CsvDialect CsvDialect { get; set; } = CsvDialect.Csv();
+  /// <summary>Background CSV row indexer.</summary>
+  public CsvRowIndexer? CsvRowIndexer { get; set; }
+  /// <summary>Sparse CSV row index built by the background indexer.</summary>
+  public CsvRowIndex? CsvRowIndex => CsvRowIndexer?.Index;
+  /// <summary>First visible data row index (0-based).</summary>
+  public long CsvTopRowIndex { get; set; }
+  /// <summary>Current cursor row (0-based data row, excluding header).</summary>
+  public long CsvCursorRow { get; set; }
+  /// <summary>Current cursor column (0-based).</summary>
+  public int CsvCursorCol { get; set; }
+  /// <summary>Selection anchor row for multi-row selection (-1 = no selection).</summary>
+  public long CsvSelectionAnchorRow { get; set; } = -1;
+  /// <summary>Computed column widths for the grid display.</summary>
+  public int[]? CsvColumnWidths { get; set; }
+  /// <summary>Horizontal scroll offset (number of columns scrolled).</summary>
+  public int CsvHorizontalScroll { get; set; }
+  /// <summary>Header field names (empty if no header).</summary>
+  public string[] CsvHeaderNames { get; set; } = [];
+  /// <summary>Number of columns detected.</summary>
+  public int CsvColumnCount { get; set; }
 
   // --- Settings ---
   public TuiSettings Settings { get; set; } = TuiSettings.Load();
@@ -213,6 +238,237 @@ internal sealed class AppState
     IsSearching = false;
   }
 
+  /// <summary>
+  /// Initialises CSV view state for the currently open file.
+  /// Loads per-file settings or auto-detects dialect.
+  /// </summary>
+  public void InitCsvView()
+  {
+    if (Document is null) return;
+
+    // Stop any previous CSV indexer
+    CsvRowIndexer?.Dispose();
+    CsvRowIndexer = null;
+
+    // Try to load per-file settings
+    CsvFileSettings? saved = CurrentFilePath is not null
+        ? Settings.GetCsvFileSettings(CurrentFilePath)
+        : null;
+
+    if (saved is not null)
+    {
+      CsvDialect = new CsvDialect(saved.Separator, saved.Quote, saved.Escape, saved.HasHeader);
+    }
+    else
+    {
+      // Auto-detect from file content
+      int sampleSize = (int)Math.Min(32768, Document.Length);
+      byte[] sampleBuf = new byte[sampleSize];
+      Document.Read(0, sampleBuf);
+      ReadOnlySpan<byte> sample = sampleBuf.AsSpan(0, sampleSize);
+      CsvDialect detected = CsvDialectDetector.Detect(sample);
+      bool hasHeader = CsvHeaderDetector.Detect(sample, detected);
+      CsvDialect = detected with { HasHeader = hasHeader };
+    }
+
+    // Reset CSV view state
+    CsvTopRowIndex = 0;
+    CsvCursorRow = 0;
+    CsvCursorCol = 0;
+    CsvSelectionAnchorRow = -1;
+    CsvHorizontalScroll = 0;
+
+    // Start background row indexing
+    if (Document.FileSource is { } source)
+    {
+      CsvRowIndexer = new CsvRowIndexer(source, CsvDialect);
+      CsvRowIndexer.StartScan();
+      CsvColumnCount = CsvRowIndexer.Index.ColumnCount;
+    }
+
+    // Parse header names
+    ParseCsvHeaders();
+
+    // Compute initial column widths from sample data
+    ComputeCsvColumnWidths();
+
+    // Save detected settings for this file
+    if (CurrentFilePath is not null && saved is null)
+    {
+      Settings.SetCsvFileSettings(CurrentFilePath, new CsvFileSettings {
+        Separator = CsvDialect.Separator,
+        Quote = CsvDialect.Quote,
+        Escape = CsvDialect.Escape,
+        HasHeader = CsvDialect.HasHeader
+      });
+    }
+  }
+
+  /// <summary>
+  /// Parses the header row names from the document.
+  /// </summary>
+  private void ParseCsvHeaders()
+  {
+    if (Document is null || !CsvDialect.HasHeader)
+    {
+      CsvHeaderNames = [];
+      return;
+    }
+
+    // Read enough for the first row
+    int readSize = (int)Math.Min(8192, Document.Length);
+    byte[] buf = new byte[readSize];
+    Document.Read(0, buf);
+
+    // Find end of first row
+    int pos = 0;
+    bool inQuoted = false;
+    byte quote = CsvDialect.Quote;
+
+    while (pos < readSize)
+    {
+      byte b = buf[pos];
+      if (inQuoted)
+      {
+        if (b == quote)
+        {
+          if (pos + 1 < readSize && buf[pos + 1] == quote)
+          {
+            pos += 2;
+            continue;
+          }
+          inQuoted = false;
+        }
+        pos++;
+        continue;
+      }
+      if (b == quote && quote != 0) { inQuoted = true; pos++; continue; }
+      if (b == (byte)'\n' || b == (byte)'\r') break;
+      pos++;
+    }
+
+    ReadOnlySpan<byte> headerRow = buf.AsSpan(0, pos);
+    Span<CsvField> fields = stackalloc CsvField[256];
+    int fieldCount = CsvFieldParser.ParseRecord(headerRow, CsvDialect, fields);
+
+    CsvHeaderNames = new string[fieldCount];
+    Span<byte> unescaped = stackalloc byte[1024];
+    for (int i = 0; i < fieldCount; i++)
+    {
+      int written = CsvFieldParser.UnescapeField(headerRow, fields[i], CsvDialect, unescaped);
+      CsvHeaderNames[i] = System.Text.Encoding.UTF8.GetString(unescaped[..written]);
+    }
+  }
+
+  /// <summary>
+  /// Computes column widths from sampling the first ~100 rows.
+  /// </summary>
+  private void ComputeCsvColumnWidths()
+  {
+    if (Document is null || CsvColumnCount == 0)
+    {
+      CsvColumnWidths = [];
+      return;
+    }
+
+    int colCount = CsvColumnCount;
+    int[] widths = new int[colCount];
+
+    // Start from header widths
+    for (int i = 0; i < CsvHeaderNames.Length && i < colCount; i++)
+      widths[i] = Math.Min(CsvHeaderNames[i].Length, 40);
+
+    // Sample data rows
+    int sampleSize = (int)Math.Min(65536, Document.Length);
+    byte[] buf = new byte[sampleSize];
+    Document.Read(0, buf);
+
+    int pos = 0;
+    bool inQuoted = false;
+    byte quote = CsvDialect.Quote;
+
+    // Skip header row if present
+    if (CsvDialect.HasHeader)
+    {
+      while (pos < sampleSize)
+      {
+        byte b = buf[pos];
+        if (inQuoted)
+        {
+          if (b == quote)
+          {
+            if (pos + 1 < sampleSize && buf[pos + 1] == quote) { pos += 2; continue; }
+            inQuoted = false;
+          }
+          pos++;
+          continue;
+        }
+        if (b == quote && quote != 0) { inQuoted = true; pos++; continue; }
+        if (b == (byte)'\n') { pos++; break; }
+        if (b == (byte)'\r') { pos++; if (pos < sampleSize && buf[pos] == (byte)'\n') pos++; break; }
+        pos++;
+      }
+      inQuoted = false;
+    }
+
+    // Parse up to 100 data rows
+    Span<CsvField> fields = stackalloc CsvField[256];
+    Span<byte> unescaped = stackalloc byte[1024];
+    for (int row = 0; row < 100 && pos < sampleSize; row++)
+    {
+      int rowStart = pos;
+
+      // Find row end (quote-aware)
+      while (pos < sampleSize)
+      {
+        byte b = buf[pos];
+        if (inQuoted)
+        {
+          if (b == quote)
+          {
+            if (pos + 1 < sampleSize && buf[pos + 1] == quote) { pos += 2; continue; }
+            inQuoted = false;
+          }
+          pos++;
+          continue;
+        }
+        if (b == quote && quote != 0) { inQuoted = true; pos++; continue; }
+        if (b == (byte)'\n') { pos++; break; }
+        if (b == (byte)'\r') { pos++; if (pos < sampleSize && buf[pos] == (byte)'\n') pos++; break; }
+        pos++;
+      }
+
+      int rowEnd = pos;
+      // Trim trailing newline from the row span
+      int rowLen = rowEnd - rowStart;
+      while (rowLen > 0 && (buf[rowStart + rowLen - 1] == (byte)'\n' || buf[rowStart + rowLen - 1] == (byte)'\r'))
+        rowLen--;
+
+      ReadOnlySpan<byte> rowBytes = buf.AsSpan(rowStart, rowLen);
+      int fieldCount = CsvFieldParser.ParseRecord(rowBytes, CsvDialect, fields);
+
+      for (int c = 0; c < fieldCount && c < colCount; c++)
+      {
+        int written = CsvFieldParser.UnescapeField(rowBytes, fields[c], CsvDialect, unescaped);
+        // For display width, count chars up to first newline (preview width)
+        int displayWidth = 0;
+        for (int j = 0; j < written; j++)
+        {
+          if (unescaped[j] == (byte)'\n' || unescaped[j] == (byte)'\r') break;
+          displayWidth++;
+        }
+        widths[c] = Math.Max(widths[c], Math.Min(displayWidth, 40));
+      }
+      inQuoted = false;
+    }
+
+    // Ensure minimum widths
+    for (int i = 0; i < colCount; i++)
+      widths[i] = Math.Max(widths[i], 4);
+
+    CsvColumnWidths = widths;
+  }
+
   private static ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch {
     TextEncoding.Utf8 => new Utf8TextDecoder(),
     TextEncoding.Utf16Le => new Utf16LeTextDecoder(),
@@ -224,5 +480,6 @@ internal sealed class AppState
 internal enum ViewMode
 {
   Hex,
-  Text
+  Text,
+  Csv
 }
