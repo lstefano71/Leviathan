@@ -25,6 +25,9 @@ internal sealed class LeviathanTextView : View
   private readonly LineWrapEngine _wrapEngine = new();
   private VisualLine[] _visualLines = new VisualLine[2048];
   private readonly List<int> _charByteOffsets = new(4096);
+  private readonly List<char> _displayChars = new(4096);
+  private readonly List<int> _clickByteOffsets = new(4096);
+  private byte[] _scanBuffer = new byte[64 * 1024];
   private long _cachedTopOffset;
   private long _cachedTopLineNumber = 1;
   private int _lastRenderedLineCount;
@@ -304,7 +307,8 @@ internal sealed class LeviathanTextView : View
     long viewStart = _state.TextTopOffset;
     long viewEnd = _state.TextTopOffset + bytesRead;
     List<SearchResult> searchResults = _state.SearchResults;
-    List<SearchResult> visibleMatches = CollectVisibleMatches(searchResults, viewStart, viewEnd);
+    int searchCount = searchResults.Count;
+    int firstViewMatchIndex = FindFirstOverlappingMatchIndex(searchResults, viewStart);
     int currentMatchIdx = _state.CurrentMatchIndex;
     SearchResult? activeMatch = currentMatchIdx >= 0 && currentMatchIdx < searchResults.Count
         ? searchResults[currentMatchIdx]
@@ -334,7 +338,6 @@ internal sealed class LeviathanTextView : View
       long relativeStart = lineDocOffset - _state.TextTopOffset;
 
       Attribute currentAttr = default;
-      bool hasCurrentAttr = false;
 
       Move(0, i);
 
@@ -354,7 +357,7 @@ internal sealed class LeviathanTextView : View
 
       // Gutter
       currentAttr = gutterAttr;
-      hasCurrentAttr = true;
+      //hasCurrentAttr = true;
       SetAttribute(gutterAttr);
       if (isHardLine) {
         long lineNumber = currentLineNumber - 1;
@@ -382,28 +385,31 @@ internal sealed class LeviathanTextView : View
       // Text content
       ReadOnlySpan<byte> lineBytes = data.Slice(lineStart, lineByteLen);
       _charByteOffsets.Clear();
-      string text = DecodeLineToDisplay(lineBytes, decoder, _state.TabWidth, _charByteOffsets);
+      _displayChars.Clear();
+      int displayCharCount = DecodeLineToDisplayBuffers(lineBytes, decoder, _state.TabWidth,
+          _charByteOffsets, _displayChars);
 
       // Track max line width for horizontal scrollbar
-      if (text.Length > frameMaxWidth)
-        frameMaxWidth = text.Length;
+      if (displayCharCount > frameMaxWidth)
+        frameMaxWidth = displayCharCount;
 
       // Apply horizontal scroll offset when word wrap is off
       int hOffset = _state.WordWrap ? 0 : _horizontalScrollOffset;
-      int visibleStart = Math.Min(hOffset, text.Length);
-      int visibleEnd = text.Length;
+      int visibleStart = Math.Min(hOffset, displayCharCount);
+      int visibleEnd = displayCharCount;
       int charsToDraw = Math.Min(visibleEnd - visibleStart, textColumnCapacity);
       int charOffsetsCount = _charByteOffsets.Count;
-      int visibleMatchCount = visibleMatches.Count;
-      int matchIndex = 0;
+      int matchIndex = firstViewMatchIndex;
 
-      if (visibleMatchCount > 0) {
+      if (searchCount > 0) {
         long firstVisibleOffset = lineDocOffset;
         if (visibleStart < charOffsetsCount)
           firstVisibleOffset = lineDocOffset + _charByteOffsets[visibleStart];
 
-        while (matchIndex < visibleMatchCount) {
-          SearchResult m = visibleMatches[matchIndex];
+        while (matchIndex < searchCount) {
+          SearchResult m = searchResults[matchIndex];
+          if (m.Offset >= viewEnd)
+            break;
           if (m.Offset + m.Length > firstVisibleOffset)
             break;
           matchIndex++;
@@ -424,8 +430,10 @@ internal sealed class LeviathanTextView : View
             && charDocOffset >= am.Offset && charDocOffset < am.Offset + am.Length) {
           attr = activeMatchAttr;
         } else {
-          while (matchIndex < visibleMatchCount) {
-            SearchResult m = visibleMatches[matchIndex];
+          while (matchIndex < searchCount) {
+            SearchResult m = searchResults[matchIndex];
+            if (m.Offset >= viewEnd)
+              break;
             long mEnd = m.Offset + m.Length;
             if (charDocOffset < mEnd) {
               if (charDocOffset >= m.Offset) {
@@ -446,7 +454,7 @@ internal sealed class LeviathanTextView : View
           SetAttribute(attr);
           currentAttr = attr;
         }
-        AddRune(text[ci]);
+        AddRune(_displayChars[ci]);
       }
 
       // Cursor at end of line: either exactly at endOffset (last line / no next line)
@@ -454,16 +462,16 @@ internal sealed class LeviathanTextView : View
       // Also handles empty lines where cursor == lineDocOffset.
       long endOffset = lineDocOffset + lineByteLen;
       bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
-      int endCol = GutterWidth + (text.Length - visibleStart);
-      bool cursorInNewlineArea = text.Length > 0
+      int endCol = GutterWidth + (displayCharCount - visibleStart);
+      bool cursorInNewlineArea = displayCharCount > 0
           && _charByteOffsets.Count > 0
           && _state.TextCursorOffset > lineDocOffset + _charByteOffsets[_charByteOffsets.Count - 1]
           && _state.TextCursorOffset < endOffset;
       bool cursorAtEnd = (_state.TextCursorOffset == endOffset && !nextLineStartsHere)
           || cursorInNewlineArea;
-      bool cursorOnEmptyLine = text.Length == 0 && _state.TextCursorOffset == lineDocOffset;
+      bool cursorOnEmptyLine = displayCharCount == 0 && _state.TextCursorOffset == lineDocOffset;
       if ((cursorAtEnd || cursorOnEmptyLine)
-          && endCol < vpWidth - 1 && text.Length >= hOffset) {
+          && endCol < vpWidth - 1 && displayCharCount >= hOffset) {
         if (!currentAttr.Equals(cursorAttr)) {
           SetAttribute(cursorAttr);
           currentAttr = cursorAttr;
@@ -1113,18 +1121,18 @@ internal sealed class LeviathanTextView : View
     }
 
     ReadOnlySpan<byte> lineBytes = _readBuffer.AsSpan(lineStart, lineByteLen);
-    List<int> offsets = new(lineByteLen);
     ITextDecoder decoder = _state.Decoder;
-    DecodeLineToDisplay(lineBytes, decoder, _state.TabWidth, offsets);
+    _clickByteOffsets.Clear();
+    DecodeLineToDisplayBuffers(lineBytes, decoder, _state.TabWidth, _clickByteOffsets, null);
 
-    int charIdx = Math.Min(textCol, offsets.Count);
+    int charIdx = Math.Min(textCol, _clickByteOffsets.Count);
     long newOffset;
-    if (charIdx >= offsets.Count) {
+    if (charIdx >= _clickByteOffsets.Count) {
       newOffset = vl.DocOffset + lineByteLen;
       if (newOffset > doc.Length) newOffset = doc.Length;
       if (newOffset > 0 && newOffset == doc.Length) newOffset = doc.Length - 1;
     } else {
-      newOffset = vl.DocOffset + offsets[charIdx];
+      newOffset = vl.DocOffset + _clickByteOffsets[charIdx];
     }
 
     newOffset = Math.Clamp(newOffset, 0, Math.Max(0, doc.Length - 1));
@@ -1401,7 +1409,8 @@ internal sealed class LeviathanTextView : View
     while (search > 0) {
       int chunkLen = (int)Math.Min(chunkSize, search);
       long chunkStart = search - chunkLen;
-      byte[] buf = new byte[chunkLen];
+      EnsureScanBuffer(chunkLen);
+      Span<byte> buf = _scanBuffer.AsSpan(0, chunkLen);
       doc.Read(chunkStart, buf);
 
       for (int i = chunkLen - minChar; i >= 0; i -= minChar) {
@@ -1456,7 +1465,8 @@ internal sealed class LeviathanTextView : View
       int chunkLen = (int)Math.Min(chunkSize + overlap, doc.Length - readStart);
       if (chunkLen <= 0) break;
 
-      byte[] buf = new byte[chunkLen];
+      EnsureScanBuffer(chunkLen);
+      Span<byte> buf = _scanBuffer.AsSpan(0, chunkLen);
       doc.Read(readStart, buf);
 
       // Start scanning past the overlap (which was already checked) unless it's the first chunk
@@ -1486,7 +1496,7 @@ internal sealed class LeviathanTextView : View
 
   /// <summary>Checks if position i in buf is a LF (0x0A) character, respecting encoding width.</summary>
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
-  private static bool IsLF(byte[] buf, int i, int minChar)
+  private static bool IsLF(ReadOnlySpan<byte> buf, int i, int minChar)
   {
     if (minChar == 1)
       return buf[i] == 0x0A;
@@ -1501,8 +1511,8 @@ internal sealed class LeviathanTextView : View
     if (doc is null) return 0;
 
     int minChar = _state.Decoder.MinCharBytes;
-    byte[] buf = new byte[minChar * 2];
-    int read = doc.Read(offset, buf.AsSpan(0, (int)Math.Min(buf.Length, doc.Length - offset)));
+    Span<byte> buf = stackalloc byte[4];
+    int read = doc.Read(offset, buf[..(int)Math.Min(minChar * 2, doc.Length - offset)]);
     if (read < minChar) return 0;
 
     if (minChar == 1) {
@@ -1610,8 +1620,7 @@ internal sealed class LeviathanTextView : View
     if (read == 0) return 0;
 
     ReadOnlySpan<byte> lineBytes = buf[..Math.Min(read, lineLen)];
-    string text = DecodeLineToDisplay(lineBytes, _state.Decoder, _state.TabWidth, null);
-    return text.Length;
+    return CountDisplayChars(lineBytes, _state.Decoder, _state.TabWidth);
   }
 
 
@@ -1686,11 +1695,12 @@ internal sealed class LeviathanTextView : View
     int minChar = _state.Decoder.MinCharBytes;
     long count = 0;
     long pos = from;
-    byte[] buf = new byte[65536];
+    EnsureScanBuffer(65536);
 
     while (pos < to) {
-      int readLen = (int)Math.Min(buf.Length, to - pos);
-      int read = doc.Read(pos, buf.AsSpan(0, readLen));
+      int readLen = (int)Math.Min(_scanBuffer.Length, to - pos);
+      Span<byte> buf = _scanBuffer.AsSpan(0, readLen);
+      int read = doc.Read(pos, buf);
       if (read == 0) break;
 
       if (minChar == 2) {
@@ -1742,12 +1752,13 @@ internal sealed class LeviathanTextView : View
 
     // Linear scan from startOffset counting LF code units
     long pos = startOffset;
-    byte[] buf = new byte[65536];
+    EnsureScanBuffer(65536);
     long found = 0;
 
     while (pos < doc.Length && found < remaining) {
-      int readLen = (int)Math.Min(buf.Length, doc.Length - pos);
-      int read = doc.Read(pos, buf.AsSpan(0, readLen));
+      int readLen = (int)Math.Min(_scanBuffer.Length, doc.Length - pos);
+      Span<byte> buf = _scanBuffer.AsSpan(0, readLen);
+      int read = doc.Read(pos, buf);
       if (read == 0) break;
 
       if (minChar == 2) {
@@ -1780,10 +1791,9 @@ internal sealed class LeviathanTextView : View
     return decoder.IsNewline(buf, index, out _);
   }
 
-  private static List<SearchResult> CollectVisibleMatches(List<SearchResult> results, long viewStart, long viewEnd)
+  private static int FindFirstOverlappingMatchIndex(List<SearchResult> results, long viewStart)
   {
-    List<SearchResult> visible = [];
-    if (results.Count == 0) return visible;
+    if (results.Count == 0) return 0;
 
     int lo = 0, hi = results.Count - 1;
     while (lo < hi) {
@@ -1793,65 +1803,76 @@ internal sealed class LeviathanTextView : View
       else
         hi = mid;
     }
-
-    for (int i = lo; i < results.Count; i++) {
-      SearchResult m = results[i];
-      if (m.Offset >= viewEnd) break;
-      if (m.Offset + m.Length > viewStart)
-        visible.Add(m);
-    }
-    return visible;
+    return lo;
   }
 
-  private static string DecodeLineToDisplay(ReadOnlySpan<byte> bytes, ITextDecoder decoder, int tabWidth,
-      List<int>? byteOffsets = null)
+  private static int DecodeLineToDisplayBuffers(
+      ReadOnlySpan<byte> bytes,
+      ITextDecoder decoder,
+      int tabWidth,
+      List<int>? byteOffsets,
+      List<char>? displayChars)
   {
-    StringBuilder sb = new(bytes.Length);
     byteOffsets?.Clear();
+    displayChars?.Clear();
+
+    int charCount = 0;
     int pos = 0;
+    Span<char> runeChars = stackalloc char[2];
     while (pos < bytes.Length) {
       (Rune rune, int len) = decoder.DecodeRune(bytes, pos);
-      if (len <= 0) { pos++; continue; }
+      if (len <= 0) {
+        pos++;
+        continue;
+      }
 
       int codePoint = rune.Value;
-      if (codePoint == '\n' || codePoint == '\r') {
+      if (codePoint == '\n' || codePoint == '\r' || codePoint == 0xFEFF) {
         pos += len;
         continue;
       }
-      // Skip BOM character (U+FEFF) — invisible zero-width no-break space
-      if (codePoint == 0xFEFF) {
-        pos += len;
-        continue;
-      }
+
       if (codePoint == '\t') {
         for (int i = 0; i < tabWidth; i++) {
-          sb.Append(' ');
+          displayChars?.Add(' ');
           byteOffsets?.Add(pos);
         }
+        charCount += tabWidth;
         pos += len;
         continue;
       }
+
       if (codePoint < 0x20) {
-        sb.Append('.');
+        displayChars?.Add('.');
         byteOffsets?.Add(pos);
+        charCount++;
         pos += len;
         continue;
       }
 
-      if (codePoint <= 0xFFFF) {
-        sb.Append((char)codePoint);
-        byteOffsets?.Add(pos);
-      } else {
-        string surr = char.ConvertFromUtf32(codePoint);
-        sb.Append(surr);
-        byteOffsets?.Add(pos);
-        if (surr.Length > 1)
-          byteOffsets?.Add(pos);
+      int written = rune.EncodeToUtf16(runeChars);
+      if (written <= 0) {
+        pos += len;
+        continue;
       }
 
+      for (int i = 0; i < written; i++)
+        displayChars?.Add(runeChars[i]);
+
+      byteOffsets?.Add(pos);
+      if (written > 1)
+        byteOffsets?.Add(pos);
+
+      charCount += written;
       pos += len;
     }
-    return sb.ToString();
+
+    return charCount;
+  }
+
+  private static int CountDisplayChars(ReadOnlySpan<byte> bytes, ITextDecoder decoder, int tabWidth)
+  {
+    return DecodeLineToDisplayBuffers(bytes, decoder, tabWidth, null, null);
   }
 
   private static IEnumerable<int> StringToCodePoints(string s)
@@ -2204,6 +2225,13 @@ internal sealed class LeviathanTextView : View
   {
     if (_readBuffer.Length < size)
       _readBuffer = new byte[size];
+  }
+
+  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+  private void EnsureScanBuffer(int size)
+  {
+    if (_scanBuffer.Length < size)
+      _scanBuffer = new byte[size];
   }
 
   private void EnsureVisualLines(int count)

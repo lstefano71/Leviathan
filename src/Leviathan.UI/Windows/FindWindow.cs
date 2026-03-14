@@ -32,8 +32,8 @@ public sealed class FindWindow
   private CancellationTokenSource? _searchCts;
   private Document? _lastSearchDoc;
   private string _lastSearchQuery = string.Empty;
-  private bool _lastSearchHex;
-  private bool _lastSearchCase;
+  // private bool _lastSearchHex;
+  // private bool _lastSearchCase;
 
   // Error display
   private string? _parseError;
