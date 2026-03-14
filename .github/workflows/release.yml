@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact: leviathan-tui2-win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: leviathan-tui2-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish AOT
+        run: dotnet publish src/Leviathan.TUI2/Leviathan.TUI2.csproj -c Release -r ${{ matrix.rid }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: src/Leviathan.TUI2/bin/Release/net10.0/${{ matrix.rid }}/publish/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package archives
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+
+          # Linux tar.gz
+          tar -czf "dist/leviathan-tui2_${VERSION}_linux-x64.tar.gz" \
+            -C artifacts/leviathan-tui2-linux-x64 .
+
+          # Windows zip
+          (cd artifacts/leviathan-tui2-win-x64 && zip -q "../../dist/leviathan-tui2_${VERSION}_win-x64.zip" *)
+
+          # Checksums
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          gh release create "$TAG" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt
