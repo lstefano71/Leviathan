@@ -1,7 +1,9 @@
+using System.Drawing;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
+using Color = Terminal.Gui.Drawing.Color;
 
 namespace Leviathan.TUI2.Widgets;
 
@@ -19,13 +21,45 @@ internal sealed class CsvRecordDetailDialog : Window
 
     string[] lines = FormatLines(fields);
 
+    int maxLineWidth = 0;
+    foreach (string line in lines)
+    {
+      if (line.Length > maxLineWidth)
+        maxLineWidth = line.Length;
+    }
+
     View content = new()
     {
       X = 1,
       Y = 0,
       Width = Dim.Fill(2),
       Height = Dim.Fill(0),
-      CanFocus = false,
+      CanFocus = true,
+    };
+
+    content.SetContentSize(new Size(maxLineWidth, lines.Length));
+    content.ViewportSettings |= ViewportSettingsFlags.HasVerticalScrollBar
+                              | ViewportSettingsFlags.HasHorizontalScrollBar;
+
+    content.KeyDown += (_, e) =>
+    {
+      if (e == Key.CursorUp) { content.ScrollVertical(-1); e.Handled = true; }
+      else if (e == Key.CursorDown) { content.ScrollVertical(1); e.Handled = true; }
+      else if (e == Key.CursorLeft) { content.ScrollHorizontal(-1); e.Handled = true; }
+      else if (e == Key.CursorRight) { content.ScrollHorizontal(1); e.Handled = true; }
+      else if (e == Key.PageUp) { content.ScrollVertical(-content.Viewport.Height); e.Handled = true; }
+      else if (e == Key.PageDown) { content.ScrollVertical(content.Viewport.Height); e.Handled = true; }
+      else if (e == Key.Home)
+      {
+        content.Viewport = content.Viewport with { Location = new Point(0, 0) };
+        e.Handled = true;
+      }
+      else if (e == Key.End)
+      {
+        int maxY = Math.Max(0, lines.Length - content.Viewport.Height);
+        content.Viewport = content.Viewport with { Location = new Point(content.Viewport.Location.X, maxY) };
+        e.Handled = true;
+      }
     };
 
     content.DrawingContent += (_, _) =>
@@ -33,6 +67,8 @@ internal sealed class CsvRecordDetailDialog : Window
       content.SetAttributeForRole(VisualRole.Normal);
       int vpW = content.Viewport.Width;
       int vpH = content.Viewport.Height;
+      int scrollX = content.Viewport.Location.X;
+      int scrollY = content.Viewport.Location.Y;
 
       for (int row = 0; row < vpH; row++)
       {
@@ -44,21 +80,25 @@ internal sealed class CsvRecordDetailDialog : Window
       Attribute nameAttr = new(Color.BrightCyan, Color.Black);
       Attribute valueAttr = new(Color.White, Color.Black);
 
-      int lineCount = Math.Min(lines.Length, vpH);
-      for (int row = 0; row < lineCount; row++)
+      for (int row = 0; row < vpH; row++)
       {
-        string line = lines[row];
-        int colCount = Math.Min(line.Length, vpW);
+        int contentRow = scrollY + row;
+        if (contentRow >= lines.Length) break;
+
+        string line = lines[contentRow];
         int sepIndex = line.IndexOf(" : ", StringComparison.Ordinal);
 
         content.Move(0, row);
-        for (int col = 0; col < colCount; col++)
+        for (int col = 0; col < vpW; col++)
         {
-          if (sepIndex >= 0 && col < sepIndex)
+          int contentCol = scrollX + col;
+          if (contentCol >= line.Length) break;
+
+          if (sepIndex >= 0 && contentCol < sepIndex)
             content.SetAttribute(nameAttr);
           else
             content.SetAttribute(valueAttr);
-          content.AddRune(line[col]);
+          content.AddRune(line[contentCol]);
         }
       }
     };
