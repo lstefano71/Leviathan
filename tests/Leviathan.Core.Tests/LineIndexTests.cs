@@ -231,4 +231,58 @@ public class LineIndexTests
     // Should count 2 LFs (CR is not 0x0A so it's not counted)
     Assert.Equal(2, index.TotalLineCount);
   }
+
+  [Fact]
+  public unsafe void ScanChunk_GrowsSparseArray_WhenCapacityExceeded()
+  {
+    // Use sparseFactor=1 and initialCapacity=4 so that 10 newlines triggers growth.
+    var index = new LineIndex(sparseFactor: 1, initialCapacity: 4);
+
+    var data = new byte[20];
+    for (int i = 0; i < 10; i++)
+      data[i * 2] = 0x0A; // newlines at even positions
+
+    fixed (byte* ptr = data) {
+      index.ScanChunk(ptr, data.Length, baseOffset: 0, CancellationToken.None);
+    }
+
+    index.MarkComplete();
+    Assert.Equal(10, index.TotalLineCount);
+    Assert.Equal(10, index.SparseEntryCount);
+
+    // Last entry should be valid
+    long lastOffset = index.GetSparseOffset(9);
+    Assert.True(lastOffset >= 0 && lastOffset < data.Length);
+  }
+
+  [Fact]
+  public unsafe void ScanChunk_SparseGrowth_OffsetsRemainValid()
+  {
+    // Verify that previously stored offsets survive array growth.
+    var index = new LineIndex(sparseFactor: 2, initialCapacity: 2);
+
+    // Newlines at every 4th byte: positions 3, 7, 11, 15, 19, 23, 27, 31, 35, 39
+    var data = new byte[40];
+    int nlCount = 0;
+    for (int i = 3; i < data.Length; i += 4) {
+      data[i] = 0x0A;
+      nlCount++;
+    }
+
+    fixed (byte* ptr = data) {
+      index.ScanChunk(ptr, data.Length, baseOffset: 100, CancellationToken.None);
+    }
+
+    index.MarkComplete();
+    Assert.Equal(nlCount, index.TotalLineCount);
+    int expectedSparse = nlCount / 2; // sparseFactor=2
+    Assert.Equal(expectedSparse, index.SparseEntryCount);
+
+    // Verify each sparse entry: the (2*k)th newline is at byte offset 100 + (2*k-1)*4 + 3
+    for (int i = 0; i < expectedSparse; i++) {
+      int newlineIndex = (i + 1) * 2 - 1; // 0-based index of the newline in the sequence
+      long expectedOffset = 100 + newlineIndex * 4 + 3;
+      Assert.Equal(expectedOffset, index.GetSparseOffset(i));
+    }
+  }
 }

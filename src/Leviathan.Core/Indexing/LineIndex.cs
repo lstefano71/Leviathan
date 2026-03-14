@@ -15,7 +15,7 @@ namespace Leviathan.Core.Indexing;
 /// </summary>
 public sealed class LineIndex
 {
-  private readonly long[] _sparseOffsets; // offset of every Nth newline
+  private long[] _sparseOffsets; // offset of every Nth newline
   private long _totalLineCount;
   private volatile bool _isComplete;
   private readonly int _sparseFactor;
@@ -38,7 +38,7 @@ public sealed class LineIndex
   /// Constructs a line index. The sparse array stores every <paramref name="sparseFactor"/>th newline.
   /// </summary>
   /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
-  public LineIndex(int charWidth = 1, int sparseFactor = 1000, int initialCapacity = 16384)
+  public LineIndex(int charWidth = 1, int sparseFactor = 1000, int initialCapacity = 65536)
   {
     _charWidth = charWidth;
     _sparseFactor = sparseFactor;
@@ -236,11 +236,27 @@ public sealed class LineIndex
 
     if (linesSoFar % _sparseFactor == 0) {
       int idx = (int)(linesSoFar / _sparseFactor) - 1;
-      if (idx < _sparseOffsets.Length) {
-        _sparseOffsets[idx] = byteOffset;
-        Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
-      }
+      if (idx >= _sparseOffsets.Length)
+        GrowSparseArray(idx);
+
+      _sparseOffsets[idx] = byteOffset;
+      Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
     }
+  }
+
+  /// <summary>
+  /// Doubles the sparse offset array so that <paramref name="requiredIndex"/> fits.
+  /// Called only from the single background scanner thread.
+  /// </summary>
+  private void GrowSparseArray(int requiredIndex)
+  {
+    int newCapacity = _sparseOffsets.Length;
+    while (newCapacity <= requiredIndex)
+      newCapacity *= 2;
+
+    long[] grown = new long[newCapacity];
+    Array.Copy(_sparseOffsets, grown, _sparseOffsets.Length);
+    _sparseOffsets = grown;
   }
 
   /// <summary>
