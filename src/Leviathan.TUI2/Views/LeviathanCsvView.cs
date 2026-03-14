@@ -18,11 +18,13 @@ internal sealed class LeviathanCsvView : View
 {
   private readonly AppState _state;
   private byte[] _readBuffer = new byte[64 * 1024];
+  private byte[] _scanBuffer = new byte[64 * 1024];
 
-  private const int GutterWidth = 8;    // row number gutter
+  private const int MinGutterWidth = 8;  // minimum gutter width
   private const int MinColumnWidth = 4;
   private const int MaxColumnWidth = 40;
   private const int ColumnPadding = 1;  // space between columns
+  private int _gutterWidth = MinGutterWidth;
 
   /// <summary>
   /// Fired when the view needs the status bar to update.
@@ -86,6 +88,14 @@ internal sealed class LeviathanCsvView : View
 
   // ─── Navigation ───
 
+  /// <summary>Recomputes gutter width based on the current total row count.</summary>
+  private void UpdateGutterWidth()
+  {
+    long total = GetTotalDataRows();
+    int digits = total > 0 ? (int)Math.Floor(Math.Log10(total)) + 1 : 1;
+    _gutterWidth = Math.Max(MinGutterWidth, digits + 2);
+  }
+
   private int VisibleDataRows()
   {
     int headerRows = _state.CsvDialect.HasHeader ? 1 : 0;
@@ -144,7 +154,7 @@ internal sealed class LeviathanCsvView : View
     else
     {
       // Calculate if column is visible
-      int available = Viewport.Width - GutterWidth;
+      int available = Viewport.Width - _gutterWidth;
       int usedWidth = 0;
       for (int c = _state.CsvHorizontalScroll; c <= col && c < _state.CsvColumnWidths.Length; c++)
       {
@@ -253,6 +263,8 @@ internal sealed class LeviathanCsvView : View
       return true;
     }
 
+    UpdateGutterWidth();
+
     Attribute normalAttr = new(Color.White, Color.Black);
     Attribute gutterAttr = new(new Color(100, 130, 170), Color.Black);
     Attribute headerAttr = new(Color.BrightCyan, new Color(30, 30, 60));
@@ -297,9 +309,7 @@ internal sealed class LeviathanCsvView : View
 
       // Gutter: row number
       string rowNum = (dataRow + 1).ToString();
-      if (rowNum.Length > GutterWidth - 1)
-        rowNum = rowNum[^(GutterWidth - 1)..];
-      string gutter = rowNum.PadLeft(GutterWidth - 1) + " ";
+      string gutter = rowNum.PadLeft(_gutterWidth - 1) + " ";
       DrawText(0, screenRow, gutter, gutterAttr);
 
       // Parse and draw fields
@@ -319,9 +329,9 @@ internal sealed class LeviathanCsvView : View
       AddRune(' ');
 
     // Gutter
-    DrawText(0, 0, new string(' ', GutterWidth), headerAttr);
+    DrawText(0, 0, new string(' ', _gutterWidth), headerAttr);
 
-    int x_pos = GutterWidth;
+    int x_pos = _gutterWidth;
     int[] widths = _state.CsvColumnWidths!;
     string[] headers = _state.CsvHeaderNames;
 
@@ -358,7 +368,7 @@ internal sealed class LeviathanCsvView : View
     if (rowBytes.Length > 0)
       fieldCount = CsvFieldParser.ParseRecord(rowBytes, _state.CsvDialect, fields);
 
-    int x_pos = GutterWidth;
+    int x_pos = _gutterWidth;
     Span<byte> unescaped = stackalloc byte[1024];
 
     for (int col = _state.CsvHorizontalScroll; col < widths.Length && x_pos < vpWidth; col++)
@@ -516,15 +526,16 @@ internal sealed class LeviathanCsvView : View
     // The index records the byte offset of the start of the NEXT row
     // after each newline. Row N starts at the offset recorded at row N-1.
 
-    // Use sparse index to get close
+    // Use sparse index to get close, clamping to last available entry
     int sparseIdx = (int)((actualRow - 1) / index.SparseFactor);
+    int effectiveSparseIdx = Math.Min(sparseIdx, index.SparseEntryCount);
     long offset;
     long rowsScanned;
 
-    if (sparseIdx > 0 && sparseIdx <= index.SparseEntryCount)
+    if (effectiveSparseIdx > 0)
     {
-      offset = index.GetSparseOffset(sparseIdx - 1);
-      rowsScanned = (long)sparseIdx * index.SparseFactor;
+      offset = index.GetSparseOffset(effectiveSparseIdx - 1);
+      rowsScanned = (long)effectiveSparseIdx * index.SparseFactor;
     }
     else if (actualRow == 1 && index.FirstDataRowOffset > 0)
     {
@@ -540,29 +551,26 @@ internal sealed class LeviathanCsvView : View
     long remaining = actualRow - rowsScanned;
     if (remaining <= 0) return offset;
 
-    // Read and scan forward
-    int scanBufSize = (int)Math.Min(64 * 1024, _state.Document.Length - offset);
-    if (scanBufSize <= 0) return offset;
-
-    byte[] scanBuf = new byte[scanBufSize];
+    // Read and scan forward using the reusable scan buffer
+    int scanBufSize = _scanBuffer.Length;
     bool inQuoted = false;
     byte quote = _state.CsvDialect.Quote;
 
     while (remaining > 0 && offset < _state.Document.Length)
     {
       int toRead = (int)Math.Min(scanBufSize, _state.Document.Length - offset);
-      int read = _state.Document.Read(offset, scanBuf.AsSpan(0, toRead));
+      int read = _state.Document.Read(offset, _scanBuffer.AsSpan(0, toRead));
       if (read == 0) break;
 
       for (int i = 0; i < read && remaining > 0; i++)
       {
-        byte b = scanBuf[i];
+        byte b = _scanBuffer[i];
 
         if (inQuoted)
         {
           if (b == quote)
           {
-            if (i + 1 < read && scanBuf[i + 1] == quote)
+            if (i + 1 < read && _scanBuffer[i + 1] == quote)
             {
               i++;
               continue;
@@ -586,7 +594,7 @@ internal sealed class LeviathanCsvView : View
         }
         else if (b == (byte)'\r')
         {
-          if (i + 1 < read && scanBuf[i + 1] == (byte)'\n')
+          if (i + 1 < read && _scanBuffer[i + 1] == (byte)'\n')
             i++;
           remaining--;
           if (remaining == 0)

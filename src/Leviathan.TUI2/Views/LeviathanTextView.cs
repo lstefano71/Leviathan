@@ -46,7 +46,8 @@ internal sealed class LeviathanTextView : View
   /// <summary>Last text-area column count from rendering, for navigation helpers.</summary>
   private int _lastTextAreaCols;
 
-  private const int GutterWidth = 9; // "  12345 │"
+  private const int MinGutterWidth = 9; // minimum: "  12345 │"
+  private int _gutterWidth = MinGutterWidth;
 
   /// <summary>
   /// Fired when the view needs the status bar to update.
@@ -102,7 +103,7 @@ internal sealed class LeviathanTextView : View
     // Horizontal scrollbar (visible only when word wrap is off)
     _horizontalScrollBar = new ScrollBar() {
       Orientation = Orientation.Horizontal,
-      X = GutterWidth,
+      X = MinGutterWidth,
       Y = Pos.AnchorEnd(1),
       Width = Dim.Fill(1), // leave room for vertical scrollbar
       Height = 1,
@@ -226,6 +227,21 @@ internal sealed class LeviathanTextView : View
 
   // ─── Drawing ───
 
+  /// <summary>Recomputes gutter width based on estimated total lines.</summary>
+  private void UpdateGutterWidth()
+  {
+    long total = _state.EstimatedTotalLines;
+    if (_state.LineIndex is { TotalLineCount: > 0 } lineIdx)
+      total = lineIdx.TotalLineCount;
+    int digits = total > 0 ? (int)Math.Floor(Math.Log10(total)) + 1 : 1;
+    int newWidth = Math.Max(MinGutterWidth, digits + 3); // digits + leading space + trailing space + separator
+    if (newWidth != _gutterWidth)
+    {
+      _gutterWidth = newWidth;
+      _horizontalScrollBar.X = _gutterWidth;
+    }
+  }
+
   /// <inheritdoc/>
   protected override bool OnDrawingContent(DrawContext? context)
   {
@@ -237,10 +253,12 @@ internal sealed class LeviathanTextView : View
       return true;
     }
 
+    UpdateGutterWidth();
+
     int vpHeight = Viewport.Height;
     int vpWidth = Viewport.Width;
 
-    int textAreaCols = Math.Max(1, vpWidth - GutterWidth - 1); // -1 for vertical scrollbar
+    int textAreaCols = Math.Max(1, vpWidth - _gutterWidth - 1); // -1 for vertical scrollbar
     _lastTextAreaCols = textAreaCols;
 
     // Update horizontal scrollbar visibility + keep vertical bar geometry in sync.
@@ -327,7 +345,7 @@ internal sealed class LeviathanTextView : View
     Attribute wrapIndicatorAttr = new(new Color(StandardColor.DarkGray), new Color(StandardColor.Black));
 
     int rowsToDraw = Math.Min(vpHeight, lineCount);
-    int textColumnCapacity = Math.Max(0, vpWidth - 1 - GutterWidth);
+    int textColumnCapacity = Math.Max(0, vpWidth - 1 - _gutterWidth);
     long textCursorOffset = _state.TextCursorOffset;
     long textSelStart = _state.TextSelStart;
     long textSelEnd = _state.TextSelEnd;
@@ -359,11 +377,12 @@ internal sealed class LeviathanTextView : View
       currentAttr = gutterAttr;
       //hasCurrentAttr = true;
       SetAttribute(gutterAttr);
+      int gutterNumberWidth = _gutterWidth - 2; // space for trailing ' │'
       if (isHardLine) {
         long lineNumber = currentLineNumber - 1;
         if (!lineNumber.TryFormat(lineNumberChars, out int lineNumLen))
           lineNumLen = 0;
-        int padding = Math.Max(0, 7 - lineNumLen);
+        int padding = Math.Max(0, gutterNumberWidth - lineNumLen);
         for (int p = 0; p < padding; p++)
           AddRune(' ');
         for (int c = 0; c < lineNumLen; c++)
@@ -375,7 +394,7 @@ internal sealed class LeviathanTextView : View
           SetAttribute(wrapIndicatorAttr);
           currentAttr = wrapIndicatorAttr;
         }
-        for (int p = 0; p < 6; p++)
+        for (int p = 0; p < gutterNumberWidth - 1; p++)
           AddRune(' ');
         AddRune('↪');
         AddRune(' ');
@@ -462,7 +481,7 @@ internal sealed class LeviathanTextView : View
       // Also handles empty lines where cursor == lineDocOffset.
       long endOffset = lineDocOffset + lineByteLen;
       bool nextLineStartsHere = (i + 1 < rowsToDraw) && _visualLines[i + 1].DocOffset == endOffset;
-      int endCol = GutterWidth + (displayCharCount - visibleStart);
+      int endCol = _gutterWidth + (displayCharCount - visibleStart);
       bool cursorInNewlineArea = displayCharCount > 0
           && _charByteOffsets.Count > 0
           && _state.TextCursorOffset > lineDocOffset + _charByteOffsets[_charByteOffsets.Count - 1]
@@ -485,7 +504,7 @@ internal sealed class LeviathanTextView : View
         SetAttribute(normalAttr);
         currentAttr = normalAttr;
       }
-      for (int c = Math.Max(GutterWidth, endCol); c < vpWidth; c++)
+      for (int c = Math.Max(_gutterWidth, endCol); c < vpWidth; c++)
         AddRune(' ');
     }
 
@@ -1101,7 +1120,7 @@ internal sealed class LeviathanTextView : View
 
     VisualLine vl = _visualLines[viewRow];
 
-    int textCol = viewCol - GutterWidth;
+    int textCol = viewCol - _gutterWidth;
     if (textCol < 0) textCol = 0;
 
     long relativeStart = vl.DocOffset - _state.TextTopOffset;

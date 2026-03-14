@@ -21,8 +21,10 @@ internal sealed class LeviathanHexView : View
   private readonly AppState _state;
   private byte[] _readBuffer = new byte[64 * 1024];
 
-  private const int AddressWidth = 10; // "XXXXXXXX: "
+  private const int MinAddressWidth = 10; // minimum: "XXXXXXXX: "
   private const int AsciiSeparatorWidth = 2; // " |"
+  private int _addressWidth = MinAddressWidth;
+  private int _addressHexDigits = 8;
 
   /// <summary>
   /// Fired when the view needs the status bar to update (cursor moved, edit, etc.).
@@ -157,6 +159,22 @@ internal sealed class LeviathanHexView : View
 
   // ─── Drawing ───
 
+  /// <summary>Recomputes address width based on file length.</summary>
+  private void UpdateAddressWidth()
+  {
+    long fileLen = _state.FileLength;
+    // Number of hex digits needed: at least 8, grows for files > 4 GB
+    int digits = 8;
+    long threshold = 0x1_0000_0000L; // 4 GB
+    while (fileLen >= threshold && digits < 16)
+    {
+      digits += 2; // grow in pairs for visual alignment
+      threshold <<= 8;
+    }
+    _addressHexDigits = digits;
+    _addressWidth = digits + 2; // digits + ": "
+  }
+
   /// <inheritdoc/>
   protected override bool OnDrawingContent(DrawContext? context)
   {
@@ -167,6 +185,8 @@ internal sealed class LeviathanHexView : View
       AddStr("No file open");
       return true;
     }
+
+    UpdateAddressWidth();
 
     int bpr = _state.BytesPerRow;
     int vpHeight = Viewport.Height;
@@ -205,7 +225,7 @@ internal sealed class LeviathanHexView : View
     Attribute nonPrintableAttr = new(new Color(StandardColor.DarkGray), new Color(StandardColor.Black));
     Attribute separatorAttr = new(new Color(StandardColor.DarkGray), new Color(StandardColor.Black));
 
-    Span<char> addrChars = stackalloc char[9];
+    Span<char> addrChars = stackalloc char[_addressHexDigits + 1]; // hex digits + colon
 
     for (int row = 0; row < vpHeight; row++) {
       long rowOffset = _state.HexBaseOffset + (long)row * bpr;
@@ -230,7 +250,7 @@ internal sealed class LeviathanHexView : View
         AddRune(ac);
 
       // Hex bytes
-      int hexCol = AddressWidth;
+      int hexCol = _addressWidth;
       for (int b = 0; b < bpr; b++) {
         // Group separator every 8 bytes
         if (b > 0 && b % 8 == 0) {
@@ -299,12 +319,12 @@ internal sealed class LeviathanHexView : View
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
   private static void FormatAddress(long offset, Span<char> dest)
   {
-    // Format as "XXXXXXXX: " (10 chars total, but 9 chars for 8 hex + colon)
-    for (int i = 7; i >= 0; i--) {
+    int digits = dest.Length - 1; // last char is ':'
+    for (int i = digits - 1; i >= 0; i--) {
       dest[i] = HexChars[(int)(offset & 0xF)];
       offset >>= 4;
     }
-    dest[8] = ':';
+    dest[digits] = ':';
   }
 
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -598,13 +618,13 @@ internal sealed class LeviathanHexView : View
     if (rowOffset >= doc.Length) return null;
 
     int hexWidth = bpr * 3 + (bpr > 0 ? (bpr - 1) / 8 : 0);
-    int asciiStart = AddressWidth + hexWidth + 1; // +1 for the │ separator
+    int asciiStart = _addressWidth + hexWidth + 1; // +1 for the │ separator
 
     int byteIndex;
-    if (viewCol < AddressWidth) {
+    if (viewCol < _addressWidth) {
       byteIndex = 0;
-    } else if (viewCol < AddressWidth + hexWidth) {
-      int hexCol = viewCol - AddressWidth;
+    } else if (viewCol < _addressWidth + hexWidth) {
+      int hexCol = viewCol - _addressWidth;
       byteIndex = HexColToByteIndex(hexCol, bpr);
     } else if (viewCol >= asciiStart && viewCol < asciiStart + bpr) {
       byteIndex = viewCol - asciiStart;

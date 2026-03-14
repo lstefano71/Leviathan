@@ -212,4 +212,65 @@ public sealed class CsvRowIndexTests
 
     Assert.Equal(4, index.FirstDataRowOffset); // "a,b\n" = 4 bytes
   }
+
+  [Fact]
+  public unsafe void ScanChunk_GrowsSparseArray_WhenCapacityExceeded()
+  {
+    // Create enough rows to exceed the initial sparse array capacity.
+    // Using sparseFactor=1 and initialCapacity=4 so that 10 rows triggers growth.
+    CsvRowIndex index = new(sparseFactor: 1, initialCapacity: 4);
+    CsvDialect dialect = CsvDialect.Csv();
+
+    var rows = new System.Text.StringBuilder();
+    for (int i = 0; i < 10; i++)
+      rows.Append($"{i}\n");
+
+    byte[] data = System.Text.Encoding.UTF8.GetBytes(rows.ToString());
+
+    fixed (byte* ptr = data)
+    {
+      index.ScanChunk(ptr, data.Length, 0, dialect, CancellationToken.None);
+    }
+
+    index.MarkComplete();
+    Assert.Equal(10, index.TotalRowCount);
+    // All 10 rows should have sparse entries (sparseFactor=1)
+    Assert.Equal(10, index.SparseEntryCount);
+
+    // Verify the last entry is valid
+    long lastOffset = index.GetSparseOffset(9);
+    Assert.True(lastOffset > 0 && lastOffset <= data.Length);
+  }
+
+  [Fact]
+  public unsafe void ScanChunk_SparseGrowth_OffsetsRemainValid()
+  {
+    // Verify that array growth does not corrupt previously stored offsets.
+    CsvRowIndex index = new(sparseFactor: 2, initialCapacity: 2);
+    CsvDialect dialect = CsvDialect.Csv();
+
+    // Each row is exactly 4 bytes: "ab\r\n"
+    var rows = new System.Text.StringBuilder();
+    for (int i = 0; i < 12; i++)
+      rows.Append("ab\r\n");
+
+    byte[] data = System.Text.Encoding.UTF8.GetBytes(rows.ToString());
+
+    fixed (byte* ptr = data)
+    {
+      index.ScanChunk(ptr, data.Length, 0, dialect, CancellationToken.None);
+    }
+
+    index.MarkComplete();
+    Assert.Equal(12, index.TotalRowCount);
+    // 12 rows / sparseFactor 2 = 6 sparse entries
+    Assert.Equal(6, index.SparseEntryCount);
+
+    // Each sparse entry should be at 2*4*(entryIdx+1) = 8*(idx+1)
+    for (int i = 0; i < 6; i++)
+    {
+      long expected = (long)(i + 1) * 2 * 4;
+      Assert.Equal(expected, index.GetSparseOffset(i));
+    }
+  }
 }

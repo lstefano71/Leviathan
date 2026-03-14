@@ -123,7 +123,7 @@ internal sealed class MainWindow : Window
     _statusFileLabel = new Label() {
       X = 0,
       Y = 0,
-      Width = Dim.Percent(50),
+      Width = Dim.Auto(DimAutoStyle.Text),
       Text = " Leviathan",
     };
 

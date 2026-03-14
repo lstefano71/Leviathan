@@ -12,7 +12,7 @@ namespace Leviathan.Core.Csv;
 /// </summary>
 public sealed class CsvRowIndex
 {
-  private readonly long[] _sparseOffsets;
+  private long[] _sparseOffsets;
   private long _totalRowCount;
   private volatile bool _isComplete;
   private readonly int _sparseFactor;
@@ -42,7 +42,7 @@ public sealed class CsvRowIndex
   /// <summary>Scanner state carried between chunks.</summary>
   private ScanState _state = ScanState.Normal;
 
-  public CsvRowIndex(int sparseFactor = 1000, int initialCapacity = 16384)
+  public CsvRowIndex(int sparseFactor = 1000, int initialCapacity = 65536)
   {
     _sparseFactor = sparseFactor;
     _sparseOffsets = new long[initialCapacity];
@@ -178,12 +178,27 @@ public sealed class CsvRowIndex
     if (rowsSoFar % _sparseFactor == 0)
     {
       int idx = (int)(rowsSoFar / _sparseFactor) - 1;
-      if (idx < _sparseOffsets.Length)
-      {
-        _sparseOffsets[idx] = nextRowOffset;
-        Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
-      }
+      if (idx >= _sparseOffsets.Length)
+        GrowSparseArray(idx);
+
+      _sparseOffsets[idx] = nextRowOffset;
+      Volatile.Write(ref _sparseEntryCount, Math.Max(_sparseEntryCount, idx + 1));
     }
+  }
+
+  /// <summary>
+  /// Doubles the sparse offset array so that <paramref name="requiredIndex"/> fits.
+  /// Called only from the single background scanner thread.
+  /// </summary>
+  private void GrowSparseArray(int requiredIndex)
+  {
+    int newCapacity = _sparseOffsets.Length;
+    while (newCapacity <= requiredIndex)
+      newCapacity *= 2;
+
+    long[] grown = new long[newCapacity];
+    Array.Copy(_sparseOffsets, grown, _sparseOffsets.Length);
+    _sparseOffsets = grown;
   }
 
   /// <summary>
