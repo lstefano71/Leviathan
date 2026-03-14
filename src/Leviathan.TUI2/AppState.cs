@@ -413,7 +413,6 @@ internal sealed class AppState
 
     // Parse up to 100 data rows
     Span<CsvField> fields = stackalloc CsvField[256];
-    Span<byte> unescaped = stackalloc byte[1024];
     for (int row = 0; row < 100 && pos < sampleSize; row++)
     {
       int rowStart = pos;
@@ -449,15 +448,8 @@ internal sealed class AppState
 
       for (int c = 0; c < fieldCount && c < colCount; c++)
       {
-        int written = CsvFieldParser.UnescapeField(rowBytes, fields[c], CsvDialect, unescaped);
-        // For display width, count chars up to first newline (preview width)
-        int displayWidth = 0;
-        for (int j = 0; j < written; j++)
-        {
-          if (unescaped[j] == (byte)'\n' || unescaped[j] == (byte)'\r') break;
-          displayWidth++;
-        }
-        widths[c] = Math.Max(widths[c], Math.Min(displayWidth, 40));
+        int displayWidth = ComputePreviewDisplayWidth(rowBytes, fields[c], CsvDialect, 40);
+        widths[c] = Math.Max(widths[c], displayWidth);
       }
       inQuoted = false;
     }
@@ -467,6 +459,43 @@ internal sealed class AppState
       widths[i] = Math.Max(widths[i], 4);
 
     CsvColumnWidths = widths;
+  }
+
+  private static int ComputePreviewDisplayWidth(ReadOnlySpan<byte> record, CsvField field, CsvDialect dialect, int maxWidth)
+  {
+    ReadOnlySpan<byte> raw = record.Slice(field.Offset, field.Length);
+    if (raw.IsEmpty || maxWidth <= 0)
+      return 0;
+
+    if (field.IsQuoted)
+    {
+      byte quote = dialect.Quote;
+      if (raw.Length >= 2 && raw[0] == quote && raw[^1] == quote)
+        raw = raw[1..^1];
+      else if (raw.Length >= 1 && raw[0] == quote)
+        raw = raw[1..];
+    }
+
+    int width = 0;
+    byte escape = dialect.Escape;
+    byte quoteChar = dialect.Quote;
+
+    for (int i = 0; i < raw.Length && width < maxWidth; i++)
+    {
+      byte current = raw[i];
+      if (current == escape && i + 1 < raw.Length && raw[i + 1] == quoteChar)
+      {
+        current = quoteChar;
+        i++;
+      }
+
+      if (current == (byte)'\n' || current == (byte)'\r')
+        break;
+
+      width++;
+    }
+
+    return width;
   }
 
   private static ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch {

@@ -171,4 +171,30 @@ public sealed class CsvFieldParserTests
     Assert.Equal(6, written);
     Assert.True(dest[..6].SequenceEqual("he\"llo"u8));
   }
+
+  [Fact]
+  public void UnescapeField_UnquotedDestinationTooSmall_TruncatesWithoutThrowing()
+  {
+    ReadOnlySpan<byte> record = "abcdefghijklmnopqrstuvwxyz"u8;
+    CsvField field = new(0, record.Length, false);
+    Span<byte> dest = stackalloc byte[8];
+
+    int written = CsvFieldParser.UnescapeField(record, field, CsvDialect.Csv(), dest);
+
+    Assert.Equal(8, written);
+    Assert.True(dest.SequenceEqual("abcdefgh"u8));
+  }
+
+  [Fact]
+  public void UnescapeField_QuotedDestinationTooSmall_TruncatesWithoutThrowing()
+  {
+    ReadOnlySpan<byte> record = "\"ab\"\"cd\"\"ef\""u8;
+    CsvField field = new(0, record.Length, true);
+    Span<byte> dest = stackalloc byte[6];
+
+    int written = CsvFieldParser.UnescapeField(record, field, CsvDialect.Csv(), dest);
+
+    Assert.Equal(6, written);
+    Assert.True(dest.SequenceEqual("ab\"cd\""u8));
+  }
 }

@@ -135,15 +135,19 @@ public static class CsvFieldParser
   /// <param name="field">The field descriptor returned by <see cref="ParseRecord"/>.</param>
   /// <param name="dialect">The CSV dialect.</param>
   /// <param name="destination">Buffer to receive the unescaped content.</param>
-  /// <returns>Number of bytes written to <paramref name="destination"/>.</returns>
+  /// <returns>
+  /// Number of bytes written to <paramref name="destination"/>.
+  /// If the destination is smaller than the unescaped field, the output is truncated.
+  /// </returns>
   public static int UnescapeField(ReadOnlySpan<byte> record, CsvField field, CsvDialect dialect, Span<byte> destination)
   {
     ReadOnlySpan<byte> raw = record.Slice(field.Offset, field.Length);
 
     if (!field.IsQuoted)
     {
-      raw.CopyTo(destination);
-      return raw.Length;
+      int toCopy = Math.Min(raw.Length, destination.Length);
+      raw[..toCopy].CopyTo(destination);
+      return toCopy;
     }
 
     byte quote = dialect.Quote;
@@ -159,6 +163,9 @@ public static class CsvFieldParser
 
     for (int i = 0; i < raw.Length; i++)
     {
+      if (written >= destination.Length)
+        break;
+
       if (raw[i] == escape && i + 1 < raw.Length && raw[i + 1] == quote)
       {
         destination[written++] = quote;
