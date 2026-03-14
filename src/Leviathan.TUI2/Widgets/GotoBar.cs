@@ -1,5 +1,4 @@
 using Terminal.Gui.App;
-using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -30,7 +29,7 @@ internal sealed class GotoBar : PopoverImpl
       X = 0,
       Y = 0,
       Width = Dim.Fill(),
-      Height = 3,    
+      Height = 3,
     };
 
     _promptLabel = new Label() {

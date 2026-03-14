@@ -31,8 +31,7 @@ public sealed class LineIndexer : IDisposable
   /// </summary>
   public void StartScan()
   {
-    _scanTask = Task.Run(() =>
-    {
+    _scanTask = Task.Run(() => {
       try {
         ScanAll(_cts.Token);
       } catch (OperationCanceledException) when (_cts.IsCancellationRequested) {

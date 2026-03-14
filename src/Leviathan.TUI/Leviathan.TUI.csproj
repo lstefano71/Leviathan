@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Hex1b" Version="0.114.0" />
+    <PackageReference Include="Hex1b" Version="0.118.0" />
   </ItemGroup>
 
 </Project>
