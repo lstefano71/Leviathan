@@ -1,111 +1,66 @@
+[![CI](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/lstefano71/Leviathan?style=flat-square)](https://github.com/lstefano71/Leviathan/releases/latest)
+
 # Leviathan
 
-Leviathan is a native-AOT, immediate-mode hex + text editor designed for extremely large files (50 GB+). It focuses on minimal allocations and low-latency rendering so the UI and core operate within strict performance constraints (sub-500 ms open time and zero GC allocations in the render loop).
+A native-AOT hex + text + CSV editor that opens **50 GB+ files in under 500 ms** with **zero GC allocations** in the render loop. Built with C# / .NET 10 for security analysts, DevOps engineers, and anyone who needs to inspect massive files without waiting.
 
-## Key features
+## ✨ Features
 
-- Extremely large file support (50 GB+)
-- Zero-allocation hot paths in the render loop
-- Memory-mapped file backing and append buffer for efficient editing
-- Piece table (`PieceTree`) based editing with O(log N) positional operations
-- Line indexing with SIMD-optimized scanning
-- Small, testable core (`Leviathan.Core`) separated from UI
+- **50 GB+ file support** — memory-mapped I/O, no file size limits
+- **< 500 ms open time** — instant access to any file, regardless of size
+- **Zero-allocation render loop** — no GC pauses, smooth 60 fps scrolling
+- **Hex + Text + CSV views** — three viewing modes in one editor
+- **SIMD-accelerated line indexing** — AVX2/SSE2/NEON cascade scans at GB/s speeds
+- **Multi-encoding support** — UTF-8, UTF-16 LE, Windows-1252 with automatic detection
+- **Boyer-Moore-Horspool search** — fast pattern matching across the entire file, text and hex patterns
+- **Atomic save** — edits are never lost, even on crash during save
+- **Native AOT** — single-file executable, no runtime required
+- **Red-Black piece table** — O(log N) insert/delete at any position
 
-## Projects
+## 🖥️ Leviathan TUI2
 
-- `src/Leviathan.Core` — Headless data engine (core editing, IO, indexing, text decoding)
-	- Key subfolders: `DataModel/` (piece table, `PieceTree`), `IO/` (`MappedFileSource`, `AppendBuffer`), `Indexing/` (`LineIndexer`, `LineIndex`), `Search/` (search engine), `Text/` (decoders, encoding utilities).
-- `src/Leviathan.UI` — GUI (ImGui + OpenGL render loop)
-	- UI has `HexView`, `TextView`, `AppWindow`, `Settings` and platform helpers (eg. `Windows/FindWindow.cs`). Includes `rd.xml` used for Native AOT configuration.
-- `src/Leviathan.TUI` — Terminal UI frontend
-	- TUI provides `AppState`, `TuiSettings`, ANSI rendering (`Rendering/AnsiBuilder.cs`) and controllers for file/hex/text views.
-- `tests/Leviathan.Core.Tests` — xUnit tests for the core library
+**The recommended way to use Leviathan.** Built on [Terminal.Gui 2.x](https://github.com/gui-cs/Terminal.Gui), it runs in any modern terminal on Windows, macOS, and Linux.
 
-## Front-ends
+- **Three view modes** — Hex view (address/hex/ASCII columns, cursor navigation, editing, selection), Text view (encoding-aware, word wrap via `LineWrapEngine`, visual lines), CSV view (tabular grid, sticky header, cell cursor, row selection)
+- **Command Palette** (`Ctrl+P`) — VS Code-style fuzzy-filtered command launcher with categories and keyboard shortcuts
+- **Find Bar** — VS Code-style find: text search, case toggle `[Aa]`, hex pattern toggle `[Hx]`, match counter, prev/next navigation
+- **Go-to Bar** — jump to any offset or line number instantly
+- **CSV tools** — dialect detection (comma/tab/semicolon/pipe), header detection, record detail dialog
 
-There are now three front-ends (GUI, TUI, and an experimental third frontend). Each front-end has its own set of problems and tradeoffs — expect UI-specific, terminal-specific, and experimental issues when testing or contributing.
+## 📦 Quick Start
 
-## Build & test
+```bash
+# Run TUI2 (recommended)
+dotnet run --project src/Leviathan.TUI2 -- path/to/large-file
 
-Build the full solution (Windows / PowerShell):
-
-```powershell
-dotnet build Leviathan.slnx
+# Or publish a native AOT binary
+dotnet publish src/Leviathan.TUI2/Leviathan.TUI2.csproj -c Release -r win-x64
 ```
 
-Run all tests:
+## 📖 Documentation
 
-```powershell
-dotnet test tests/Leviathan.Core.Tests/Leviathan.Core.Tests.csproj
-```
+- **[Build & Install](docs/building.md)** — prerequisites, build, test, publish AOT binaries
+- **[Architecture Deep-Dive](docs/architecture.md)** — data pipeline, PieceTree, SIMD indexing, search engine, encoding detection
+- **[Releases](https://github.com/lstefano71/Leviathan/releases)** — download pre-built binaries
 
-Run a single test class or method with a filter:
+## 🏗️ Architecture at a Glance
 
-```powershell
-# single test class
-dotnet test tests/Leviathan.Core.Tests/ --filter "FullyQualifiedName~PieceTreeTests"
+`Document` is the public façade over `MappedFileSource` (zero-copy memory-mapped reads), `AppendBuffer` (arena allocator backed by `ArrayPool<byte>`), and `PieceTree` (red-black piece table with O(log N) positional operations). Background SIMD line indexing enables instant scrollbar positioning over arbitrarily large files. All hot-path code uses `stackalloc`, `ReadOnlySpan<byte>`, and value types — zero heap allocations per frame.
 
-# single test method
-dotnet test tests/Leviathan.Core.Tests/ --filter "FullyQualifiedName~PieceTreeTests.Insert_AtBeginning_ReturnsCorrectContent"
-```
+See **[Architecture Deep-Dive](docs/architecture.md)** for the full technical breakdown with diagrams.
 
-Run the UI (optionally pass a file path to open):
+## Frontends
 
-```powershell
-dotnet run --project src/Leviathan.UI [path-to-file]
-```
+| Frontend | Stack | Status | Description |
+|----------|-------|--------|-------------|
+| **TUI2** | Terminal.Gui 2.x | ✅ Primary | Full-featured terminal UI with hex/text/CSV views, command palette, find bar |
+| GUI | ImGui + OpenGL | Functional | Immediate-mode desktop GUI via Silk.NET |
+| TUI | Hex1b | Original | Minimal ANSI-based terminal UI |
 
-Publish a Native AOT single-file executable:
+## Contributing
 
-```powershell
-dotnet publish src/Leviathan.UI/Leviathan.UI.csproj -c Release -r win-x64
-```
-
-## Architecture & important conventions
-
-`Document` is the public facade over `MappedFileSource`, `AppendBuffer`, and `PieceTree`.
-
-Core components (high level):
-
-- `MappedFileSource` — memory-mapped backing with zero-copy reads for large files.
-- `AppendBuffer` — arena allocator backed by `ArrayPool<byte>` for low-allocation edits.
-- `PieceTree` — red-black piece table using value types (`readonly record struct`) for pieces and O(log N) positional ops.
-- `LineIndexer` / `LineIndex` — background scanning with a SIMD cascade (AVX2 → SSE2/NEON → scalar) and sparse index checkpoints for fast scroll estimation.
-- `SearchEngine` — efficient searching over indexed content; returns `SearchResult` objects used by frontends.
-- `Text` subcomponents — encoding detection, multi-encoding decoders (`Utf8TextDecoder`, `Utf16LeTextDecoder`, `Windows1252TextDecoder`), and `Utf8Utils` helpers.
-
-UI & TUI notes:
-
-- UI hot path avoids heap allocations — code uses `stackalloc`, UTF-8 string literals, and raw ImGui/OpenGL draw calls.
-- TUI contains `AnsiBuilder` for terminal rendering and controllers for `HexView`/`TextView`.
-- `Windows/FindWindow.cs` contains platform helpers when running on Windows.
-
-Performance & AOT:
-
-- The codebase is AOT-aware: avoid runtime reflection and use source-generated JSON contexts for serialization when needed.
-- `rd.xml` in `src/Leviathan.UI` contains runtime directives to support Native AOT publishing.
-
-## Code style and testing notes
-
-- Prefer explicit types over `var` in critical code; annotate hot-path methods with `[MethodImpl(MethodImplOptions.AggressiveInlining)]`.
-- Public APIs and important internal types should have XML docs.
-- Tests are xUnit-based; test naming: `MethodName_Condition_ExpectedResult`.
-
-Additional developer notes:
-
-- Keep hot-path code allocation-free and annotate with `[MethodImpl(MethodImplOptions.AggressiveInlining)]` where appropriate.
-- When changing performance-critical code, add micro-benchmarks or tests and run them locally before submitting PRs.
-- Use the existing test project to add coverage for core features (`Search`, `PieceTree`, `LineIndex`, decoders, etc.).
-
-## Contribution
-
-Contributions welcome. When opening PRs:
-
-- Keep changes minimal and focused.
-- Preserve performance characteristics of hot paths — benchmark before changing critical code.
-- Add or update tests in `tests/Leviathan.Core.Tests` for core changes.
+Contributions welcome. Keep changes focused, preserve hot-path performance characteristics, and add tests in `tests/Leviathan.Core.Tests` for core changes. See **[Build & Install](docs/building.md)** for development setup.
 
 ## License
 
-See `LICENSE.txt` at the repository root.
-
+Unlicense — see [`LICENSE.txt`](LICENSE.txt).
