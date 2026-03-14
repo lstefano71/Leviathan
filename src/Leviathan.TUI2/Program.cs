@@ -258,7 +258,7 @@ internal sealed class MainWindow : Window
                 _wordWrapItem,
                 _encodingItem,
                 _bprItem,
-                (_csvSettingsItem = new MenuItem("CSV _Settings...", "", () => ShowCsvSettings()) { HelpText = "Configure CSV dialect", Visible = false }),
+                (_csvSettingsItem = new MenuItem("CSV _Settings...", Key.F8, () => ShowCsvSettings()) { HelpText = "Configure CSV dialect", Visible = false }),
             ]),
             new MenuBarItem("_Navigate", [
                 new MenuItem("_Go to Offset/Line...", Key.G.WithCtrl, () => _palettePopover.ShowGoto()) { HelpText = "Jump to offset or line" },
@@ -334,6 +334,9 @@ internal sealed class MainWindow : Window
         e.Handled = true;
       } else if (e == Key.F7) {
         SwitchView(ViewMode.Csv);
+        e.Handled = true;
+      } else if (e == Key.F8 && _state.ActiveView == ViewMode.Csv) {
+        ShowCsvSettings();
         e.Handled = true;
       } else if (e == Key.F2 && _state.ActiveView == ViewMode.Csv) {
         ShowCsvRecordDetail();
@@ -596,6 +599,11 @@ internal sealed class MainWindow : Window
       ("Navigation and editing", "Ctrl+C / Ctrl+V", "Copy / Paste"),
       ("Navigation and editing", "Ctrl+A", "Select all"),
       ("Navigation and editing", "Enter", "Insert newline (Text view)"),
+      ("CSV view", "F7", "Switch to CSV view"),
+      ("CSV view", "F8", "CSV settings (separator, quote, header)"),
+      ("CSV view", "F2", "Record detail (drill-down)"),
+      ("CSV view", "Tab / Shift+Tab", "Next / previous column"),
+      ("CSV view", "Del", "Delete selected rows"),
     ];
 
     const string shortcutHeader = "Shortcut";
@@ -1003,7 +1011,7 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("View", "Hex View", "F5", () => SwitchView(ViewMode.Hex));
     _palette.RegisterCommand("View", "Text View", "F6", () => SwitchView(ViewMode.Text));
     _palette.RegisterCommand("View", "CSV View", "F7", () => SwitchView(ViewMode.Csv));
-    _palette.RegisterCommand("View", "CSV Settings...", "", () => ShowCsvSettings());
+    _palette.RegisterCommand("View", "CSV Settings...", "F8", () => ShowCsvSettings());
 
     // Word wrap — dynamic check indicator
     _palette.RegisterCommand("View",

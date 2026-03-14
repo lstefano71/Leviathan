@@ -32,28 +32,47 @@ public sealed class CsvRowIndexer : IDisposable
   }
 
   /// <summary>
-  /// Starts scanning the file for CSV record boundaries on a background thread.
-  /// Returns immediately; check <see cref="CsvRowIndex.IsComplete"/>.
+  /// Starts scanning the file for CSV record boundaries.
+  /// The first chunk is processed synchronously so that row data is immediately
+  /// available for the initial draw. The remainder runs on a background thread;
+  /// check <see cref="CsvRowIndex.IsComplete"/>.
   /// </summary>
   public void StartScan()
   {
+    long totalLength = _source.Length;
+    long initialChunkLen = Math.Min(totalLength, ChunkSize);
+
+    // Process first chunk synchronously so TotalRowCount > 0 before first draw.
+    if (initialChunkLen > 0)
+      ScanRange(0, initialChunkLen, _cts.Token);
+
+    long remaining = totalLength - initialChunkLen;
+    if (remaining <= 0)
+    {
+      // Entire file scanned synchronously.
+      _index.MarkComplete();
+      return;
+    }
+
+    long bgOffset = initialChunkLen;
     _scanTask = Task.Run(() => {
       try {
-        ScanAll(_cts.Token);
+        ScanRange(bgOffset, totalLength - bgOffset, _cts.Token);
+        if (!_cts.IsCancellationRequested)
+          _index.MarkComplete();
       } catch (OperationCanceledException) when (_cts.IsCancellationRequested) {
         // expected during disposal / file switches
       }
     }, _cts.Token);
   }
 
-  private unsafe void ScanAll(CancellationToken ct)
+  /// <summary>Scans <paramref name="length"/> bytes starting at <paramref name="offset"/>.</summary>
+  private unsafe void ScanRange(long offset, long length, CancellationToken ct)
   {
-    long remaining = _source.Length;
-    long offset = 0;
-
-    while (remaining > 0 && !ct.IsCancellationRequested)
+    long end = offset + length;
+    while (offset < end && !ct.IsCancellationRequested)
     {
-      int chunkLen = (int)Math.Min(remaining, ChunkSize);
+      int chunkLen = (int)Math.Min(end - offset, ChunkSize);
       ReadOnlySpan<byte> span = _source.GetSpan(offset, chunkLen);
 
       fixed (byte* ptr = span) {
@@ -61,11 +80,7 @@ public sealed class CsvRowIndexer : IDisposable
       }
 
       offset += chunkLen;
-      remaining -= chunkLen;
     }
-
-    if (!ct.IsCancellationRequested)
-      _index.MarkComplete();
   }
 
   /// <summary>
