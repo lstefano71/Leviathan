@@ -12,6 +12,11 @@ public readonly record struct CsvField(int Offset, int Length, bool IsQuoted);
 /// (without the terminating newline), splits it into field boundaries described as
 /// <see cref="CsvField"/> values written into a caller-provided span.
 /// </summary>
+/// <remarks>
+/// Field boundaries are detected using single-byte comparisons. This limits the
+/// parser to single-byte encodings (UTF-8, ASCII, Windows-1252). UTF-16 and other
+/// multi-byte encodings are not supported.
+/// </remarks>
 public static class CsvFieldParser
 {
   /// <summary>

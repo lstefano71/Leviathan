@@ -26,6 +26,7 @@ internal sealed class LeviathanHexView : View
   private int _addressWidth = MinAddressWidth;
   private int _addressHexDigits = 8;
 
+
   /// <summary>
   /// Fired when the view needs the status bar to update (cursor moved, edit, etc.).
   /// </summary>
@@ -193,7 +194,6 @@ internal sealed class LeviathanHexView : View
     int vpWidth = Viewport.Width;
     _state.VisibleRows = vpHeight;
 
-    EnsureCursorVisible();
 
     int totalBytes = vpHeight * bpr;
     EnsureBuffer(totalBytes);
@@ -686,6 +686,7 @@ internal sealed class LeviathanHexView : View
 
   private void OnStateChanged()
   {
+    EnsureCursorVisible();
     SetNeedsDraw();
     StateChanged?.Invoke();
   }

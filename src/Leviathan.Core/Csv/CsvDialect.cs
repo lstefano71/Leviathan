@@ -5,6 +5,12 @@ namespace Leviathan.Core.Csv;
 /// field separator, quote character, and escape character, and whether
 /// the first record is a header row.
 /// </summary>
+/// <remarks>
+/// The CSV pipeline operates on single-byte tokens. Separator, quote, and escape
+/// are each a single <see cref="byte"/>, so the pipeline is limited to single-byte
+/// encodings (UTF-8, ASCII, Windows-1252). Multi-byte encodings such as UTF-16
+/// are not currently supported.
+/// </remarks>
 public readonly record struct CsvDialect(
     byte Separator,
     byte Quote,

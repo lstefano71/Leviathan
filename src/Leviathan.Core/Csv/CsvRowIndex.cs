@@ -10,6 +10,12 @@ namespace Leviathan.Core.Csv;
 /// Stores every Nth record offset in a sparse array for O(1) scrollbar positioning
 /// over arbitrarily large files.
 /// </summary>
+/// <remarks>
+/// Row boundary scanning checks for <c>0x0A</c> and <c>0x0D</c> as single bytes.
+/// This works correctly for single-byte encodings (UTF-8, ASCII, Windows-1252) but
+/// would misidentify row boundaries in UTF-16 files where these byte values can
+/// appear inside multi-byte characters.
+/// </remarks>
 public sealed class CsvRowIndex
 {
   private long[] _sparseOffsets;

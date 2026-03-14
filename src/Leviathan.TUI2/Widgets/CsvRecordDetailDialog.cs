@@ -41,6 +41,12 @@ internal sealed class CsvRecordDetailDialog : Window
     content.ViewportSettings |= ViewportSettingsFlags.HasVerticalScrollBar
                               | ViewportSettingsFlags.HasHorizontalScrollBar;
 
+    content.MouseEvent += (_, e) =>
+    {
+      if (e.Flags.HasFlag(MouseFlags.WheeledUp)) { content.ScrollVertical(-3); e.Handled = true; }
+      else if (e.Flags.HasFlag(MouseFlags.WheeledDown)) { content.ScrollVertical(3); e.Handled = true; }
+    };
+
     content.KeyDown += (_, e) =>
     {
       if (e == Key.CursorUp) { content.ScrollVertical(-1); e.Handled = true; }

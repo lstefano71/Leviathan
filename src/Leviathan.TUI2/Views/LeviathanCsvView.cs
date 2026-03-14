@@ -14,6 +14,11 @@ namespace Leviathan.TUI2.Views;
 /// sticky header row, cell-level cursor, and row selection for copy/delete.
 /// Handles large files via <see cref="CsvRowIndex"/> sparse indexing.
 /// </summary>
+/// <remarks>
+/// Cell values are decoded as UTF-8. The underlying CSV pipeline (dialect detection,
+/// row indexing, field parsing) operates on single-byte tokens, so this view does
+/// not support multi-byte encodings such as UTF-16.
+/// </remarks>
 internal sealed class LeviathanCsvView : View
 {
   private readonly AppState _state;
@@ -37,6 +42,7 @@ internal sealed class LeviathanCsvView : View
     CanFocus = true;
     SetupCommands();
     SetupKeyBindings();
+    SetupMouseBindings();
   }
 
   // ─── Commands ───
@@ -53,6 +59,8 @@ internal sealed class LeviathanCsvView : View
     AddCommand(Command.RightEnd, () => { _state.CsvCursorCol = Math.Max(0, _state.CsvColumnCount - 1); EnsureColumnVisible(); StateChanged?.Invoke(); SetNeedsDraw(); return true; });
     AddCommand(Command.Start, () => { _state.CsvCursorRow = 0; _state.CsvTopRowIndex = 0; StateChanged?.Invoke(); SetNeedsDraw(); return true; });
     AddCommand(Command.End, () => { GoToLastRow(); return true; });
+    AddCommand(Command.ScrollUp, () => { ScrollViewport(-3); return true; });
+    AddCommand(Command.ScrollDown, () => { ScrollViewport(3); return true; });
   }
 
   private void SetupKeyBindings()
@@ -74,6 +82,13 @@ internal sealed class LeviathanCsvView : View
     // Shift+nav for selection
     KeyBindings.Add(Key.CursorUp.WithShift, [Command.Up]);
     KeyBindings.Add(Key.CursorDown.WithShift, [Command.Down]);
+  }
+
+  private void SetupMouseBindings()
+  {
+    MouseBindings.ReplaceCommands(MouseFlags.LeftButtonClicked, Command.Activate);
+    MouseBindings.Add(MouseFlags.WheeledUp, Command.ScrollUp);
+    MouseBindings.Add(MouseFlags.WheeledDown, Command.ScrollDown);
   }
 
   /// <summary>Handles shift+arrow and Tab for selection and column navigation.</summary>
@@ -142,6 +157,22 @@ internal sealed class LeviathanCsvView : View
     SetNeedsDraw();
   }
 
+  private void ScrollViewport(int delta)
+  {
+    if (_state.Document is null) return;
+    long totalRows = GetTotalDataRows();
+    if (totalRows <= 0) return;
+
+    int visibleRows = VisibleDataRows();
+    long maxTop = Math.Max(0, totalRows - visibleRows);
+    long newTop = Math.Clamp(_state.CsvTopRowIndex + delta, 0, maxTop);
+    if (newTop == _state.CsvTopRowIndex) return;
+
+    _state.CsvTopRowIndex = newTop;
+    StateChanged?.Invoke();
+    SetNeedsDraw();
+  }
+
   private void EnsureColumnVisible()
   {
     if (_state.CsvColumnWidths is null) return;
@@ -169,6 +200,69 @@ internal sealed class LeviathanCsvView : View
     }
   }
 
+  // ─── Mouse ───
+
+  /// <inheritdoc/>
+  protected override bool OnActivating(CommandEventArgs args)
+  {
+    if (args.Context?.Binding is not MouseBinding { MouseEvent: { } mouse })
+      return base.OnActivating(args);
+
+    if (!HasFocus)
+      SetFocus();
+
+    if (_state.Document is null || _state.CsvColumnWidths is null)
+      return true;
+
+    int mx = mouse.Position!.Value.X;
+    int my = mouse.Position!.Value.Y;
+
+    int headerRows = _state.CsvDialect.HasHeader ? 1 : 0;
+
+    // Ignore clicks on the header row
+    if (my < headerRows) return true;
+
+    // Convert screen row to data row
+    long dataRow = _state.CsvTopRowIndex + (my - headerRows);
+    long totalRows = GetTotalDataRows();
+    if (dataRow < 0 || dataRow >= totalRows) return true;
+
+    // Convert screen X to column index
+    int col = ScreenXToColumn(mx);
+
+    _state.CsvSelectionAnchorRow = -1;
+    _state.CsvCursorRow = dataRow;
+    if (col >= 0)
+      _state.CsvCursorCol = col;
+
+    StateChanged?.Invoke();
+    SetNeedsDraw();
+    return true;
+  }
+
+  /// <summary>
+  /// Maps a viewport X coordinate to the corresponding column index,
+  /// accounting for gutter width, horizontal scroll, and column widths.
+  /// Returns -1 if the coordinate falls outside any data column (e.g. in the gutter or separator).
+  /// </summary>
+  private int ScreenXToColumn(int screenX)
+  {
+    if (_state.CsvColumnWidths is null) return -1;
+
+    int x = _gutterWidth;
+    int[] widths = _state.CsvColumnWidths;
+
+    for (int col = _state.CsvHorizontalScroll; col < widths.Length; col++)
+    {
+      int colEnd = x + widths[col];
+      if (screenX >= x && screenX < colEnd)
+        return col;
+      x = colEnd + ColumnPadding;
+    }
+
+    return -1;
+  }
+
   private void GoToLastRow()
   {
     long total = GetTotalDataRows();
@@ -177,6 +271,42 @@ internal sealed class LeviathanCsvView : View
     _state.CsvCursorRow = total - 1;
     int visibleRows = VisibleDataRows();
     _state.CsvTopRowIndex = Math.Max(0, total - visibleRows);
+    StateChanged?.Invoke();
+    SetNeedsDraw();
+  }
+
+  /// <summary>
+  /// Scrolls the CSV view to show the row containing the given byte offset.
+  /// Used by search navigation.
+  /// </summary>
+  internal void GotoOffset(long offset)
+  {
+    if (_state.Document is null) return;
+
+    long totalRows = GetTotalDataRows();
+    if (totalRows <= 0) return;
+
+    // Binary search: find the last data row whose start offset <= target offset
+    long lo = 0, hi = totalRows - 1;
+    while (lo < hi)
+    {
+      long mid = lo + (hi - lo + 1) / 2;
+      long midOffset = GetRowByteOffset(mid);
+      if (midOffset <= offset)
+        lo = mid;
+      else
+        hi = mid - 1;
+    }
+
+    _state.CsvCursorRow = lo;
+
+    // Ensure the row is visible
+    int visibleRows = VisibleDataRows();
+    if (lo < _state.CsvTopRowIndex || lo >= _state.CsvTopRowIndex + visibleRows)
+    {
+      _state.CsvTopRowIndex = Math.Max(0, lo - visibleRows / 3);
+    }
+
     StateChanged?.Invoke();
     SetNeedsDraw();
   }

@@ -38,6 +38,7 @@ internal sealed class LeviathanTextView : View
   private bool _updatingScrollBar;
   private int _userScrollFrames;
   private int _userHScrollFrames;
+
   private bool _horizontalScrollVisible;
   private int _horizontalScrollOffset;
   private int _maxLineWidthInViewport;
@@ -281,7 +282,6 @@ internal sealed class LeviathanTextView : View
 
     int frameMaxWidth = 0;
 
-    EnsureCursorVisible(textAreaCols);
 
     // Compute visual lines
     ITextDecoder decoder = _state.Decoder;
@@ -2178,6 +2178,8 @@ internal sealed class LeviathanTextView : View
 
   private void OnStateChanged()
   {
+    int textAreaCols = _lastTextAreaCols > 0 ? _lastTextAreaCols : 80;
+    EnsureCursorVisible(textAreaCols);
     SetNeedsDraw();
     StateChanged?.Invoke();
   }

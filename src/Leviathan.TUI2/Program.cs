@@ -199,15 +199,15 @@ internal sealed class MainWindow : Window
 
   private MenuBar BuildMenuBar()
   {
-    // Word Wrap — CheckBox CommandView
+    // Line Wrap — CheckBox CommandView
     _wordWrapCheckBox = new CheckBox {
-      Title = "_Word Wrap",
+      Title = "_Line Wrap",
       CanFocus = false,
       Value = _state.WordWrap ? CheckState.Checked : CheckState.UnChecked
     };
     _wordWrapItem = new MenuItem {
-      Title = "_Word Wrap",
-      HelpText = "Toggle word wrap",
+      Title = "_Line Wrap",
+      HelpText = "Toggle line wrap",
       CommandView = _wordWrapCheckBox
     };
     _wordWrapItem.Action += () => {
@@ -812,6 +812,8 @@ internal sealed class MainWindow : Window
 
     if (_state.ActiveView == ViewMode.Hex)
       _hexView.GotoOffset(match.Offset);
+    else if (_state.ActiveView == ViewMode.Csv)
+      _csvView.GotoOffset(match.Offset);
     else
       _textView.GotoOffset(match.Offset);
 
@@ -1015,9 +1017,9 @@ internal sealed class MainWindow : Window
     _palette.RegisterCommand("View", "CSV View", "F7", () => SwitchView(ViewMode.Csv));
     _palette.RegisterCommand("View", "CSV Settings...", "F8", () => ShowCsvSettings());
 
-    // Word wrap — dynamic check indicator
+    // Line wrap — dynamic check indicator
     _palette.RegisterCommand("View",
-        () => _state.WordWrap ? "✓ Word Wrap" : "  Word Wrap",
+        () => _state.WordWrap ? "✓ Line Wrap" : "  Line Wrap",
         "", () => ToggleWordWrap());
 
     // Bytes per row — dynamic radio indicators
