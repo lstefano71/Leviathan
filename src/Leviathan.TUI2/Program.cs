@@ -77,6 +77,7 @@ internal sealed class MainWindow : Window
   private OptionSelector? _bprSelector;
   private MenuItem? _csvSettingsItem;
   private MenuBarItem? _fileMenuBarItem;
+  private object? _indexingTimerToken;
 
   internal MainWindow(
       IApplication app,
@@ -168,6 +169,7 @@ internal sealed class MainWindow : Window
     _csvSettingsBar = new CsvSettingsBar(state, () => {
       _csvView.SetNeedsDraw();
       UpdateStatusBar();
+      StartIndexingTimer();
     });
     Initialized += RegisterPopovers;
 
@@ -404,9 +406,8 @@ internal sealed class MainWindow : Window
 
     UpdateStatusBar();
     UpdateTitle();
-  }
-
-  /// <summary>Shows/hides menu items based on active view mode.</summary>
+    StartIndexingTimer();
+  }  /// <summary>Shows/hides menu items based on active view mode.</summary>
   private void UpdateViewMenuVisibility(ViewMode mode)
   {
     if (_wordWrapItem is not null)
@@ -449,6 +450,7 @@ internal sealed class MainWindow : Window
     _textView.SetNeedsDraw();
     _csvView.SetNeedsDraw();
     RefreshFileMenu();
+    StartIndexingTimer();
 
     if (_state.ActiveView == ViewMode.Csv)
       _csvView.SetFocus();
@@ -1058,6 +1060,32 @@ internal sealed class MainWindow : Window
 
   // ─── Status bar & title ───
 
+  /// <summary>
+  /// Starts a periodic timer that refreshes the status bar while background
+  /// indexing is in progress. Auto-stops when all active indexers complete.
+  /// </summary>
+  private void StartIndexingTimer()
+  {
+    if (_indexingTimerToken is not null) return; // already running
+
+    _indexingTimerToken = _app.AddTimeout(
+      TimeSpan.FromMilliseconds(500),
+      () =>
+      {
+        bool linesDone = _state.LineIndex?.IsComplete ?? true;
+        bool csvDone = _state.CsvRowIndex?.IsComplete ?? true;
+
+        UpdateStatusBar();
+
+        if (linesDone && csvDone)
+        {
+          _indexingTimerToken = null;
+          return false; // stop the timer
+        }
+        return true; // keep ticking
+      });
+  }
+
   private void UpdateStatusBar()
   {
     if (_state.Document is null) {
@@ -1096,9 +1124,11 @@ internal sealed class MainWindow : Window
 
     if (_state.ActiveView == ViewMode.Csv)
     {
+      bool csvIndexing = !(_state.CsvRowIndex?.IsComplete ?? true);
       long totalRows = _state.CsvRowIndex?.TotalRowCount ?? 0;
       if (_state.CsvDialect.HasHeader && totalRows > 0) totalRows--;
-      string csvInfo = $"Row {_state.CsvCursorRow + 1}/{totalRows} | Col {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
+      string totalStr = csvIndexing ? $"~{totalRows}" : totalRows.ToString();
+      string csvInfo = $"Row {_state.CsvCursorRow + 1}/{totalStr} | Col {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
       char sep = (char)_state.CsvDialect.Separator;
       string sepName = sep switch { ',' => "Comma", '\t' => "Tab", '|' => "Pipe", ';' => "Semicolon", _ => $"'{sep}'" };
       Title = $"{modified}{fileName} — {viewName} | {csvInfo} | Sep: {sepName} | {FormatFileSize(_state.FileLength)}";
@@ -1107,13 +1137,15 @@ internal sealed class MainWindow : Window
     }
     else
     {
-      Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo} | {encoding}";
+      bool lineIndexing = !(_state.LineIndex?.IsComplete ?? true);
+      string indexingInfo = lineIndexing ? " | Indexing…" : "";
+      Title = $"{modified}{fileName} — {viewName} | {FormatFileSize(_state.FileLength)} | Offset: 0x{cursor:X} ({cursor}){searchInfo}{indexingInfo} | {encoding}";
 
       // Status bar — left: file name with dirty indicator
       _statusFileLabel.Text = $" {modified}{fileName}";
 
       // Status bar — right: view mode, encoding, offset, size, search
-      _statusInfoLabel.Text = $"{viewName} | {encoding} | Offset: 0x{cursor:X} ({cursor}) | {FormatFileSize(_state.FileLength)}{searchInfo} ";
+      _statusInfoLabel.Text = $"{viewName} | {encoding} | Offset: 0x{cursor:X} ({cursor}) | {FormatFileSize(_state.FileLength)}{searchInfo}{indexingInfo} ";
     }
   }
 
