@@ -118,9 +118,10 @@ internal sealed class HexViewControl : Control
         }
 
         double lineHeight = _state.ContentFontSize + LinePadding;
+        double headerHeight = lineHeight;
 
         int bytesPerRow = _state.BytesPerRow;
-        int visibleRows = Math.Max(1, (int)(bounds.Height / lineHeight));
+        int visibleRows = Math.Max(1, (int)((bounds.Height - headerHeight) / lineHeight));
         _state.VisibleRows = visibleRows;
 
         // Determine address column width (grows for large files)
@@ -137,16 +138,60 @@ internal sealed class HexViewControl : Control
         // ASCII column
         double asciiX = separatorX + 3 * charWidth;
 
-        // Draw separator line
+        // ── Fixed column header ──────────────────────────────────────
+        IBrush headerBgBrush = theme.HeaderBackground;
+        IBrush headerTextBrush = theme.HeaderText;
+
+        context.FillRectangle(headerBgBrush, new Rect(0, 0, bounds.Width, headerHeight));
+
+        // "Offset" label in address column
+        FormattedText offsetLabel = new("Offset", System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+        context.DrawText(offsetLabel, new Point(charWidth, 0));
+
+        // Hex column offsets: 00 01 02 … 0F (matching byte positions)
+        for (int col = 0; col < bytesPerRow; col++)
+        {
+            int groupSep = col / 8;
+            double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
+
+            char hi = (char)HexChars[col >> 4];
+            char lo = (char)HexChars[col & 0xF];
+            string label = new string([hi, lo]);
+
+            FormattedText headerHex = new(label, System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            context.DrawText(headerHex, new Point(hexX, 0));
+        }
+
+        // ASCII column offsets: 0123456789ABCDEF (single char per column)
+        for (int col = 0; col < bytesPerRow; col++)
+        {
+            double ax = asciiX + col * charWidth;
+            char label = (char)HexChars[col & 0xF];
+
+            FormattedText headerAscii = new(label.ToString(), System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            context.DrawText(headerAscii, new Point(ax, 0));
+        }
+
+        // Header / data separator line
         IPen separatorPen = theme.GridLinePen;
+        context.DrawLine(separatorPen, new Point(0, headerHeight), new Point(bounds.Width, headerHeight));
+
+        // Vertical separator between hex and ASCII columns
         context.DrawLine(separatorPen, new Point(separatorX + charWidth, 0),
             new Point(separatorX + charWidth, bounds.Height));
 
-        // Read visible data
+        // ── Data rows (offset by header height) ──────────────────────
         long startOffset = _state.HexBaseOffset;
         int totalBytes = visibleRows * bytesPerRow;
         int maxRead = (int)Math.Min(totalBytes, _state.FileLength - startOffset);
-        if (maxRead <= 0) return;
+        if (maxRead <= 0)
+        {
+            QueueScrollBarUpdate();
+            return;
+        }
 
         int readLen = Math.Min(maxRead, _readBuffer.Length);
         _state.Document.Read(startOffset, _readBuffer.AsSpan(0, readLen));
@@ -173,7 +218,7 @@ internal sealed class HexViewControl : Control
             long rowOffset = startOffset + (long)row * bytesPerRow;
             if (rowOffset >= _state.FileLength) break;
 
-            double y = row * lineHeight;
+            double y = headerHeight + row * lineHeight;
             int rowStart = row * bytesPerRow;
             int rowBytes = Math.Min(bytesPerRow, readLen - rowStart);
             if (rowBytes <= 0) break;
@@ -415,9 +460,13 @@ internal sealed class HexViewControl : Control
     {
         double charWidth = MeasureCharWidth();
         double lineHeight = _state.ContentFontSize + LinePadding;
+        double headerHeight = lineHeight;
         int bytesPerRow = _state.BytesPerRow;
 
-        int row = (int)(point.Y / lineHeight);
+        // Click in the header row — ignore
+        if (point.Y < headerHeight) return -1;
+
+        int row = (int)((point.Y - headerHeight) / lineHeight);
         if (row < 0 || row >= _state.VisibleRows) return -1;
 
         int addressDigits = _state.FileLength > 0xFFFF_FFFFL ? 16 : 8;
