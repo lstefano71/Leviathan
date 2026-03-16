@@ -3,30 +3,69 @@
         x:Class="Leviathan.GUI.Views.MainWindow"
         x:CompileBindings="True"
         Title="Leviathan"
-        Width="1280" Height="720">
+        Width="1280" Height="720"
+        WindowStartupLocation="CenterScreen">
 
     <DockPanel>
         <!-- Menu Bar -->
-        <Menu DockPanel.Dock="Top">
-            <MenuItem Header="_File">
-                <MenuItem Header="_Open..." x:Name="MenuOpen" />
+        <Menu DockPanel.Dock="Top" x:Name="MainMenu">
+            <MenuItem Header="_File" x:Name="FileMenu">
+                <MenuItem Header="_Open..." x:Name="MenuOpen" HotKey="Ctrl+O" />
+                <MenuItem Header="_Save" x:Name="MenuSave" HotKey="Ctrl+S" />
+                <MenuItem Header="Save _As..." x:Name="MenuSaveAs" />
                 <Separator />
-                <MenuItem Header="E_xit" x:Name="MenuExit" />
+                <!-- MRU items inserted dynamically -->
+                <Separator x:Name="MruSeparator" IsVisible="False" />
+                <MenuItem Header="E_xit" x:Name="MenuExit" HotKey="Alt+F4" />
             </MenuItem>
             <MenuItem Header="_View">
-                <MenuItem Header="_Hex" x:Name="MenuViewHex" />
-                <MenuItem Header="_Text" x:Name="MenuViewText" />
+                <MenuItem Header="_Hex View" x:Name="MenuViewHex" HotKey="F5" />
+                <MenuItem Header="_Text View" x:Name="MenuViewText" HotKey="F6" />
+                <MenuItem Header="_CSV View" x:Name="MenuViewCsv" HotKey="F7" />
+                <Separator />
+                <MenuItem Header="_Line Wrap" x:Name="MenuWordWrap" />
+                <MenuItem Header="_Encoding" x:Name="MenuEncoding">
+                    <MenuItem Header="UTF-8" x:Name="MenuEncodingUtf8" />
+                    <MenuItem Header="UTF-16 LE" x:Name="MenuEncodingUtf16Le" />
+                    <MenuItem Header="Windows-1252" x:Name="MenuEncodingWin1252" />
+                </MenuItem>
+                <MenuItem Header="_Bytes/Row" x:Name="MenuBytesPerRow">
+                    <MenuItem Header="Auto" x:Name="MenuBprAuto" />
+                    <MenuItem Header="8" x:Name="MenuBpr8" />
+                    <MenuItem Header="16" x:Name="MenuBpr16" />
+                    <MenuItem Header="24" x:Name="MenuBpr24" />
+                    <MenuItem Header="32" x:Name="MenuBpr32" />
+                    <MenuItem Header="48" x:Name="MenuBpr48" />
+                    <MenuItem Header="64" x:Name="MenuBpr64" />
+                </MenuItem>
+                <MenuItem Header="CSV _Settings..." x:Name="MenuCsvSettings" HotKey="F8" IsVisible="False" />
+            </MenuItem>
+            <MenuItem Header="_Navigate">
+                <MenuItem Header="_Go to Offset/Line..." x:Name="MenuGoto" HotKey="Ctrl+G" />
+            </MenuItem>
+            <MenuItem Header="_Search">
+                <MenuItem Header="_Find..." x:Name="MenuFind" HotKey="Ctrl+F" />
+                <MenuItem Header="Find _Next" x:Name="MenuFindNext" HotKey="F3" />
+                <MenuItem Header="Find _Previous" x:Name="MenuFindPrev" HotKey="Shift+F3" />
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Copy" x:Name="MenuCopy" HotKey="Ctrl+C" />
+                <MenuItem Header="_Paste" x:Name="MenuPaste" HotKey="Ctrl+V" />
+                <MenuItem Header="Select _All" x:Name="MenuSelectAll" HotKey="Ctrl+A" />
+                <MenuItem Header="_Delete Row(s)" x:Name="MenuDeleteRows" />
             </MenuItem>
             <MenuItem Header="_Help">
+                <MenuItem Header="_Keyboard Shortcuts" x:Name="MenuKeyboardShortcuts" HotKey="F1" />
                 <MenuItem Header="_About" x:Name="MenuAbout" />
             </MenuItem>
         </Menu>
 
         <!-- Status Bar -->
-        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
-                Padding="8,2">
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,2" Height="24">
             <Grid ColumnDefinitions="*,Auto">
-                <TextBlock x:Name="StatusLeft" Text="Ready" Grid.Column="0"
+                <TextBlock x:Name="StatusLeft" Text=" Leviathan" Grid.Column="0"
                            VerticalAlignment="Center" FontSize="12" />
                 <TextBlock x:Name="StatusRight" Text="" Grid.Column="1"
                            VerticalAlignment="Center" FontSize="12" />
@@ -35,9 +74,17 @@
 
         <!-- Content Area -->
         <Panel x:Name="ContentArea">
-            <TextBlock Text="Leviathan — Avalonia GUI Experiment"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       FontSize="18" Opacity="0.5" />
+            <!-- Welcome View (visible when no file is open) -->
+            <StackPanel x:Name="WelcomeView" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="12">
+                <TextBlock Text="Leviathan" FontSize="28" FontWeight="Bold"
+                           HorizontalAlignment="Center" Opacity="0.7" />
+                <TextBlock Text="Large File Editor — Avalonia GUI" FontSize="14"
+                           HorizontalAlignment="Center" Opacity="0.5" />
+                <TextBlock Text="Ctrl+O to open a file" FontSize="12"
+                           HorizontalAlignment="Center" Opacity="0.4" Margin="0,8,0,0" />
+                <StackPanel x:Name="MruListPanel" Spacing="4" Margin="0,16,0,0" />
+            </StackPanel>
         </Panel>
     </DockPanel>
 
