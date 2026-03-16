@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Leviathan.GUI.Views.MainWindow"
+        x:CompileBindings="True"
+        Title="Leviathan"
+        Width="1280" Height="720">
+
+    <DockPanel>
+        <!-- Menu Bar -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open..." x:Name="MenuOpen" />
+                <Separator />
+                <MenuItem Header="E_xit" x:Name="MenuExit" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="_Hex" x:Name="MenuViewHex" />
+                <MenuItem Header="_Text" x:Name="MenuViewText" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_About" x:Name="MenuAbout" />
+            </MenuItem>
+        </Menu>
+
+        <!-- Status Bar -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,2">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock x:Name="StatusLeft" Text="Ready" Grid.Column="0"
+                           VerticalAlignment="Center" FontSize="12" />
+                <TextBlock x:Name="StatusRight" Text="" Grid.Column="1"
+                           VerticalAlignment="Center" FontSize="12" />
+            </Grid>
+        </Border>
+
+        <!-- Content Area -->
+        <Panel x:Name="ContentArea">
+            <TextBlock Text="Leviathan — Avalonia GUI Experiment"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       FontSize="18" Opacity="0.5" />
+        </Panel>
+    </DockPanel>
+
+</Window>
