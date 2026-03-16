@@ -36,7 +36,8 @@ public sealed partial class MainWindow : Window
         _state.WordWrap = _state.Settings.WordWrap;
 
         WireMenuEvents();
-        BuildMruList();
+        WireWelcomeScreen();
+        BuildFileMenuMru();
         UpdateViewVisibility();
         UpdateWordWrapCheck();
         UpdateBprChecks();
@@ -81,6 +82,7 @@ public sealed partial class MainWindow : Window
     private void WireMenuEvents()
     {
         MenuOpen.Click += async (_, _) => await ShowOpenDialog();
+        MenuClose.Click += async (_, _) => await CloseFileAsync();
         MenuSave.Click += (_, _) => SaveFile();
         MenuSaveAs.Click += async (_, _) => await ShowSaveAsDialog();
         MenuExit.Click += (_, _) => Close();
@@ -148,6 +150,25 @@ public sealed partial class MainWindow : Window
             _state.OpenFile(path);
             OnFileOpened();
         }
+    }
+
+    private async Task CloseFileAsync()
+    {
+        if (_state.Document is null) return;
+        if (!await GuardUnsavedChanges()) return;
+
+        _state.CloseFile();
+
+        // Hide any open overlays
+        if (_findBar is not null) _findBar.IsVisible = false;
+        if (_gotoBar is not null) _gotoBar.IsVisible = false;
+        if (_commandPalette is not null) _commandPalette.IsVisible = false;
+
+        UpdateViewVisibility();
+        BuildFileMenuMru();
+        UpdateTitle();
+        UpdateStatusBar();
+        RefreshCommandPaletteCommands();
     }
 
     private void SaveFile()
@@ -309,7 +330,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateViewVisibility();
-        BuildMruList();
+        BuildFileMenuMru();
         RefreshCommandPaletteCommands();
         UpdateTitle();
         UpdateStatusBar();
@@ -389,7 +410,14 @@ public sealed partial class MainWindow : Window
     private void UpdateViewVisibility()
     {
         bool hasFile = _state.Document is not null;
-        WelcomeView.IsVisible = !hasFile;
+        WelcomeScreen.IsVisible = !hasFile;
+
+        // Hide menu bar and status bar on the welcome screen
+        MainMenu.IsVisible = hasFile;
+        StatusBar.IsVisible = hasFile;
+
+        if (!hasFile)
+            PopulateWelcomeScreen();
 
         if (_hexView is not null)
         {
@@ -597,11 +625,55 @@ public sealed partial class MainWindow : Window
         return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
     }
 
-    // ─── MRU list ───
+    // ─── Welcome screen ───
 
-    private void BuildMruList()
+    private void WireWelcomeScreen()
     {
-        // ── File menu MRU items ──
+        WelcomeScreen.FileSelected = path => _ = OpenRecentFileAsync(path);
+        WelcomeScreen.OpenFileRequested = () => _ = ShowOpenDialog();
+        WelcomeScreen.PinChanged = (path, pinned) =>
+        {
+            if (pinned)
+                _state.Settings.PinFile(path);
+            else
+                _state.Settings.UnpinFile(path);
+            PopulateWelcomeScreen();
+            BuildFileMenuMru();
+        };
+        WelcomeScreen.FileRemoved = path =>
+        {
+            _state.Settings.RemoveFile(path);
+            PopulateWelcomeScreen();
+            BuildFileMenuMru();
+        };
+
+        // Populate version info in the right-hand panel
+        string version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        string? buildDate = null;
+        foreach (System.Reflection.CustomAttributeData attr in typeof(MainWindow).Assembly.CustomAttributes)
+        {
+            if (attr.AttributeType == typeof(System.Reflection.AssemblyMetadataAttribute)
+                && attr.ConstructorArguments.Count == 2
+                && attr.ConstructorArguments[0].Value is string key
+                && key == "BuildDateUtc"
+                && attr.ConstructorArguments[1].Value is string val)
+            {
+                buildDate = val;
+                break;
+            }
+        }
+        WelcomeScreen.SetVersionInfo(version, buildDate);
+    }
+
+    private void PopulateWelcomeScreen()
+    {
+        WelcomeScreen.Populate(_state.Settings.PinnedFiles, _state.Settings.RecentFiles);
+    }
+
+    // ─── File menu MRU ───
+
+    private void BuildFileMenuMru()
+    {
         // Remove any previous dynamic MRU items (between first Separator and MruSeparator)
         List<Control> toRemove = [];
         bool inMruZone = false;
@@ -614,72 +686,30 @@ public sealed partial class MainWindow : Window
         foreach (Control c in toRemove)
             FileMenu.Items.Remove(c);
 
-        List<string> recent = _state.Settings.RecentFiles;
+        // Combine pinned + recent for the file menu
+        List<string> allFiles = [.. _state.Settings.PinnedFiles, .. _state.Settings.RecentFiles];
 
-        if (recent.Count == 0)
+        if (allFiles.Count == 0)
         {
             MruSeparator.IsVisible = false;
         }
         else
         {
             MruSeparator.IsVisible = true;
-            // Insert MRU items before MruSeparator
             int insertIdx = FileMenu.Items.IndexOf(MruSeparator);
-            for (int i = 0; i < Math.Min(9, recent.Count); i++)
+            for (int i = 0; i < Math.Min(9, allFiles.Count); i++)
             {
-                string path = recent[i];
+                string path = allFiles[i];
                 string fileName = Path.GetFileName(path);
                 int number = i + 1;
-                MenuItem mruItem = new() { Header = $"_{number} {fileName}", StaysOpenOnClick = false };
+                bool isPinned = _state.Settings.PinnedFiles.Contains(path);
+                string prefix = isPinned ? "📌 " : "";
+                MenuItem mruItem = new() { Header = $"_{number} {prefix}{fileName}", StaysOpenOnClick = false };
                 string capturedPath = path;
                 mruItem.Click += async (_, _) => await OpenRecentFileAsync(capturedPath, closeFileMenu: true);
                 FileMenu.Items.Insert(insertIdx + i, mruItem);
             }
         }
-
-        // ── Welcome view MRU list ──
-        MruListPanel.Children.Clear();
-        if (recent.Count == 0) return;
-
-        MruListPanel.Children.Add(new TextBlock
-        {
-            Text = "Recent Files:",
-            FontSize = 13,
-            FontWeight = FontWeight.SemiBold,
-            Opacity = 0.6,
-            Margin = new Thickness(0, 0, 0, 4)
-        });
-
-        ListBox mruListBox = new()
-        {
-            SelectionMode = SelectionMode.Single,
-            Background = Brushes.Transparent,
-            MaxHeight = 300
-        };
-
-        for (int i = 0; i < Math.Min(9, recent.Count); i++)
-        {
-            string path = recent[i];
-            string fileName = Path.GetFileName(path);
-            ListBoxItem item = new()
-            {
-                Content = $"[{i + 1}]  {fileName}",
-                Tag = path,
-                FontFamily = new FontFamily("Consolas, Courier New, monospace"),
-                FontSize = 13,
-                Padding = new Thickness(8, 4)
-            };
-            ToolTip.SetTip(item, path);
-            mruListBox.Items.Add(item);
-        }
-
-        mruListBox.DoubleTapped += async (_, _) =>
-        {
-            if (mruListBox.SelectedItem is ListBoxItem sel && sel.Tag is string filePath)
-                await OpenRecentFileAsync(filePath);
-        };
-
-        MruListPanel.Children.Add(mruListBox);
     }
 
     private async Task OpenRecentFileAsync(string path, bool closeFileMenu = false)
@@ -714,6 +744,10 @@ public sealed partial class MainWindow : Window
                     Close();
                     e.Handled = true;
                     return;
+                case Key.W:
+                    _ = CloseFileAsync();
+                    e.Handled = true;
+                    return;
             }
         }
 
@@ -723,25 +757,6 @@ public sealed partial class MainWindow : Window
             ShowCsvRecordDetail();
             e.Handled = true;
             return;
-        }
-
-        // Digit shortcutsfor MRU on welcome screen
-        if (_state.Document is null && e.KeyModifiers == KeyModifiers.None)
-        {
-            int digit = e.Key switch
-            {
-                Key.D1 => 1, Key.D2 => 2, Key.D3 => 3,
-                Key.D4 => 4, Key.D5 => 5, Key.D6 => 6,
-                Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
-                _ => 0
-            };
-
-            if (digit > 0 && digit <= _state.Settings.RecentFiles.Count)
-            {
-                string path = _state.Settings.RecentFiles[digit - 1];
-                _ = OpenRecentFileAsync(path);
-                e.Handled = true;
-            }
         }
     }
 
@@ -805,6 +820,7 @@ public sealed partial class MainWindow : Window
 
         _commandPalette.ClearCommands();
         _commandPalette.RegisterCommand("Open File", "Open a file (Ctrl+O)", () => _ = ShowOpenDialog());
+        _commandPalette.RegisterCommand("Close File", "Close current file (Ctrl+W)", () => _ = CloseFileAsync());
         _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand(
             () => _state.ActiveView == ViewMode.Hex ? "● Hex View" : "○ Hex View",
@@ -834,13 +850,42 @@ public sealed partial class MainWindow : Window
             ToggleWordWrap,
             searchName: "Line Wrap",
             restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.Decoder.Encoding == TextEncoding.Utf8 ? "● Encoding: UTF-8" : "○ Encoding: UTF-8",
+            "Switch to UTF-8 encoding",
+            () => SwitchEncoding(TextEncoding.Utf8),
+            searchName: "Encoding UTF-8",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.Decoder.Encoding == TextEncoding.Utf16Le ? "● Encoding: UTF-16 LE" : "○ Encoding: UTF-16 LE",
+            "Switch to UTF-16 Little Endian encoding",
+            () => SwitchEncoding(TextEncoding.Utf16Le),
+            searchName: "Encoding UTF-16 LE",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.Decoder.Encoding == TextEncoding.Windows1252 ? "● Encoding: Windows-1252" : "○ Encoding: Windows-1252",
+            "Switch to Windows-1252 (Latin-1) encoding",
+            () => SwitchEncoding(TextEncoding.Windows1252),
+            searchName: "Encoding Windows-1252",
+            restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
 
-        foreach (string recentPath in _state.Settings.RecentFiles.Take(10))
+        foreach (string pinnedPath in _state.Settings.PinnedFiles)
+        {
+            string capturedPath = pinnedPath;
+            string fileName = Path.GetFileName(capturedPath);
+            _commandPalette.RegisterCommand(
+                () => $"📌 Open: {fileName}",
+                capturedPath,
+                () => _ = OpenRecentFileAsync(capturedPath),
+                searchName: $"Open Pinned {fileName}");
+        }
+
+        foreach (string recentPath in _state.Settings.RecentFiles.Take(20))
         {
             string capturedPath = recentPath;
             string fileName = Path.GetFileName(capturedPath);

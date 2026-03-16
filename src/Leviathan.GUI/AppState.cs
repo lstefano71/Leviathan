@@ -194,6 +194,43 @@ public sealed class AppState
     }
 
     /// <summary>
+    /// Closes the current document and resets all state back to the welcome screen.
+    /// </summary>
+    public void CloseFile()
+    {
+        CancelSearch();
+        Indexer?.Dispose();
+        Indexer = null;
+        CsvRowIndexer?.Dispose();
+        CsvRowIndexer = null;
+        Document?.Dispose();
+        Document = null;
+        CurrentFilePath = null;
+
+        ActiveView = ViewMode.Hex;
+        HexBaseOffset = 0;
+        HexCursorOffset = -1;
+        HexSelectionAnchor = -1;
+        NibbleLow = false;
+        TextTopOffset = 0;
+        TextCursorOffset = -1;
+        TextSelectionAnchor = -1;
+        EstimatedTotalLines = 0;
+        BomLength = 0;
+        SearchResults = [];
+        CurrentMatchIndex = -1;
+        SearchStatus = "";
+        CsvTopRowIndex = 0;
+        CsvCursorRow = 0;
+        CsvCursorCol = 0;
+        CsvSelectionAnchorRow = -1;
+        CsvHorizontalScroll = 0;
+        CsvHeaderNames = [];
+        CsvColumnWidths = null;
+        CsvColumnCount = 0;
+    }
+
+    /// <summary>
     /// Attempts to save the document. Returns true on success, sets error message on failure.
     /// </summary>
     public bool TrySave(string path, out string? errorMessage)

@@ -8,11 +8,18 @@ namespace Leviathan.GUI;
 /// </summary>
 public sealed class GuiSettings
 {
-    private const int MaxRecentFiles = 10;
+    private const int MaxRecentFiles = 20;
     private const int MaxFindHistory = 20;
     private const int MaxCsvFileSettings = 200;
 
     public List<string> RecentFiles { get; set; } = [];
+
+    /// <summary>
+    /// User-pinned favourite files. Pinned files are never evicted by MRU rotation
+    /// and always appear above the recent files list on the welcome screen.
+    /// </summary>
+    public List<string> PinnedFiles { get; set; } = [];
+
     public int BytesPerRow { get; set; } // 0 = auto
     public bool WordWrap { get; set; } = true;
     public List<string> FindHistory { get; set; } = [];
@@ -20,12 +27,56 @@ public sealed class GuiSettings
     /// <summary>Per-file CSV dialect settings, keyed by full file path.</summary>
     public Dictionary<string, CsvFileSettings> CsvFileSettings { get; set; } = new();
 
+    /// <summary>
+    /// Adds a file to the recent list. Skips files already pinned.
+    /// </summary>
     public void AddRecent(string filePath)
     {
+        if (PinnedFiles.Contains(filePath))
+            return;
+
         RecentFiles.Remove(filePath);
         RecentFiles.Insert(0, filePath);
         if (RecentFiles.Count > MaxRecentFiles)
             RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);
+        Save();
+    }
+
+    /// <summary>
+    /// Pins a file: removes it from recent files and adds it to the pinned list.
+    /// </summary>
+    public void PinFile(string filePath)
+    {
+        if (PinnedFiles.Contains(filePath))
+            return;
+
+        RecentFiles.Remove(filePath);
+        PinnedFiles.Add(filePath);
+        Save();
+    }
+
+    /// <summary>
+    /// Unpins a file: removes it from pinned files and inserts it at the top of recent files.
+    /// </summary>
+    public void UnpinFile(string filePath)
+    {
+        if (!PinnedFiles.Remove(filePath))
+            return;
+
+        RecentFiles.Remove(filePath);
+        RecentFiles.Insert(0, filePath);
+        if (RecentFiles.Count > MaxRecentFiles)
+            RecentFiles.RemoveRange(MaxRecentFiles, RecentFiles.Count - MaxRecentFiles);
+        Save();
+    }
+
+    /// <summary>
+    /// Removes a file from both pinned and recent lists.
+    /// </summary>
+    public void RemoveFile(string filePath)
+    {
+        PinnedFiles.Remove(filePath);
+        RecentFiles.Remove(filePath);
         Save();
     }
 
@@ -128,6 +179,12 @@ public sealed class GuiSettings
                         RecentFiles.Add(recent);
                 }
 
+                foreach (string pinned in diskSettings.PinnedFiles)
+                {
+                    if (!PinnedFiles.Contains(pinned))
+                        PinnedFiles.Add(pinned);
+                }
+
                 foreach (string query in diskSettings.FindHistory)
                 {
                     if (!FindHistory.Contains(query) && FindHistory.Count < MaxFindHistory)
@@ -161,5 +218,6 @@ public sealed class CsvFileSettings
 [JsonSerializable(typeof(GuiSettings))]
 [JsonSerializable(typeof(CsvFileSettings))]
 [JsonSerializable(typeof(Dictionary<string, CsvFileSettings>))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSourceGenerationOptions(WriteIndented = true)]
 internal sealed partial class GuiSettingsContext : JsonSerializerContext;

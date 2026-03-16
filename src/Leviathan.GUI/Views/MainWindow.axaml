@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:widgets="using:Leviathan.GUI.Widgets"
         x:Class="Leviathan.GUI.Views.MainWindow"
         x:CompileBindings="True"
         Title="Leviathan"
@@ -11,6 +12,7 @@
         <Menu DockPanel.Dock="Top" x:Name="MainMenu">
             <MenuItem Header="_File" x:Name="FileMenu">
                 <MenuItem Header="_Open..." x:Name="MenuOpen" HotKey="Ctrl+O" />
+                <MenuItem Header="_Close" x:Name="MenuClose" HotKey="Ctrl+W" />
                 <MenuItem Header="_Save" x:Name="MenuSave" HotKey="Ctrl+S" />
                 <MenuItem Header="Save _As..." x:Name="MenuSaveAs" />
                 <Separator />
@@ -61,7 +63,7 @@
         </Menu>
 
         <!-- Status Bar -->
-        <Border DockPanel.Dock="Bottom"
+        <Border x:Name="StatusBar" DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="8,2" Height="24">
             <Grid ColumnDefinitions="*,Auto">
@@ -74,18 +76,8 @@
 
         <!-- Content Area -->
         <Panel x:Name="ContentArea">
-            <!-- Welcome View (visible when no file is open) -->
-            <StackPanel x:Name="WelcomeView" VerticalAlignment="Center"
-                        Margin="40,0" Spacing="12" MaxWidth="600"
-                        HorizontalAlignment="Center">
-                <TextBlock Text="Leviathan" FontSize="28" FontWeight="Bold"
-                           Opacity="0.7" />
-                <TextBlock Text="Large File Editor — Avalonia GUI" FontSize="14"
-                           Opacity="0.5" />
-                <TextBlock Text="Ctrl+O to open a file, or select a recent file below"
-                           FontSize="12" Opacity="0.4" Margin="0,8,0,0" />
-                <StackPanel x:Name="MruListPanel" Spacing="4" Margin="0,16,0,0" />
-            </StackPanel>
+            <!-- Welcome Screen (visible when no file is open) -->
+            <widgets:WelcomeScreen x:Name="WelcomeScreen" />
         </Panel>
     </DockPanel>
 
