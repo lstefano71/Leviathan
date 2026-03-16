@@ -124,14 +124,20 @@ public sealed partial class CsvDetailPanel : UserControl
             Foreground = Brushes.Gray
         });
 
-        row.Children.Add(new TextBlock
+        bool isEmpty = string.IsNullOrEmpty(value);
+        TextBlock valueBlock = new()
         {
-            Text = string.IsNullOrEmpty(value) ? "(empty)" : value,
+            Text = isEmpty ? "(empty)" : value,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 13,
-            Foreground = string.IsNullOrEmpty(value) ? Brushes.DarkGray : null,
-            FontStyle = string.IsNullOrEmpty(value) ? FontStyle.Italic : FontStyle.Normal
-        });
+            FontSize = 13
+        };
+        if (isEmpty)
+        {
+            valueBlock.Foreground = Brushes.DarkGray;
+            valueBlock.FontStyle = FontStyle.Italic;
+        }
+
+        row.Children.Add(valueBlock);
 
         return new Border
         {
