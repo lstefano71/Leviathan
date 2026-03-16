@@ -1,12 +1,16 @@
 using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using Leviathan.Core.Text;
 
 namespace Leviathan.Core.Search;
 
 /// <summary>
 /// High-performance streaming pattern search over a <see cref="Document"/>.
-/// Uses Boyer-Moore-Horspool with 4 MB chunk reads and proper boundary overlap
+/// Literal search uses <see cref="MemoryExtensions.IndexOf{T}(ReadOnlySpan{T}, ReadOnlySpan{T})"/>
+/// (SIMD-accelerated in .NET 8+) with 4 MB chunk reads and proper boundary overlap
 /// so matches spanning two consecutive chunks are never missed.
 /// Allocation policy: one ArrayPool buffer per search, no per-match allocation.
 /// </summary>
@@ -21,7 +25,8 @@ public static class SearchEngine
   /// (every ~4 MB) so the search can be stopped promptly even when matches are sparse.
   /// </summary>
   public static IEnumerable<SearchResult> FindAll(
-      Document doc, byte[] pattern, bool caseSensitive = true, CancellationToken ct = default)
+      Document doc, byte[] pattern, bool caseSensitive = true,
+      bool wholeWord = false, CancellationToken ct = default)
   {
     if (pattern.Length == 0 || doc.Length == 0) yield break;
     if (pattern.Length > doc.Length) yield break;
@@ -29,11 +34,7 @@ public static class SearchEngine
     int pLen = pattern.Length;
     int overlap = pLen - 1; // bytes carried over from the previous chunk
 
-    // For case-insensitive search, fold the pattern to lowercase
     byte[] effectivePattern = caseSensitive ? pattern : FoldToLower(pattern);
-    int[] badChar = caseSensitive
-        ? BuildBadCharTable(effectivePattern)
-        : BuildBadCharTableCaseInsensitive(effectivePattern);
 
     // Buffer layout per chunk: [overlap from prev][ChunkSize new bytes]
     byte[] buffer = ArrayPool<byte>.Shared.Rent(ChunkSize + overlap);
@@ -50,37 +51,35 @@ public static class SearchEngine
         if (bytesRead == 0) break;
 
         int totalLen = prevLen + bytesRead;
-
-        // docOffsetOfBufferStart: document offset that maps to buffer[0]
         long docOffsetOfBufferStart = docBase - prevLen;
 
-        // Search buffer[0..totalLen] — only yield matches that START at >= docBase
-        // (matches before docBase were already reported in the previous iteration)
-        int end = totalLen - pLen;
-        int i = 0;
+        // For case-insensitive search, fold the newly-read bytes to lowercase.
+        // Overlap bytes carried from the previous chunk are already folded.
+        if (!caseSensitive)
+          FoldBufferToLower(buffer, prevLen, bytesRead);
 
-        while (i <= end) {
-          int j = pLen - 1;
-          while (j >= 0 && (caseSensitive
-              ? buffer[i + j] == effectivePattern[j]
-              : ToLowerAscii(buffer[i + j]) == effectivePattern[j]))
-            j--;
+        // Use Span.IndexOf (SIMD-accelerated in .NET 8+) for the inner search loop.
+        // Spans are created inline to avoid ref struct crossing yield boundaries.
+        int searchStart = 0;
 
-          if (j < 0) {
-            // Full match at buffer[i]
-            long matchOffset = docOffsetOfBufferStart + i;
-            if (matchOffset >= docBase)
+        while (searchStart <= totalLen - pLen) {
+          int idx = buffer.AsSpan(searchStart, totalLen - searchStart)
+                         .IndexOf(effectivePattern.AsSpan());
+          if (idx < 0) break;
+
+          int matchPos = searchStart + idx;
+          long matchOffset = docOffsetOfBufferStart + matchPos;
+
+          if (matchOffset >= docBase) {
+            if (!wholeWord || IsWholeWordMatch(buffer, matchPos, pLen, totalLen))
               yield return new SearchResult(matchOffset, pLen);
-            i++;
-          } else {
-            byte b = caseSensitive ? buffer[i + pLen - 1] : ToLowerAscii(buffer[i + pLen - 1]);
-            int skip = badChar[b];
-            i += skip > 0 ? skip : 1;
           }
+
+          searchStart = matchPos + 1;
         }
 
         // Carry the last `overlap` bytes forward for the next chunk
-        int newPrevLen = Math.Min(overlap, bytesRead);
+        int newPrevLen = Math.Min(overlap, totalLen);
         if (newPrevLen > 0)
           Buffer.BlockCopy(buffer, totalLen - newPrevLen, buffer, 0, newPrevLen);
 
@@ -93,12 +92,105 @@ public static class SearchEngine
   }
 
   /// <summary>
+  /// Yields all occurrences of a regex <paramref name="pattern"/> in <paramref name="doc"/>.
+  /// Decodes byte chunks to text using <paramref name="decoder"/>, then runs the regex.
+  /// The search is synchronous; wrap in <c>Task.Run</c> for background execution.
+  /// Uses <see cref="RegexOptions.NonBacktracking"/> for linear-time guarantees and AOT safety.
+  /// </summary>
+  /// <returns>
+  /// An empty sequence if <paramref name="pattern"/> is empty or invalid regex.
+  /// </returns>
+  public static IEnumerable<SearchResult> FindAllRegex(
+      Document doc, ITextDecoder decoder, string pattern,
+      bool caseSensitive = true, CancellationToken ct = default)
+  {
+    if (string.IsNullOrEmpty(pattern) || doc.Length == 0) yield break;
+
+    RegexOptions options = RegexOptions.NonBacktracking;
+    if (!caseSensitive) options |= RegexOptions.IgnoreCase;
+
+    Regex regex;
+    try { regex = new Regex(pattern, options); }
+    catch (RegexParseException) { yield break; }
+
+    Encoding encoding = GetDotNetEncoding(decoder);
+
+    // Text overlap to catch regex matches that span chunk boundaries.
+    // We carry forward enough bytes to cover any reasonable match.
+    int textOverlapBytes = Math.Max(pattern.Length * 4 * decoder.MinCharBytes, 4096);
+
+    byte[] buffer = ArrayPool<byte>.Shared.Rent(ChunkSize + textOverlapBytes);
+
+    try {
+      long docBase = 0;
+      int prevLen = 0;
+
+      while (docBase < doc.Length) {
+        ct.ThrowIfCancellationRequested();
+
+        int toRead = (int)Math.Min(ChunkSize, doc.Length - docBase);
+        int bytesRead = doc.Read(docBase, buffer.AsSpan(prevLen, toRead));
+        if (bytesRead == 0) break;
+
+        int totalLen = prevLen + bytesRead;
+        long docOffsetOfBufferStart = docBase - prevLen;
+
+        // Align totalLen to a character boundary to avoid splitting a multi-byte char
+        int alignedLen = AlignToCharBoundary(buffer, totalLen, decoder);
+
+        string text = encoding.GetString(buffer, 0, alignedLen);
+
+        // Track char→byte offset incrementally for efficiency
+        int prevCharEnd = 0;
+        int prevByteEnd = 0;
+
+        // Use Matches() rather than EnumerateMatches() because
+        // ValueMatchEnumerator is a ref struct that cannot cross yield boundaries.
+        foreach (Match match in regex.Matches(text)) {
+          prevByteEnd += encoding.GetByteCount(text.AsSpan(prevCharEnd, match.Index - prevCharEnd));
+          prevCharEnd = match.Index;
+
+          long matchOffset = docOffsetOfBufferStart + prevByteEnd;
+          int matchByteLen = encoding.GetByteCount(text.AsSpan(match.Index, match.Length));
+
+          if (matchOffset >= docBase && matchByteLen > 0)
+            yield return new SearchResult(matchOffset, matchByteLen);
+        }
+
+        // Carry forward overlap bytes for cross-boundary match detection
+        int newPrevLen = Math.Min(textOverlapBytes, alignedLen);
+        if (newPrevLen > 0)
+          Buffer.BlockCopy(buffer, alignedLen - newPrevLen, buffer, 0, newPrevLen);
+
+        prevLen = newPrevLen;
+        docBase += bytesRead;
+      }
+    } finally {
+      ArrayPool<byte>.Shared.Return(buffer);
+    }
+  }
+
+  /// <summary>
+  /// Validates whether a regex pattern is syntactically correct for the
+  /// <see cref="RegexOptions.NonBacktracking"/> engine.
+  /// </summary>
+  public static bool IsValidRegex(string pattern)
+  {
+    try {
+      _ = new Regex(pattern, RegexOptions.NonBacktracking);
+      return true;
+    } catch (RegexParseException) {
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Finds the first occurrence of <paramref name="pattern"/> at or after
   /// <paramref name="startOffset"/>. Returns null if not found.
   /// </summary>
   public static SearchResult? FindNext(Document doc, byte[] pattern, long startOffset)
   {
-    foreach (var result in FindAll(doc, pattern)) {
+    foreach (SearchResult result in FindAll(doc, pattern)) {
       if (result.Offset >= startOffset)
         return result;
     }
@@ -112,7 +204,7 @@ public static class SearchEngine
   public static SearchResult? FindPrevious(Document doc, byte[] pattern, long beforeOffset)
   {
     SearchResult? last = null;
-    foreach (var result in FindAll(doc, pattern)) {
+    foreach (SearchResult result in FindAll(doc, pattern)) {
       if (result.Offset >= beforeOffset) break;
       last = result;
     }
@@ -151,48 +243,32 @@ public static class SearchEngine
     return result;
   }
 
-  /// <summary>
-  /// Boyer-Moore-Horspool bad-character skip table.
-  /// For each byte value, stores the distance from the right end of the pattern
-  /// to the rightmost occurrence of that byte (excluding the last position).
-  /// Chars not in the pattern get a skip of <c>pattern.Length</c>.
-  /// </summary>
-  private static int[] BuildBadCharTable(byte[] pattern)
-  {
-    int pLen = pattern.Length;
-    int[] table = new int[256];
+  // ── Whole-word helpers ──────────────────────────────────────────────────
 
-    for (int i = 0; i < 256; i++)
-      table[i] = pLen;
-
-    for (int i = 0; i < pLen - 1; i++)
-      table[pattern[i]] = pLen - 1 - i;
-
-    return table;
-  }
+  /// <summary>Tests whether <paramref name="b"/> is an ASCII word character [A-Za-z0-9_].</summary>
+  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+  private static bool IsWordChar(byte b) =>
+      (b >= (byte)'A' && b <= (byte)'Z') ||
+      (b >= (byte)'a' && b <= (byte)'z') ||
+      (b >= (byte)'0' && b <= (byte)'9') ||
+      b == (byte)'_';
 
   /// <summary>
-  /// Case-insensitive bad-character table. Builds entries for both upper and lower
-  /// ASCII variants so that the skip table works correctly with folded lookups.
+  /// Returns true when the match at <paramref name="matchStart"/> is surrounded
+  /// by non-word characters (or buffer boundaries).
   /// </summary>
-  private static int[] BuildBadCharTableCaseInsensitive(byte[] lowerPattern)
+  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+  private static bool IsWholeWordMatch(byte[] buffer, int matchStart, int matchLen, int bufferLen)
   {
-    int pLen = lowerPattern.Length;
-    int[] table = new int[256];
-
-    for (int i = 0; i < 256; i++)
-      table[i] = pLen;
-
-    for (int i = 0; i < pLen - 1; i++) {
-      byte b = lowerPattern[i];
-      table[b] = pLen - 1 - i;
-      // Also set for the uppercase variant
-      if (b >= 0x61 && b <= 0x7A)
-        table[b - 0x20] = pLen - 1 - i;
-    }
-
-    return table;
+    if (matchStart > 0 && IsWordChar(buffer[matchStart - 1]))
+      return false;
+    int afterMatch = matchStart + matchLen;
+    if (afterMatch < bufferLen && IsWordChar(buffer[afterMatch]))
+      return false;
+    return true;
   }
+
+  // ── Case-folding helpers ────────────────────────────────────────────────
 
   /// <summary>Folds ASCII uppercase to lowercase.</summary>
   [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -205,5 +281,51 @@ public static class SearchEngine
     for (int i = 0; i < pattern.Length; i++)
       result[i] = ToLowerAscii(pattern[i]);
     return result;
+  }
+
+  /// <summary>
+  /// Folds a region of the buffer to ASCII lowercase in-place.
+  /// </summary>
+  private static void FoldBufferToLower(byte[] buffer, int offset, int length)
+  {
+    for (int i = offset; i < offset + length; i++)
+      buffer[i] = ToLowerAscii(buffer[i]);
+  }
+
+  // ── Regex helpers ───────────────────────────────────────────────────────
+
+  /// <summary>
+  /// Maps the <see cref="ITextDecoder"/> encoding to the closest
+  /// <see cref="System.Text.Encoding"/> for bulk byte↔text conversion.
+  /// </summary>
+  private static Encoding GetDotNetEncoding(ITextDecoder decoder) =>
+      decoder.Encoding switch {
+        TextEncoding.Utf8 => Encoding.UTF8,
+        TextEncoding.Utf16Le => Encoding.Unicode,
+        _ => Encoding.Latin1, // Windows-1252 ≈ Latin1 for byte-count mapping
+      };
+
+  /// <summary>
+  /// Trims <paramref name="length"/> backward so it does not split a multi-byte character.
+  /// </summary>
+  private static int AlignToCharBoundary(byte[] buffer, int length, ITextDecoder decoder)
+  {
+    if (decoder.MinCharBytes <= 1 && decoder.Encoding == TextEncoding.Utf8) {
+      // Walk back past any trailing continuation bytes (10xxxxxx)
+      int pos = length;
+      while (pos > 0 && (buffer[pos - 1] & 0xC0) == 0x80) pos--;
+      // If the lead byte indicates more bytes than available, trim it
+      if (pos > 0) {
+        byte lead = buffer[pos - 1];
+        int expected = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+        if (pos - 1 + expected > length) pos--;
+      }
+      return pos;
+    }
+    if (decoder.MinCharBytes == 2) {
+      // UTF-16 LE: ensure even length
+      return length & ~1;
+    }
+    return length; // Single-byte encodings are always aligned
   }
 }

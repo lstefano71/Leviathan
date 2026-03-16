@@ -1205,34 +1205,96 @@ public sealed partial class MainWindow : Window
         CancellationTokenSource cts = new();
         _state.SearchCts = cts;
 
-        byte[]? pattern = _state.FindHexMode
-            ? SearchEngine.ParseHexPattern(_state.FindInput)
-            : _state.Decoder.EncodeString(_state.FindInput);
+        bool isRegex = _state.FindRegexMode && !_state.FindHexMode;
+        bool isHex = _state.FindHexMode;
+        bool caseSensitive = isHex || _state.FindCaseSensitive;
+        bool wholeWord = _state.FindWholeWord;
+        Core.Document doc = _state.Document;
+        ITextDecoder decoder = _state.Decoder;
+        string query = _state.FindInput;
 
-        if (pattern is null || pattern.Length == 0)
+        // Validate pattern before launching background task
+        if (isHex)
+        {
+            try { SearchEngine.ParseHexPattern(query); }
+            catch (FormatException)
+            {
+                _state.IsSearching = false;
+                _state.SearchStatus = "Invalid hex pattern";
+                _findBar?.UpdateMatchStatus();
+                return;
+            }
+        }
+        else if (isRegex && !SearchEngine.IsValidRegex(query))
         {
             _state.IsSearching = false;
-            _state.SearchStatus = "Invalid pattern";
+            _state.SearchStatus = "Invalid regex";
             _findBar?.UpdateMatchStatus();
             return;
         }
 
-        bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
-        Core.Document doc = _state.Document;
-
         _state.SearchTask = Task.Run(() =>
         {
-            List<SearchResult> results = SearchEngine.FindAll(doc, pattern, caseSensitive, cts.Token).ToList();
+            IEnumerable<SearchResult> source;
+            if (isRegex)
+            {
+                source = SearchEngine.FindAllRegex(doc, decoder, query, caseSensitive, cts.Token);
+            }
+            else
+            {
+                byte[] pattern = isHex
+                    ? SearchEngine.ParseHexPattern(query)
+                    : decoder.EncodeString(query);
+                if (pattern.Length == 0) return;
+                source = SearchEngine.FindAll(doc, pattern, caseSensitive, wholeWord, cts.Token);
+            }
+
+            // Stream results in batches for responsive UI
+            const int BatchSize = 500;
+            List<SearchResult> batch = new(BatchSize);
+            int totalSoFar = 0;
+
+            foreach (SearchResult r in source)
+            {
+                batch.Add(r);
+                if (batch.Count >= BatchSize)
+                {
+                    List<SearchResult> toPost = batch;
+                    batch = new List<SearchResult>(BatchSize);
+                    int batchTotal = totalSoFar + toPost.Count;
+                    totalSoFar = batchTotal;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        _state.SearchResults.AddRange(toPost);
+                        if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0)
+                        {
+                            _state.CurrentMatchIndex = 0;
+                            NavigateToMatch(0);
+                        }
+                        _findBar?.UpdateMatchStatus();
+                        _hexView?.InvalidateVisual();
+                        _textView?.InvalidateVisual();
+                    });
+                }
+            }
+
+            // Post final batch
+            List<SearchResult> finalBatch = batch;
             Dispatcher.UIThread.Post(() =>
             {
-                _state.SearchResults = results;
-                _state.IsSearching = false;
-                _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
-                _state.SearchStatus = results.Count > 0 ? $"{results.Count} matches" : "No matches";
-                _findBar?.UpdateMatchStatus();
+                if (finalBatch.Count > 0)
+                    _state.SearchResults.AddRange(finalBatch);
 
-                if (results.Count > 0)
+                _state.IsSearching = false;
+                if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0)
+                {
+                    _state.CurrentMatchIndex = 0;
                     NavigateToMatch(0);
+                }
+                _state.SearchStatus = _state.SearchResults.Count > 0
+                    ? $"{_state.SearchResults.Count} matches"
+                    : "No matches";
+                _findBar?.UpdateMatchStatus();
 
                 _hexView?.InvalidateVisual();
                 _textView?.InvalidateVisual();

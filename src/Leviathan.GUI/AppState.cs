@@ -57,6 +57,8 @@ public sealed class AppState
     public string FindInput { get; set; } = "";
     public bool FindHexMode { get; set; }
     public bool FindCaseSensitive { get; set; }
+    public bool FindRegexMode { get; set; }
+    public bool FindWholeWord { get; set; }
     public List<SearchResult> SearchResults { get; set; } = [];
     public int CurrentMatchIndex { get; set; } = -1;
     public string SearchStatus { get; set; } = "";

@@ -746,7 +746,7 @@ internal sealed class MainWindow : Window
       try {
         List<SearchResult> results = [];
         bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
-        foreach (SearchResult r in SearchEngine.FindAll(document, pattern, caseSensitive, token)) {
+        foreach (SearchResult r in SearchEngine.FindAll(document, pattern, caseSensitive, ct: token)) {
           if (token.IsCancellationRequested) break;
           results.Add(r);
         }

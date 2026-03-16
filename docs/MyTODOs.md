@@ -1,4 +1,4 @@
-
+Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 
 [x] avalonia front-end: it would be cool if the hex view had a fixed header on the two parts of the display with the relative offsets from the address in the gutter.
@@ -24,5 +24,14 @@
 
 [ ] can you make sure the avalonia front-end has its version via GitVersioning like the TUI2, and gets compiled, tested and released by the github action pipelines along with the TUI2? what's the best practice for projects which release multiple different separate artifacts? Also: could you check if the release notes are up to the task? I noticed a sad "click here for full changelog" but maybe a list of main items inlined would help a returning user?
 
+[ ] avalonia front-end: a bit of attention to the spacing of the gutter. It looks a bit cramped at the moment. Maybe add some padding between the gutter and the views? Also: maybe add a vertical line to separate the gutter from View? also: the gutter should be able to be hidden and shown. And maybe the file offset in the hex view should also be displayable in decimal?
+
+[ ] avalonia front-end: the status bar at the bottom could contain better information but also have fields whose size remains a bit more constant. At the moment they widen and shrink during indexing and so on.
+
+[ ] avalonia front-end: multiple file support. It would be nice if I could open multiple files in different tabs? 
+
+[ ] avalonia front-end: F1 should also include a clickable link to a help page on the Leviathan origin repo. The page does not exist yet and needs to be created as a markdown file in the docs folder. 
+
+[ ] avalonia front-end: refactoring. keep the code a bit DRY-er. Find places where there is duplicated code and try to abstract it away. Anything that makes sense moving to the core should be moved to the core. Some files might benefit from being split into smaller files.
 
 [ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? 

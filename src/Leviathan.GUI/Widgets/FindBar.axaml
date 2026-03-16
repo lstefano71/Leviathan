@@ -5,21 +5,46 @@
              HorizontalAlignment="Right" VerticalAlignment="Top"
              Margin="8">
 
+    <UserControl.Styles>
+        <Style Selector="ToggleButton.findToggle">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="ToggleButton.findToggle:checked">
+            <Setter Property="Background" Value="{DynamicResource SystemAccentColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+    </UserControl.Styles>
+
     <Border Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
             CornerRadius="4" Padding="8" BorderThickness="1"
             BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}">
-        <StackPanel Orientation="Horizontal" Spacing="6">
+        <StackPanel Orientation="Horizontal" Spacing="4">
             <TextBox x:Name="SearchInput" Width="200" Watermark="Find..."
                      FontSize="13" />
-            <CheckBox x:Name="CaseSensitiveCheck" Content="Aa" ToolTip.Tip="Case sensitive"
-                      FontSize="11" VerticalAlignment="Center" />
-            <CheckBox x:Name="HexModeCheck" Content="Hx" ToolTip.Tip="Hex pattern search"
-                      FontSize="11" VerticalAlignment="Center" />
+            <ToggleButton x:Name="CaseSensitiveToggle" Content="Aa" Classes="findToggle"
+                          ToolTip.Tip="Match Case" />
+            <ToggleButton x:Name="WholeWordToggle" Content="Ab" Classes="findToggle"
+                          ToolTip.Tip="Match Whole Word" />
+            <ToggleButton x:Name="RegexToggle" Content=".*" Classes="findToggle"
+                          ToolTip.Tip="Use Regular Expression" />
+            <ToggleButton x:Name="HexModeToggle" Content="Hx" Classes="findToggle"
+                          ToolTip.Tip="Hex Pattern Search" />
             <TextBlock x:Name="MatchStatus" Text="" VerticalAlignment="Center"
-                       FontSize="12" Opacity="0.7" MinWidth="40" />
-            <Button x:Name="PrevButton" Content="◀" FontSize="11" Width="28" Height="28"
+                       FontSize="12" Opacity="0.7" MinWidth="40" Margin="4,0" />
+            <Button x:Name="PrevButton" Content="↑" FontSize="14" Width="28" Height="28"
                     ToolTip.Tip="Previous match (Shift+F3)" />
-            <Button x:Name="NextButton" Content="▶" FontSize="11" Width="28" Height="28"
+            <Button x:Name="NextButton" Content="↓" FontSize="14" Width="28" Height="28"
                     ToolTip.Tip="Next match (F3)" />
             <Button x:Name="CloseButton" Content="✕" FontSize="11" Width="28" Height="28"
                     ToolTip.Tip="Close (Esc)" />
