@@ -5,7 +5,9 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Leviathan.Core.Search;
 using Leviathan.Core.Text;
+using Leviathan.GUI.Widgets;
 
 namespace Leviathan.GUI.Views;
 
@@ -19,6 +21,9 @@ public sealed partial class MainWindow : Window
     private TextViewControl? _textView;
     private CsvViewControl? _csvView;
     private DispatcherTimer? _indexingTimer;
+    private FindBar? _findBar;
+    private GotoBar? _gotoBar;
+    private CommandPaletteOverlay? _commandPalette;
 
     public MainWindow()
     {
@@ -84,6 +89,16 @@ public sealed partial class MainWindow : Window
 
         MenuAbout.Click += (_, _) => ShowAboutDialog();
         MenuKeyboardShortcuts.Click += (_, _) => ShowKeyboardShortcuts();
+
+        MenuFind.Click += (_, _) => ShowFindBar();
+        MenuFindNext.Click += (_, _) => FindNext();
+        MenuFindPrev.Click += (_, _) => FindPrevious();
+        MenuGoto.Click += (_, _) => ShowGotoBar();
+        MenuCsvSettings.Click += async (_, _) => await ShowCsvSettingsDialog();
+        MenuCopy.Click += (_, _) => DoCopy();
+        MenuPaste.Click += (_, _) => DoPaste();
+        MenuSelectAll.Click += (_, _) => DoSelectAll();
+        MenuDeleteRows.Click += (_, _) => DoDeleteCsvRows();
     }
 
     // ─── File operations ───
@@ -467,6 +482,18 @@ public sealed partial class MainWindow : Window
 
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        // Global shortcuts that work regardless of focus
+        if (e.KeyModifiers == KeyModifiers.Control)
+        {
+            switch (e.Key)
+            {
+                case Key.P:
+                    ShowCommandPalette();
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         // Digit shortcuts for MRU on welcome screen
         if (_state.Document is null && e.KeyModifiers == KeyModifiers.None)
         {
@@ -488,6 +515,202 @@ public sealed partial class MainWindow : Window
                     e.Handled = true;
                 }
             }
+        }
+    }
+
+    // ─── Find / Search ───
+
+    private void ShowFindBar()
+    {
+        EnsureOverlaysCreated();
+        _findBar!.ShowBar();
+    }
+
+    private void ShowGotoBar()
+    {
+        EnsureOverlaysCreated();
+        _gotoBar!.ShowBar();
+    }
+
+    private void ShowCommandPalette()
+    {
+        EnsureOverlaysCreated();
+        _commandPalette!.Show();
+    }
+
+    private void EnsureOverlaysCreated()
+    {
+        if (_findBar is not null) return;
+
+        _findBar = new FindBar(_state, StartSearch, FindNext, FindPrevious);
+        _findBar.IsVisible = false;
+
+        _gotoBar = new GotoBar(_state,
+            offset => _hexView?.GotoOffset(offset),
+            line => _textView?.GotoLine(line));
+        _gotoBar.IsVisible = false;
+
+        _commandPalette = new CommandPaletteOverlay(_state,
+            offset => _hexView?.GotoOffset(offset),
+            line => _textView?.GotoLine(line));
+        _commandPalette.IsVisible = false;
+        RegisterCommands();
+
+        ContentArea.Children.Add(_findBar);
+        ContentArea.Children.Add(_gotoBar);
+        ContentArea.Children.Add(_commandPalette);
+    }
+
+    private void RegisterCommands()
+    {
+        if (_commandPalette is null) return;
+
+        _commandPalette.RegisterCommand("Open File", "Open a file (Ctrl+O)", () => _ = ShowOpenDialog());
+        _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile);
+        _commandPalette.RegisterCommand("Hex View", "Switch to hex view (F5)", () => SwitchView(ViewMode.Hex));
+        _commandPalette.RegisterCommand("Text View", "Switch to text view (F6)", () => SwitchView(ViewMode.Text));
+        _commandPalette.RegisterCommand("CSV View", "Switch to CSV view (F7)", () => SwitchView(ViewMode.Csv));
+        _commandPalette.RegisterCommand("Find", "Search in file (Ctrl+F)", ShowFindBar);
+        _commandPalette.RegisterCommand("Find Next", "Go to next match (F3)", FindNext);
+        _commandPalette.RegisterCommand("Find Previous", "Go to previous match (Shift+F3)", FindPrevious);
+        _commandPalette.RegisterCommand("Go to", "Go to offset or line (Ctrl+G)", ShowGotoBar);
+        _commandPalette.RegisterCommand("Toggle Word Wrap", "Toggle line wrapping", ToggleWordWrap);
+        _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy);
+        _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste);
+        _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll);
+        _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
+        _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
+    }
+
+    private void StartSearch()
+    {
+        if (_state.Document is null || string.IsNullOrEmpty(_state.FindInput)) return;
+
+        _state.CancelSearch();
+        _state.SearchResults = [];
+        _state.CurrentMatchIndex = -1;
+        _state.IsSearching = true;
+        _findBar?.UpdateMatchStatus();
+
+        _state.Settings.AddFindHistory(_state.FindInput);
+
+        CancellationTokenSource cts = new();
+        _state.SearchCts = cts;
+
+        byte[]? pattern = _state.FindHexMode
+            ? SearchEngine.ParseHexPattern(_state.FindInput)
+            : _state.Decoder.EncodeString(_state.FindInput);
+
+        if (pattern is null || pattern.Length == 0)
+        {
+            _state.IsSearching = false;
+            _state.SearchStatus = "Invalid pattern";
+            _findBar?.UpdateMatchStatus();
+            return;
+        }
+
+        bool caseSensitive = _state.FindHexMode || _state.FindCaseSensitive;
+        Core.Document doc = _state.Document;
+
+        _state.SearchTask = Task.Run(() =>
+        {
+            List<SearchResult> results = SearchEngine.FindAll(doc, pattern, caseSensitive, cts.Token).ToList();
+            Dispatcher.UIThread.Post(() =>
+            {
+                _state.SearchResults = results;
+                _state.IsSearching = false;
+                _state.CurrentMatchIndex = results.Count > 0 ? 0 : -1;
+                _state.SearchStatus = results.Count > 0 ? $"{results.Count} matches" : "No matches";
+                _findBar?.UpdateMatchStatus();
+
+                if (results.Count > 0)
+                    NavigateToMatch(0);
+
+                _hexView?.InvalidateVisual();
+                _textView?.InvalidateVisual();
+            });
+        }, cts.Token);
+    }
+
+    private void FindNext()
+    {
+        if (_state.SearchResults.Count == 0) return;
+        _state.CurrentMatchIndex = (_state.CurrentMatchIndex + 1) % _state.SearchResults.Count;
+        NavigateToMatch(_state.CurrentMatchIndex);
+        _findBar?.UpdateMatchStatus();
+    }
+
+    private void FindPrevious()
+    {
+        if (_state.SearchResults.Count == 0) return;
+        _state.CurrentMatchIndex = (_state.CurrentMatchIndex - 1 + _state.SearchResults.Count) % _state.SearchResults.Count;
+        NavigateToMatch(_state.CurrentMatchIndex);
+        _findBar?.UpdateMatchStatus();
+    }
+
+    private void NavigateToMatch(int matchIndex)
+    {
+        if (matchIndex < 0 || matchIndex >= _state.SearchResults.Count) return;
+        long offset = _state.SearchResults[matchIndex].Offset;
+
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            _state.HexCursorOffset = offset;
+            _hexView?.GotoOffset(offset);
+        }
+        else
+        {
+            _state.TextCursorOffset = offset;
+            _textView?.InvalidateVisual();
+        }
+    }
+
+    // ─── Edit operations ───
+
+    private void DoCopy()
+    {
+        // TODO: implement clipboard copy for selection
+    }
+
+    private void DoPaste()
+    {
+        // TODO: implement clipboard paste
+    }
+
+    private void DoSelectAll()
+    {
+        if (_state.Document is null) return;
+
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            _state.HexSelectionAnchor = 0;
+            _state.HexCursorOffset = _state.FileLength - 1;
+        }
+        else if (_state.ActiveView == ViewMode.Text)
+        {
+            _state.TextSelectionAnchor = _state.BomLength;
+            _state.TextCursorOffset = _state.FileLength;
+        }
+
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+    }
+
+    private void DoDeleteCsvRows()
+    {
+        // TODO: implement CSV row deletion
+    }
+
+    // ─── CSV dialogs ───
+
+    private async Task ShowCsvSettingsDialog()
+    {
+        CsvSettingsDialog dialog = new(_state);
+        await dialog.ShowDialog(this);
+        if (dialog.Applied)
+        {
+            _csvView?.InvalidateVisual();
+            UpdateStatusBar();
         }
     }
 

@@ -1,0 +1,40 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Leviathan.GUI.Widgets.CsvSettingsDialog"
+        x:CompileBindings="True"
+        Title="CSV Settings"
+        Width="350" Height="280"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+
+    <StackPanel Margin="16" Spacing="12">
+        <TextBlock Text="CSV Dialect Configuration" FontWeight="SemiBold" FontSize="14" />
+
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Separator:" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" x:Name="SeparatorCombo" SelectedIndex="0">
+                <ComboBoxItem Content="Comma (,)" Tag="44" />
+                <ComboBoxItem Content="Tab (\\t)" Tag="9" />
+                <ComboBoxItem Content="Semicolon (;)" Tag="59" />
+                <ComboBoxItem Content="Pipe (|)" Tag="124" />
+            </ComboBox>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Quote:" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="QuoteCombo" SelectedIndex="0">
+                <ComboBoxItem Content="Double Quote (&quot;)" Tag="34" />
+                <ComboBoxItem Content="Single Quote (')" Tag="39" />
+                <ComboBoxItem Content="None" Tag="0" />
+            </ComboBox>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Header:" VerticalAlignment="Center" />
+            <CheckBox Grid.Row="2" Grid.Column="1" x:Name="HasHeaderCheck" Content="First row is header"
+                      IsChecked="True" />
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="ApplyButton" Content="Apply" Width="80" />
+            <Button x:Name="CancelButton" Content="Cancel" Width="80" />
+        </StackPanel>
+    </StackPanel>
+
+</Window>

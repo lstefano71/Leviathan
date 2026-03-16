@@ -6,7 +6,7 @@ namespace Leviathan.GUI;
 /// <summary>
 /// Persisted settings for the GUI frontend. AOT-safe via source-generated JSON context.
 /// </summary>
-internal sealed class GuiSettings
+public sealed class GuiSettings
 {
     private const int MaxRecentFiles = 10;
     private const int MaxFindHistory = 20;
@@ -150,7 +150,7 @@ internal sealed class GuiSettings
 /// <summary>
 /// Per-file CSV dialect settings.
 /// </summary>
-internal sealed class CsvFileSettings
+public sealed class CsvFileSettings
 {
     public byte Separator { get; set; } = (byte)',';
     public byte Quote { get; set; } = (byte)'"';

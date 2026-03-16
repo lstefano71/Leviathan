@@ -10,7 +10,7 @@ namespace Leviathan.GUI;
 /// Mutable application state shared across all GUI components.
 /// Ported from TUI2 AppState — same Document lifecycle and view state management.
 /// </summary>
-internal sealed class AppState
+public sealed class AppState
 {
     // --- Document ---
     public Document? Document { get; set; }
@@ -511,7 +511,7 @@ internal sealed class AppState
     };
 }
 
-internal enum ViewMode
+public enum ViewMode
 {
     Hex,
     Text,

@@ -1,0 +1,20 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Leviathan.GUI.Widgets.GotoBar"
+             x:CompileBindings="True"
+             HorizontalAlignment="Center" VerticalAlignment="Top"
+             Margin="0,8">
+
+    <Border Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+            CornerRadius="4" Padding="8" BorderThickness="1"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="Go to:" VerticalAlignment="Center" FontSize="13" />
+            <TextBox x:Name="GotoInput" Width="200" Watermark="offset (0x1A3F) or line number"
+                     FontSize="13" />
+            <Button x:Name="GoButton" Content="Go" Width="40" Height="28" />
+            <Button x:Name="CloseButton" Content="✕" FontSize="11" Width="28" Height="28" />
+        </StackPanel>
+    </Border>
+
+</UserControl>

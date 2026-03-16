@@ -1,0 +1,19 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Leviathan.GUI.Widgets.CommandPaletteOverlay"
+             x:CompileBindings="True"
+             HorizontalAlignment="Center" VerticalAlignment="Top"
+             Margin="0,40">
+
+    <Border Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+            CornerRadius="6" Padding="4" BorderThickness="1"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+            Width="500" MaxHeight="400">
+        <DockPanel>
+            <TextBox DockPanel.Dock="Top" x:Name="PaletteInput" Watermark="Type a command or : to go to..."
+                     FontSize="14" Margin="4" />
+            <ListBox x:Name="CommandList" Margin="4" MaxHeight="320" />
+        </DockPanel>
+    </Border>
+
+</UserControl>
