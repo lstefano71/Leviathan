@@ -97,6 +97,7 @@ public sealed class AppState
     public int CsvColumnCount { get; set; }
     /// <summary>Whether the CSV detail side panel is visible (session-only, not persisted).</summary>
     public bool CsvDetailPanelVisible { get; set; }
+    public HashSet<int> CsvHiddenColumns { get; set; } = [];
 
     // --- Settings ---
     public GuiSettings Settings { get; set; } = GuiSettings.Load();

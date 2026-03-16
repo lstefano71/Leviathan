@@ -1274,6 +1274,7 @@ public sealed partial class MainWindow : Window
                         _findBar?.UpdateMatchStatus();
                         _hexView?.InvalidateVisual();
                         _textView?.InvalidateVisual();
+                        _csvView?.InvalidateVisual();
                     });
                 }
             }
@@ -1298,6 +1299,7 @@ public sealed partial class MainWindow : Window
 
                 _hexView?.InvalidateVisual();
                 _textView?.InvalidateVisual();
+                _csvView?.InvalidateVisual();
             });
         }, cts.Token);
     }

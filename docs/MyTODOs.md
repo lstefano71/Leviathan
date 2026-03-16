@@ -7,14 +7,15 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: hex view unexpectedly slow when scrolling down
 
-[ ] avalonia front-end: text search. are there ways to speed it up? on very large files it's still quite slow. Also: is it possible to add regex match in addition to the already present case sensitive match?
+[x] avalonia front-end: text search. are there ways to speed it up? on very large files it's still quite slow. Also: is it possible to add regex match in addition to the already present case sensitive match?
 
+[ ] avalonia front-end: csv view. search as once again stopped jumping to the right row/column? also: it would be cool if I could hide and show columns. I don't know if this fact should be reflected in the details. Also, could you reduce the padding of the details but maybe make the color of the detail fields striped to make it easier to read? Maybe stripe the columns in the main view as well? Also: do the search matches get highlighted in the details? if not, that would be a nice addition. 
 
-[ ] avalonia front-end: csv view. it would be cool if I could hide and show columns. I don't know if this fact should be reflected in the details. Also, could you reduce the padding of the details but maybe color the background of the detail fields striped to make it easier to read? Also: could you add a "copy value" button to the details? Also: do the search matches get highlighted in the details? if not, that would be a nice addition. 
+[ ] avalonia front-end: now that we have streaming search, do we still need to invalidate the search results when the file changes? can we fix them or rerun the search? also, it would seem that the streaming does not actually apply to the view as the matches are found? it seems that the view only updates after the whole file has been searched. if that's the case, it would be nice if the view updated as the matches are found, so that I can start looking at them right away instead of waiting for the whole search to finish.
 
 [ ] avalonia front-end, hex view: it would be nice if I could select a range of bytes and then copy them in hex or text format. ImHex has a very nice selection visual. Maybe also add a "copy as hex" and "copy as text" right click options to the details when a range is selected? selection should work with the usual conventions (shift + movement, shift + click, click + drag). Same in the text view if it's not already implemented. In the text view, deleting a selection should also work with the usual conventions (backspace, delete, etc). At the moment "Del" only deletes the byte under the cursor, which is a bit weird.
 
-[ ] avalonia front-end: the "unsaved changes" dialog does not get the focus, does not show the file name, and does not have visible shortcuts to the "save" and "discard" buttons. It would be nice if it did all of those things. "Esc" should cancel the dialog and "Enter" should save the file. Also: maybe the "discard" button should be red to make it more clear that it's a destructive action?
+[ ] avalonia front-end: the "unsaved changes" dialog does not get the focus, does not show the file name, and does not have visible shortcuts to the "save" and "discard" buttons. It would be nice if it did all of those things. "Esc" should cancel the dialog and "Enter" should save the file. Also: maybe the "discard" button should be red to make it more clear that it's a destructive action? also: why all the white margin below the buttons?
 
 [ ] avalonia front-end: right-click behaviour throughout the app. let's think about it together. In the hex view, right-clicking on a byte should open a context menu with options like "copy as hex", "copy as text", "go to offset", "add bookmark", etc. In the text view, right-clicking on a character should open a context menu with options like "copy", "go to line", "add bookmark", etc. In the details view, right-clicking on a field should open a context menu with options like "copy value", "go to offset", etc. In the csv view, right-clicking on a cell should open a context menu with options like "copy value", "hide column", etc.  What else?
 
@@ -32,6 +33,6 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: F1 should also include a clickable link to a help page on the Leviathan origin repo. The page does not exist yet and needs to be created as a markdown file in the docs folder. 
 
-[ ] avalonia front-end: refactoring. keep the code a bit DRY-er. Find places where there is duplicated code and try to abstract it away. Anything that makes sense moving to the core should be moved to the core. Some files might benefit from being split into smaller files.
+[ ] avalonia front-end and core: refactoring and complete code review. keep the code a bit DRY-er. Find places where there is duplicated code and try to abstract it away. Anything that makes sense moving to the core should be moved to the core. Some files might benefit from being split into smaller files.
 
 [ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? 

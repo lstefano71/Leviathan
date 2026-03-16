@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Leviathan.Core.Csv;
+using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Views;
@@ -41,6 +42,60 @@ internal sealed class CsvViewControl : Control
         {
             _theme = _state.ActiveTheme;
             InvalidateVisual();
+        };
+        BuildContextMenu();
+    }
+
+    private void BuildContextMenu()
+    {
+        ContextMenu menu = new();
+
+        MenuItem hideCol = new() { Header = "Hide Column" };
+        hideCol.Click += (_, _) =>
+        {
+            int col = _state.CsvCursorCol;
+            if (col >= 0 && col < _state.CsvColumnCount)
+            {
+                _state.CsvHiddenColumns.Add(col);
+                InvalidateVisual();
+                StateChanged?.Invoke();
+            }
+        };
+
+        MenuItem showAll = new() { Header = "Show All Columns" };
+        showAll.Click += (_, _) =>
+        {
+            _state.CsvHiddenColumns.Clear();
+            InvalidateVisual();
+            StateChanged?.Invoke();
+        };
+
+        MenuItem colVis = new() { Header = "Column Visibility..." };
+        colVis.Click += async (_, _) =>
+        {
+            if (Avalonia.VisualTree.VisualExtensions.GetVisualRoot(this) is not Window owner) return;
+            Widgets.ColumnVisibilityDialog dlg = new(_state);
+            await dlg.ShowDialog(owner);
+            if (dlg.Changed)
+            {
+                InvalidateVisual();
+                StateChanged?.Invoke();
+            }
+        };
+
+        menu.Items.Add(hideCol);
+        menu.Items.Add(showAll);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(colVis);
+        ContextMenu = menu;
+
+        // Update "Hide Column" header with column name on menu opening
+        menu.Opening += (_, _) =>
+        {
+            int col = _state.CsvCursorCol;
+            string[] headers = _state.CsvHeaderNames;
+            string colName = col >= 0 && col < headers.Length ? headers[col] : $"Column {col + 1}";
+            hideCol.Header = $"Hide Column \"{colName}\"";
         };
     }
 
@@ -134,7 +189,14 @@ internal sealed class CsvViewControl : Control
         IBrush headerBg = theme.HeaderBackground;
         IBrush cursorBrush = theme.SelectionHighlight;
         IBrush selectionBrush = theme.SelectionHighlight;
+        IBrush matchBrush = theme.MatchHighlight;
+        IBrush activeMatchBrush = theme.ActiveMatchHighlight;
+        IBrush rowStripeBrush = theme.RowStripe;
+        IBrush colStripeBrush = theme.ColumnStripe;
         IPen gridLinePen = theme.GridLinePen;
+        List<SearchResult> matches = _state.SearchResults;
+        int activeMatchIdx = _state.CurrentMatchIndex;
+        HashSet<int> hiddenCols = _state.CsvHiddenColumns;
 
         int hScroll = _state.CsvHorizontalScroll;
 
@@ -146,7 +208,13 @@ internal sealed class CsvViewControl : Control
             double hx = gutterWidth;
             for (int c = hScroll; c < colCount && hx < bounds.Width; c++)
             {
+                if (hiddenCols.Contains(c)) continue;
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
+
+                // Column stripe on header too
+                if (c % 2 == 0)
+                    context.FillRectangle(colStripeBrush, new Rect(hx, 0, cellWidth, lineHeight));
+
                 string headerText = c < _state.CsvHeaderNames.Length ? _state.CsvHeaderNames[c] : $"Col {c + 1}";
                 if (headerText.Length > colWidths[c])
                     headerText = headerText[..colWidths[c]];
@@ -183,6 +251,10 @@ internal sealed class CsvViewControl : Control
 
             double y = dataY + rowIdx * lineHeight;
 
+            // Alternating row stripe (drawn first, behind everything)
+            if (rowIdx % 2 == 0)
+                context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
+
             // Row number in gutter
             string rowNumStr = (dataRow + 1).ToString();
             double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
@@ -214,25 +286,59 @@ internal sealed class CsvViewControl : Control
             // Parse fields
             int fieldCount = CsvFieldParser.ParseRecord(rowData, dialect, fields);
 
+            // Find first match overlapping this row for highlight rendering
+            int rowMatchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, rowOffset);
+
             // Render cells
             double cellX = gutterWidth;
             for (int c = hScroll; c < colCount && cellX < bounds.Width; c++)
             {
+                if (hiddenCols.Contains(c)) continue;
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
+
+                // Column stripe
+                if (c % 2 == 0)
+                    context.FillRectangle(colStripeBrush, new Rect(cellX, y, cellWidth, lineHeight));
 
                 if (c < fieldCount)
                 {
+                    // Search match highlight for this cell
+                    long cellStart = rowOffset + fields[c].Offset;
+                    long cellEnd = cellStart + fields[c].Length - 1;
+                    bool isMatch = false;
+                    bool isActiveMatch = false;
+
+                    int mc = rowMatchCursor;
+                    while (mc < matches.Count)
+                    {
+                        long mStart = matches[mc].Offset;
+                        long mEnd = mStart + matches[mc].Length - 1;
+                        if (mStart > cellEnd) break;
+                        if (mEnd >= cellStart)
+                        {
+                            isMatch = true;
+                            isActiveMatch = mc == activeMatchIdx;
+                            break;
+                        }
+                        mc++;
+                    }
+
+                    if (isMatch)
+                    {
+                        context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
+                            new Rect(cellX, y, cellWidth, lineHeight));
+                    }
+
                     int written = CsvFieldParser.UnescapeField(rowData, fields[c], dialect, unescaped);
                     string cellText = FormatCellPreview(Encoding.UTF8.GetString(unescaped[..written]), colWidths[c]);
 
-                    IBrush cellBrush = textBrush;
                     if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol)
                     {
                         context.FillRectangle(theme.CursorHighlight,
                             new Rect(cellX, y, cellWidth, lineHeight));
                     }
 
-                    FormattedText ft = CreateFormattedText(cellText, cellBrush);
+                    FormattedText ft = CreateFormattedText(cellText, textBrush);
                     context.DrawText(ft, new Point(cellX + CellPaddingX / 2, GetTextOriginY(y, textBaseline, ft)));
                 }
 
@@ -384,20 +490,134 @@ internal sealed class CsvViewControl : Control
         InvalidateVisual();
     }
 
-    /// <summary>Navigates to the CSV row containing the given byte offset.</summary>
+    /// <summary>Navigates to the CSV row and column containing the given byte offset.</summary>
     internal void GotoOffset(long byteOffset)
     {
         if (_state.CsvRowIndex is null || _state.Document is null || _state.CsvRowIndex.TotalRowCount <= 0)
             return;
 
-        long estimatedRow = _state.CsvRowIndex.EstimateRowForOffset(byteOffset, _state.Document.Length);
-        // EstimateRowForOffset returns a 0-based data row count; clamp to valid range
-        long targetRow = Math.Clamp(estimatedRow, 0, _state.CsvRowIndex.TotalRowCount - 1);
+        // Step 1: Find the precise row using sparse index + linear scan
+        long targetRow = FindPreciseRowForOffset(byteOffset);
+        targetRow = Math.Clamp(targetRow, 0, _state.CsvRowIndex.TotalRowCount - 1);
         _state.CsvCursorRow = targetRow;
+
+        // Step 2: Determine which column the offset falls into
+        long rowOffset = GetRowByteOffset(targetRow);
+        if (rowOffset >= 0 && rowOffset < _state.FileLength)
+        {
+            int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
+            if (readLen > 0)
+            {
+                _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
+                int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), _state.CsvDialect);
+                Span<CsvField> fields = stackalloc CsvField[256];
+                int fieldCount = CsvFieldParser.ParseRecord(_readBuffer.AsSpan(0, rowLen), _state.CsvDialect, fields);
+                long localOffset = byteOffset - rowOffset;
+
+                for (int c = 0; c < fieldCount; c++)
+                {
+                    if (localOffset >= fields[c].Offset && localOffset < fields[c].Offset + fields[c].Length)
+                    {
+                        _state.CsvCursorCol = c;
+                        break;
+                    }
+                }
+            }
+        }
+
         _state.CsvSelectionAnchorRow = -1;
         EnsureCursorVisible();
         InvalidateVisual();
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Finds the precise 0-based data row for a byte offset by using the sparse index
+    /// to get close, then linear-scanning forward to the exact row.
+    /// </summary>
+    private long FindPreciseRowForOffset(long byteOffset)
+    {
+        CsvRowIndex? index = _state.CsvRowIndex;
+        if (index is null || _state.Document is null) return 0;
+
+        CsvDialect dialect = _state.CsvDialect;
+        long totalRows = index.TotalRowCount;
+
+        // Binary search sparse entries to find the closest entry <= byteOffset
+        int lo = 0, hi = index.SparseEntryCount - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (index.GetSparseOffset(mid) <= byteOffset)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+
+        // hi is now the largest sparse index whose offset <= byteOffset (or -1 if none)
+        long baseRow;
+        long scanOffset;
+        if (hi >= 0)
+        {
+            baseRow = (long)(hi + 1) * index.SparseFactor;
+            scanOffset = index.GetSparseOffset(hi);
+        }
+        else
+        {
+            baseRow = 0;
+            scanOffset = 0;
+        }
+
+        // Account for header row offset
+        if (dialect.HasHeader && baseRow == 0)
+        {
+            scanOffset = index.FirstDataRowOffset > 0 ? index.FirstDataRowOffset : 0;
+        }
+
+        // Linear scan forward counting rows until we pass byteOffset
+        long currentRow = baseRow;
+        bool inQuoted = false;
+        byte quote = dialect.Quote;
+
+        while (scanOffset < byteOffset && currentRow < totalRows)
+        {
+            int toRead = (int)Math.Min(_readBuffer.Length, _state.FileLength - scanOffset);
+            if (toRead <= 0) break;
+            _state.Document.Read(scanOffset, _readBuffer.AsSpan(0, toRead));
+
+            for (int i = 0; i < toRead; i++)
+            {
+                long absPos = scanOffset + i;
+                if (absPos >= byteOffset) return Math.Max(0, currentRow - (dialect.HasHeader ? 1 : 0));
+
+                byte b = _readBuffer[i];
+                if (inQuoted)
+                {
+                    if (b == quote)
+                    {
+                        if (i + 1 < toRead && _readBuffer[i + 1] == quote) { i++; continue; }
+                        inQuoted = false;
+                    }
+                    continue;
+                }
+                if (b == quote && quote != 0) { inQuoted = true; continue; }
+                if (b == (byte)'\n')
+                {
+                    currentRow++;
+                }
+                else if (b == (byte)'\r')
+                {
+                    if (i + 1 < toRead && _readBuffer[i + 1] == (byte)'\n') i++;
+                    currentRow++;
+                }
+            }
+
+            scanOffset += toRead;
+        }
+
+        // Convert from absolute row to data row (subtract header if present)
+        long dataRow = dialect.HasHeader ? currentRow - 1 : currentRow;
+        return Math.Clamp(dataRow, 0, totalRows - 1);
     }
 
     internal void GotoRow(long rowNumber)

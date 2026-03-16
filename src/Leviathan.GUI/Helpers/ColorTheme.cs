@@ -68,6 +68,12 @@ internal sealed class ColorTheme
     /// <summary>Active search match highlight (current match).</summary>
     public IBrush ActiveMatchHighlight { get; }
 
+    /// <summary>Subtle alternating-row tint for CSV grid.</summary>
+    public IBrush RowStripe { get; }
+
+    /// <summary>Subtle alternating-column tint for CSV grid.</summary>
+    public IBrush ColumnStripe { get; }
+
     // ── Cached pens (avoid allocation per access) ────────────────────
 
     /// <summary>Pen for separator / grid lines.</summary>
@@ -84,7 +90,8 @@ internal sealed class ColorTheme
         IBrush background, IBrush selectionHighlight, IBrush cursorHighlight,
         IBrush gridLine, IBrush headerBackground, IBrush headerText,
         IBrush gutterBackground, IBrush cursorBar,
-        IBrush matchHighlight, IBrush activeMatchHighlight)
+        IBrush matchHighlight, IBrush activeMatchHighlight,
+        IBrush rowStripe, IBrush columnStripe)
     {
         Id = id;
         Name = name;
@@ -102,6 +109,8 @@ internal sealed class ColorTheme
         CursorBar = cursorBar;
         MatchHighlight = matchHighlight;
         ActiveMatchHighlight = activeMatchHighlight;
+        RowStripe = rowStripe;
+        ColumnStripe = columnStripe;
         GridLinePen = new Pen(gridLine, 1);
         GutterPen = new Pen(gridLine, 1);
     }
@@ -123,10 +132,10 @@ internal sealed class ColorTheme
         gutterBackground:     BrushA(30, 128, 128, 128),    // near-transparent gray
         cursorBar:            BrushA(200, 220, 220, 220),   // bright caret
         matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
-        activeMatchHighlight: BrushA(140, 255, 165, 0)      // translucent orange
+        activeMatchHighlight: BrushA(140, 255, 165, 0),     // translucent orange
+        rowStripe:            BrushA(12, 255, 255, 255),    // very subtle white tint
+        columnStripe:         BrushA(8, 100, 150, 255)      // very subtle blue tint
     );
-
-    /// <summary>Light theme palette — dark text on light background.</summary>
     public static ColorTheme Light { get; } = new(
         id: "light", name: "Light", baseVariant: ThemeVariant.Light,
         textPrimary:          Brush(30, 30, 30),            // near-black
@@ -141,10 +150,10 @@ internal sealed class ColorTheme
         gutterBackground:     BrushA(20, 80, 80, 80),       // near-transparent
         cursorBar:            BrushA(220, 30, 30, 30),      // dark caret
         matchHighlight:       BrushA(70, 255, 220, 0),      // translucent yellow
-        activeMatchHighlight: BrushA(100, 255, 140, 0)      // translucent orange
+        activeMatchHighlight: BrushA(100, 255, 140, 0),     // translucent orange
+        rowStripe:            BrushA(10, 0, 0, 0),          // very subtle dark tint
+        columnStripe:         BrushA(6, 60, 100, 200)       // very subtle blue tint
     );
-
-    /// <summary>IBM 5151 green phosphor — classic green-on-black terminal.</summary>
     public static ColorTheme GreenPhosphor { get; } = new(
         id: "green-phosphor", name: "Green Phosphor", baseVariant: ThemeVariant.Dark,
         textPrimary:          Brush(51, 255, 51),           // #33FF33
@@ -159,10 +168,10 @@ internal sealed class ColorTheme
         gutterBackground:     BrushA(20, 51, 255, 51),      // near-transparent green
         cursorBar:            BrushA(200, 51, 255, 51),     // bright green caret
         matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
-        activeMatchHighlight: BrushA(140, 255, 165, 0)      // translucent orange
+        activeMatchHighlight: BrushA(140, 255, 165, 0),     // translucent orange
+        rowStripe:            BrushA(10, 51, 255, 51),      // very subtle green tint
+        columnStripe:         BrushA(6, 51, 200, 51)        // very subtle green tint
     );
-
-    /// <summary>Amber phosphor — warm amber-on-dark terminal.</summary>
     public static ColorTheme AmberPhosphor { get; } = new(
         id: "amber-phosphor", name: "Amber Phosphor", baseVariant: ThemeVariant.Dark,
         textPrimary:          Brush(255, 176, 0),           // #FFB000
@@ -177,7 +186,9 @@ internal sealed class ColorTheme
         gutterBackground:     BrushA(20, 255, 176, 0),      // near-transparent amber
         cursorBar:            BrushA(200, 255, 176, 0),     // bright amber caret
         matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
-        activeMatchHighlight: BrushA(140, 255, 200, 0)      // translucent bright amber
+        activeMatchHighlight: BrushA(140, 255, 200, 0),     // translucent bright amber
+        rowStripe:            BrushA(10, 255, 176, 0),      // very subtle amber tint
+        columnStripe:         BrushA(6, 200, 140, 0)        // very subtle amber tint
     );
 
     /// <summary>All built-in themes.</summary>
@@ -286,7 +297,9 @@ internal sealed class ColorTheme
             gutterBackground:     ParseBrush(c, "gutterBackground", fallback.GutterBackground),
             cursorBar:            ParseBrush(c, "cursorBar", fallback.CursorBar),
             matchHighlight:       ParseBrush(c, "matchHighlight", fallback.MatchHighlight),
-            activeMatchHighlight: ParseBrush(c, "activeMatchHighlight", fallback.ActiveMatchHighlight)
+            activeMatchHighlight: ParseBrush(c, "activeMatchHighlight", fallback.ActiveMatchHighlight),
+            rowStripe:            ParseBrush(c, "rowStripe", fallback.RowStripe),
+            columnStripe:         ParseBrush(c, "columnStripe", fallback.ColumnStripe)
         );
     }
 

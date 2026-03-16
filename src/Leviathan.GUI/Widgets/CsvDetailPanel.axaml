@@ -23,7 +23,7 @@
         <!-- Field list -->
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="FieldsPanel" Spacing="2" Margin="8,4" />
+            <StackPanel x:Name="FieldsPanel" Spacing="1" Margin="6,3" />
         </ScrollViewer>
     </DockPanel>
 

@@ -211,7 +211,7 @@ internal sealed class HexViewControl : Control
         int activeMatchIdx = _state.CurrentMatchIndex;
 
         // Binary-search for the first match visible in or after the viewport
-        int matchCursor = BinarySearchFirstMatch(matches, startOffset);
+        int matchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, startOffset);
 
         for (int row = 0; row < visibleRows; row++)
         {
@@ -552,30 +552,4 @@ internal sealed class HexViewControl : Control
         Key.F => 15,
         _ => -1
     };
-
-    /// <summary>
-    /// Binary-searches for the first match whose end offset is &gt;= <paramref name="startOffset"/>.
-    /// Returns the index into <paramref name="matches"/>, or <c>matches.Count</c> if none.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int BinarySearchFirstMatch(List<SearchResult> matches, long startOffset)
-    {
-        int lo = 0, hi = matches.Count - 1;
-        int result = matches.Count;
-        while (lo <= hi)
-        {
-            int mid = lo + (hi - lo) / 2;
-            long mEnd = matches[mid].Offset + matches[mid].Length - 1;
-            if (mEnd >= startOffset)
-            {
-                result = mid;
-                hi = mid - 1;
-            }
-            else
-            {
-                lo = mid + 1;
-            }
-        }
-        return result;
-    }
 }
