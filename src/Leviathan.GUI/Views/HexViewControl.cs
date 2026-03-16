@@ -15,13 +15,11 @@ namespace Leviathan.GUI.Views;
 /// </summary>
 internal sealed class HexViewControl : Control
 {
-    private static readonly Typeface MonoTypeface = new("Consolas, Courier New, monospace");
-    private const double FontSize = 14;
     private const double LinePadding = 2;
 
     private readonly AppState _state;
     private readonly byte[] _readBuffer = new byte[65536];
-    private ViewTheme _theme = ViewTheme.Resolve();
+    private ColorTheme _theme;
 
     internal Action? StateChanged;
 
@@ -36,13 +34,24 @@ internal sealed class HexViewControl : Control
     public HexViewControl(AppState state)
     {
         _state = state;
+        _theme = state.ActiveTheme;
         Focusable = true;
         ClipToBounds = true;
         ActualThemeVariantChanged += (_, _) =>
         {
-            _theme = ViewTheme.Resolve();
+            _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
+    }
+
+    /// <summary>
+    /// Applies the current theme and font from AppState, then repaints.
+    /// Called by MainWindow when the user switches themes or fonts.
+    /// </summary>
+    internal void ApplyThemeAndFont()
+    {
+        _theme = _state.ActiveTheme;
+        InvalidateVisual();
     }
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -93,7 +102,7 @@ internal sealed class HexViewControl : Control
         if (_state.Document is null) return;
 
         Rect bounds = Bounds;
-        ViewTheme theme = _theme;
+        ColorTheme theme = _theme;
 
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
@@ -108,7 +117,7 @@ internal sealed class HexViewControl : Control
                 _state.BytesPerRow = autoFit;
         }
 
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
 
         int bytesPerRow = _state.BytesPerRow;
         int visibleRows = Math.Max(1, (int)(bounds.Height / lineHeight));
@@ -174,7 +183,7 @@ internal sealed class HexViewControl : Control
                 ? rowOffset.ToString("X16")
                 : rowOffset.ToString("X8");
             FormattedText addressText = new(address, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, MonoTypeface, FontSize, addressBrush);
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, addressBrush);
             context.DrawText(addressText, new Point(charWidth, y));
 
             // Hex bytes
@@ -227,7 +236,7 @@ internal sealed class HexViewControl : Control
                 string hexPair = new string([hi, lo]);
 
                 FormattedText hexText = new(hexPair, System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, textBrush);
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
                 context.DrawText(hexText, new Point(hexX, y));
             }
 
@@ -252,7 +261,7 @@ internal sealed class HexViewControl : Control
 
                 char ch = b >= 0x20 && b < 0x7F ? (char)b : '.';
                 FormattedText asciiText = new(ch.ToString(), System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, asciiBrush);
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, asciiBrush);
                 context.DrawText(asciiText, new Point(ax, y));
             }
         }
@@ -264,7 +273,7 @@ internal sealed class HexViewControl : Control
     private double MeasureCharWidth()
     {
         FormattedText measurement = new("0", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, MonoTypeface, FontSize, Brushes.White);
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, Brushes.White);
         return measurement.Width;
     }
 
@@ -405,7 +414,7 @@ internal sealed class HexViewControl : Control
     private long HitTest(Point point)
     {
         double charWidth = MeasureCharWidth();
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
         int bytesPerRow = _state.BytesPerRow;
 
         int row = (int)(point.Y / lineHeight);

@@ -16,8 +16,6 @@ namespace Leviathan.GUI.Views;
 /// </summary>
 internal sealed class TextViewControl : Control
 {
-    private static readonly Typeface MonoTypeface = new("Consolas, Courier New, monospace");
-    private const double FontSize = 14;
     private const double LinePadding = 2;
 
     private readonly AppState _state;
@@ -27,7 +25,7 @@ internal sealed class TextViewControl : Control
     private VisualLine[] _navVisualLines = new VisualLine[256];
     private readonly LineWrapEngine _wrapEngine;
     private const int MaxReadSize = 16 * 1024 * 1024; // 16 MB max buffer
-    private ViewTheme _theme = ViewTheme.Resolve();
+    private ColorTheme _theme;
     private int _lastRenderedLineCount;
     private int _desiredColumn = -1;
     private int _userScrollFrames;
@@ -45,14 +43,25 @@ internal sealed class TextViewControl : Control
     public TextViewControl(AppState state)
     {
         _state = state;
+        _theme = state.ActiveTheme;
         _wrapEngine = new LineWrapEngine(state.TabWidth);
         Focusable = true;
         ClipToBounds = true;
         ActualThemeVariantChanged += (_, _) =>
         {
-            _theme = ViewTheme.Resolve();
+            _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
+    }
+
+    /// <summary>
+    /// Applies the current theme and font from AppState, then repaints.
+    /// Called by MainWindow when the user switches themes or fonts.
+    /// </summary>
+    internal void ApplyThemeAndFont()
+    {
+        _theme = _state.ActiveTheme;
+        InvalidateVisual();
     }
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -129,13 +138,13 @@ internal sealed class TextViewControl : Control
         if (_state.Document is null) return;
 
         Rect bounds = Bounds;
-        ViewTheme theme = _theme;
+        ColorTheme theme = _theme;
 
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
 
         double charWidth = MeasureCharWidth();
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
 
         int visibleRows = Math.Max(1, (int)(bounds.Height / lineHeight));
         _state.VisibleRows = visibleRows;
@@ -235,7 +244,7 @@ internal sealed class TextViewControl : Control
 
                 FormattedText lineNumText = new(lineNumStr,
                     System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, gutterTextBrush);
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, gutterTextBrush);
                 context.DrawText(lineNumText, new Point(lineNumX, y));
             }
             else
@@ -244,7 +253,7 @@ internal sealed class TextViewControl : Control
                 string wrapIndicator = "↪";
                 FormattedText wrapText = new(wrapIndicator,
                     System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, theme.TextMuted);
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, theme.TextMuted);
                 double separatorX = gutterWidth - charWidth;
                 double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
                 context.DrawText(wrapText, new Point(wrapX, y));
@@ -339,7 +348,7 @@ internal sealed class TextViewControl : Control
 
                 FormattedText charText = new(ch.ToString(),
                     System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, textBrush);
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
                 context.DrawText(charText, new Point(textX + charCol * charWidth, y));
 
                 charCol++;
@@ -354,7 +363,7 @@ internal sealed class TextViewControl : Control
     private double MeasureCharWidth()
     {
         FormattedText measurement = new("0", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, MonoTypeface, FontSize, Brushes.White);
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, Brushes.White);
         return measurement.Width;
     }
 
@@ -507,7 +516,7 @@ internal sealed class TextViewControl : Control
 
         Point pos = e.GetPosition(this);
         double charWidth = MeasureCharWidth();
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
 
         // Compute gutter width
         long totalLines = Math.Max(1, _state.EstimatedTotalLines);

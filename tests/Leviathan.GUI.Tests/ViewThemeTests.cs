@@ -4,7 +4,8 @@ using Leviathan.GUI.Helpers;
 namespace Leviathan.GUI.Tests;
 
 /// <summary>
-/// Tests for <see cref="ViewTheme"/> palette resolution.
+/// Tests for <see cref="ViewTheme"/> compatibility shim.
+/// Verifies the shim correctly delegates to <see cref="ColorTheme"/>.
 /// </summary>
 public sealed class ViewThemeTests
 {
@@ -71,7 +72,6 @@ public sealed class ViewThemeTests
     [Fact]
     public void DarkAndLight_HaveDifferentTextPrimary()
     {
-        // Ensure light and dark aren't accidentally the same palette
         Assert.NotSame(ViewTheme.Dark.TextPrimary, ViewTheme.Light.TextPrimary);
     }
 

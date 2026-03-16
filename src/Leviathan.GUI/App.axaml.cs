@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
+using Leviathan.GUI.Helpers;
 using Leviathan.GUI.Views;
 
 namespace Leviathan.GUI;
@@ -19,7 +21,13 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            MainWindow mainWindow = new();
+            desktop.MainWindow = mainWindow;
+
+            // Apply persisted theme variant on startup
+            string themeName = mainWindow.GetThemeName();
+            ColorTheme theme = ColorTheme.FindById(themeName);
+            RequestedThemeVariant = theme.BaseVariant;
         }
 
         base.OnFrameworkInitializationCompleted();

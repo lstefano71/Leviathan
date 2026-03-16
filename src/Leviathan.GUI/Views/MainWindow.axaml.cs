@@ -5,9 +5,11 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
+using Leviathan.GUI.Helpers;
 using Leviathan.GUI.Widgets;
 
 namespace Leviathan.GUI.Views;
@@ -34,10 +36,12 @@ public sealed partial class MainWindow : Window
         // Apply persisted settings
         _state.BytesPerRowSetting = _state.Settings.BytesPerRow;
         _state.WordWrap = _state.Settings.WordWrap;
+        InitializeThemeAndFont();
 
         WireMenuEvents();
         WireWelcomeScreen();
         BuildFileMenuMru();
+        BuildThemeMenu();
         UpdateViewVisibility();
         UpdateWordWrapCheck();
         UpdateBprChecks();
@@ -129,6 +133,9 @@ public sealed partial class MainWindow : Window
         MenuPaste.Click += (_, _) => DoPaste();
         MenuSelectAll.Click += (_, _) => DoSelectAll();
         MenuDeleteRows.Click += (_, _) => DoDeleteCsvRows();
+        MenuSelectFont.Click += (_, _) => ShowFontPicker();
+        MenuFontSizeUp.Click += (_, _) => AdjustFontSize(+1);
+        MenuFontSizeDown.Click += (_, _) => AdjustFontSize(-1);
     }
 
     // ─── File operations ───
@@ -405,6 +412,218 @@ public sealed partial class MainWindow : Window
         UpdateStatusBar();
 
         MenuCsvSettings.IsVisible = mode == ViewMode.Csv;
+    }
+
+    // ─── Theme & Font ───
+
+    /// <summary>Returns the persisted theme name for App.axaml.cs startup.</summary>
+    internal string GetThemeName() => _state.Settings.ThemeName;
+
+    private void InitializeThemeAndFont()
+    {
+        // Load user themes from themes/ directory
+        string themesDir = Path.Combine(AppContext.BaseDirectory, "themes");
+        _state.UserThemes = ColorTheme.LoadUserThemes(themesDir);
+
+        // Resolve active theme
+        ColorTheme theme = ColorTheme.FindById(_state.Settings.ThemeName, _state.UserThemes);
+        _state.ActiveTheme = theme;
+
+        // Resolve font
+        _state.ContentFontSize = Math.Clamp(_state.Settings.FontSize, 8, 72);
+        string fontFamily = _state.Settings.FontFamily;
+        _state.ContentTypeface = new Typeface($"{fontFamily}, Consolas, Courier New, monospace");
+    }
+
+    private void SwitchTheme(string themeId)
+    {
+        ColorTheme theme = ColorTheme.FindById(themeId, _state.UserThemes);
+        _state.ActiveTheme = theme;
+        _state.Settings.ThemeName = theme.Id;
+        _state.Settings.Save();
+
+        // Switch Avalonia chrome variant
+        if (Application.Current is { } app)
+            app.RequestedThemeVariant = theme.BaseVariant;
+
+        // Refresh custom view controls
+        _hexView?.ApplyThemeAndFont();
+        _textView?.ApplyThemeAndFont();
+        _csvView?.ApplyThemeAndFont();
+
+        BuildThemeMenu();
+        RefreshCommandPaletteCommands();
+    }
+
+    private void BuildThemeMenu()
+    {
+        MenuTheme.Items.Clear();
+
+        foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
+        {
+            string id = theme.Id;
+            MenuItem item = new()
+            {
+                Header = (_state.ActiveTheme.Id == id ? "● " : "○ ") + theme.Name
+            };
+            item.Click += (_, _) => SwitchTheme(id);
+            MenuTheme.Items.Add(item);
+        }
+
+        if (_state.UserThemes.Count > 0)
+        {
+            MenuTheme.Items.Add(new Separator());
+            foreach (ColorTheme theme in _state.UserThemes)
+            {
+                string id = theme.Id;
+                MenuItem item = new()
+                {
+                    Header = (_state.ActiveTheme.Id == id ? "● " : "○ ") + theme.Name
+                };
+                item.Click += (_, _) => SwitchTheme(id);
+                MenuTheme.Items.Add(item);
+            }
+        }
+    }
+
+    private void ShowFontPicker()
+    {
+        // Build a list of monospace font families
+        List<string> monoFonts = GetMonospaceFonts();
+        string currentFont = _state.Settings.FontFamily;
+
+        // Create a simple selection window
+        Window fontWindow = new()
+        {
+            Title = "Select Font",
+            Width = 450,
+            Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        DockPanel panel = new();
+
+        // Preview text
+        TextBlock preview = new()
+        {
+            Text = "AaBbCcDdEe 0123456789 {}[]|\\",
+            FontFamily = new FontFamily(currentFont),
+            FontSize = _state.ContentFontSize,
+            Margin = new Thickness(16, 8),
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+        };
+        DockPanel.SetDock(preview, Avalonia.Controls.Dock.Bottom);
+        panel.Children.Add(preview);
+
+        // Font list
+        ListBox fontList = new();
+        foreach (string name in monoFonts)
+        {
+            ListBoxItem item = new()
+            {
+                Content = name,
+                Tag = name
+            };
+            fontList.Items.Add(item);
+            if (string.Equals(name, currentFont, StringComparison.OrdinalIgnoreCase))
+                fontList.SelectedItem = item;
+        }
+
+        fontList.SelectionChanged += (_, _) =>
+        {
+            if (fontList.SelectedItem is ListBoxItem { Tag: string fontName })
+            {
+                preview.FontFamily = new FontFamily(fontName);
+                ApplyFont(fontName, _state.ContentFontSize);
+            }
+        };
+
+        fontList.DoubleTapped += (_, _) => fontWindow.Close();
+
+        panel.Children.Add(fontList);
+        fontWindow.Content = panel;
+        fontWindow.ShowDialog(this);
+    }
+
+    private void ApplyFont(string fontFamily, double fontSize)
+    {
+        fontSize = Math.Clamp(fontSize, 8, 72);
+        _state.ContentTypeface = new Typeface($"{fontFamily}, Consolas, Courier New, monospace");
+        _state.ContentFontSize = fontSize;
+        _state.Settings.FontFamily = fontFamily;
+        _state.Settings.FontSize = (int)fontSize;
+        _state.Settings.Save();
+
+        _hexView?.ApplyThemeAndFont();
+        _textView?.ApplyThemeAndFont();
+        _csvView?.ApplyThemeAndFont();
+
+        RefreshCommandPaletteCommands();
+    }
+
+    private void AdjustFontSize(int delta)
+    {
+        double newSize = Math.Clamp(_state.ContentFontSize + delta, 8, 72);
+        ApplyFont(_state.Settings.FontFamily, newSize);
+    }
+
+    /// <summary>
+    /// Enumerates installed fonts and returns those that appear to be monospaced.
+    /// Uses a heuristic: compares the width of 'W' and 'i' glyphs.
+    /// </summary>
+    private static List<string> GetMonospaceFonts()
+    {
+        // Well-known monospace fonts to always include at the top
+        HashSet<string> knownMono = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Consolas", "Courier New", "Cascadia Code", "Cascadia Mono",
+            "JetBrains Mono", "Fira Code", "Fira Mono", "Source Code Pro",
+            "DejaVu Sans Mono", "Ubuntu Mono", "Hack", "Inconsolata",
+            "Liberation Mono", "Menlo", "Monaco", "SF Mono", "IBM Plex Mono",
+            "Roboto Mono", "Noto Sans Mono", "Droid Sans Mono",
+            "Anonymous Pro", "Input Mono"
+        };
+
+        SortedSet<string> result = new(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            foreach (FontFamily family in FontManager.Current.SystemFonts)
+            {
+                string name = family.Name;
+                if (knownMono.Contains(name))
+                {
+                    result.Add(name);
+                    continue;
+                }
+
+                // Heuristic: measure 'W' and 'i' — if same width, it's monospace
+                try
+                {
+                    Typeface typeface = new(name);
+                    FormattedText wide = new("W", System.Globalization.CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, typeface, 14, Brushes.White);
+                    FormattedText narrow = new("i", System.Globalization.CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, typeface, 14, Brushes.White);
+                    if (Math.Abs(wide.Width - narrow.Width) < 0.1)
+                        result.Add(name);
+                }
+                catch
+                {
+                    // Skip fonts that can't be measured
+                }
+            }
+        }
+        catch
+        {
+            // If font enumeration fails, return known fonts
+        }
+
+        // Ensure at least Consolas is present
+        if (result.Count == 0)
+            result.Add("Consolas");
+
+        return [.. result];
     }
 
     private void UpdateViewVisibility()
@@ -873,6 +1092,42 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
+
+        // Theme commands
+        foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
+        {
+            string id = theme.Id;
+            string name = theme.Name;
+            _commandPalette.RegisterCommand(
+                () => _state.ActiveTheme.Id == id ? $"● Theme: {name}" : $"○ Theme: {name}",
+                $"Switch to {name} color theme",
+                () => SwitchTheme(id),
+                searchName: $"Theme {name}",
+                restoreFocusAfterExecute: true);
+        }
+
+        foreach (ColorTheme theme in _state.UserThemes)
+        {
+            string id = theme.Id;
+            string name = theme.Name;
+            _commandPalette.RegisterCommand(
+                () => _state.ActiveTheme.Id == id ? $"● Theme: {name}" : $"○ Theme: {name}",
+                $"Switch to {name} color theme (user)",
+                () => SwitchTheme(id),
+                searchName: $"Theme {name}",
+                restoreFocusAfterExecute: true);
+        }
+
+        // Font commands
+        _commandPalette.RegisterCommand("Change Font", "Select content font family", ShowFontPicker);
+        _commandPalette.RegisterCommand(
+            () => $"Font Size: {_state.ContentFontSize:0}",
+            "Current font size (use + and - to adjust)",
+            () => { },
+            searchName: "Font Size",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Font Size +", "Increase font size", () => AdjustFontSize(+1), restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Font Size -", "Decrease font size", () => AdjustFontSize(-1), restoreFocusAfterExecute: true);
 
         foreach (string pinnedPath in _state.Settings.PinnedFiles)
         {

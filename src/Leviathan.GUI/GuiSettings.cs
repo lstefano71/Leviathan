@@ -24,6 +24,21 @@ public sealed class GuiSettings
     public bool WordWrap { get; set; } = true;
     public List<string> FindHistory { get; set; } = [];
 
+    /// <summary>
+    /// Active color theme ID (e.g. "dark", "light", "green-phosphor", or a user theme filename).
+    /// </summary>
+    public string ThemeName { get; set; } = "dark";
+
+    /// <summary>
+    /// Font family used for content views. Must be a monospace font.
+    /// </summary>
+    public string FontFamily { get; set; } = "Consolas";
+
+    /// <summary>
+    /// Font size in device-independent pixels for content views.
+    /// </summary>
+    public int FontSize { get; set; } = 14;
+
     /// <summary>Per-file CSV dialect settings, keyed by full file path.</summary>
     public Dictionary<string, CsvFileSettings> CsvFileSettings { get; set; } = new();
 

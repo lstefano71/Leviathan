@@ -1,8 +1,10 @@
+using Avalonia.Media;
 using Leviathan.Core;
 using Leviathan.Core.Csv;
 using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
+using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI;
 
@@ -94,6 +96,22 @@ public sealed class AppState
 
     // --- Settings ---
     public GuiSettings Settings { get; set; } = GuiSettings.Load();
+
+    // --- Theme & Font ---
+    /// <summary>Active color theme used by all custom view controls.</summary>
+    internal ColorTheme ActiveTheme { get; set; } = ColorTheme.Dark;
+
+    /// <summary>Typeface used by all custom view controls.</summary>
+    public Typeface ContentTypeface { get; set; } = new("Consolas, Courier New, monospace");
+
+    /// <summary>Font size (device-independent pixels) used by all custom view controls.</summary>
+    public double ContentFontSize { get; set; } = 14;
+
+    /// <summary>Line padding added below each text line in view controls.</summary>
+    public const double LinePadding = 2;
+
+    /// <summary>User themes loaded from the themes/ directory.</summary>
+    internal List<ColorTheme> UserThemes { get; set; } = [];
 
     // --- Computed helpers ---
     public long FileLength => Document?.Length ?? 0;

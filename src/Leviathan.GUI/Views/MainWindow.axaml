@@ -41,6 +41,14 @@
                     <MenuItem Header="64" x:Name="MenuBpr64" />
                 </MenuItem>
                 <MenuItem Header="CSV _Settings..." x:Name="MenuCsvSettings" HotKey="F8" IsVisible="False" />
+                <Separator />
+                <MenuItem Header="_Theme" x:Name="MenuTheme" />
+                <MenuItem Header="_Font" x:Name="MenuFont">
+                    <MenuItem Header="Select _Font..." x:Name="MenuSelectFont" />
+                    <Separator />
+                    <MenuItem Header="Font Size _+" x:Name="MenuFontSizeUp" />
+                    <MenuItem Header="Font Size _-" x:Name="MenuFontSizeDown" />
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_Navigate">
                 <MenuItem Header="_Go to Offset/Line..." x:Name="MenuGoto" HotKey="Ctrl+G" />

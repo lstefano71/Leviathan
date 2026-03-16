@@ -16,14 +16,12 @@ namespace Leviathan.GUI.Views;
 /// </summary>
 internal sealed class CsvViewControl : Control
 {
-    private static readonly Typeface MonoTypeface = new("Consolas, Courier New, monospace");
-    private const double FontSize = 14;
     private const double LinePadding = 2;
     private const double CellPaddingX = 8;
 
     private readonly AppState _state;
     private readonly byte[] _readBuffer = new byte[65536];
-    private ViewTheme _theme = ViewTheme.Resolve();
+    private ColorTheme _theme;
 
     internal Action? StateChanged;
     internal Action? OnRecordDetail;
@@ -36,13 +34,24 @@ internal sealed class CsvViewControl : Control
     public CsvViewControl(AppState state)
     {
         _state = state;
+        _theme = state.ActiveTheme;
         Focusable = true;
         ClipToBounds = true;
         ActualThemeVariantChanged += (_, _) =>
         {
-            _theme = ViewTheme.Resolve();
+            _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
+    }
+
+    /// <summary>
+    /// Applies the current theme and font from AppState, then repaints.
+    /// Called by MainWindow when the user switches themes or fonts.
+    /// </summary>
+    internal void ApplyThemeAndFont()
+    {
+        _theme = _state.ActiveTheme;
+        InvalidateVisual();
     }
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -91,14 +100,14 @@ internal sealed class CsvViewControl : Control
         if (_state.Document is null || _state.CsvRowIndex is null) return;
 
         Rect bounds = Bounds;
-        ViewTheme theme = _theme;
+        ColorTheme theme = _theme;
 
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
 
         FormattedText measurement = CreateFormattedText("0", Brushes.White);
         double charWidth = measurement.Width;
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
         double textBaseline = Math.Max(0, (lineHeight - measurement.Height) / 2) + measurement.Baseline;
 
         // Row number gutter
@@ -240,9 +249,9 @@ internal sealed class CsvViewControl : Control
         return CreateFormattedText("0", Brushes.White).Width;
     }
 
-    private static FormattedText CreateFormattedText(string text, IBrush brush) =>
+    private FormattedText CreateFormattedText(string text, IBrush brush) =>
         new(text, System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, MonoTypeface, FontSize, brush);
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, brush);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double GetTextOriginY(double rowY, double baseline, FormattedText text) =>
@@ -329,7 +338,7 @@ internal sealed class CsvViewControl : Control
 
         Point pos = e.GetPosition(this);
         double charWidth = MeasureCharWidth();
-        double lineHeight = FontSize + LinePadding;
+        double lineHeight = _state.ContentFontSize + LinePadding;
         int[] colWidths = _state.CsvColumnWidths ?? [];
         if (colWidths.Length == 0) return;
 
