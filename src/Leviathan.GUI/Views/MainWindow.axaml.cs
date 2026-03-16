@@ -230,11 +230,15 @@ public sealed partial class MainWindow : Window
     {
         if (!_state.IsModified) return true;
 
+        string fileName = _state.CurrentFilePath is not null
+            ? System.IO.Path.GetFileName(_state.CurrentFilePath)
+            : "Untitled";
+
         Window dialog = new()
         {
             Title = "Unsaved Changes",
-            Width = 400,
-            Height = 150,
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -243,10 +247,23 @@ public sealed partial class MainWindow : Window
 
         StackPanel panel = new()
         {
-            Margin = new Thickness(16),
-            Spacing = 12
+            Margin = new Thickness(20, 16, 20, 16),
+            Spacing = 16
         };
-        panel.Children.Add(new TextBlock { Text = "The file has unsaved changes. What would you like to do?" });
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"Do you want to save the changes you made to \"{fileName}\"?",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 14
+        });
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Your changes will be lost if you don't save them.",
+            Foreground = Brushes.Gray,
+            FontSize = 12
+        });
 
         StackPanel buttons = new()
         {
@@ -255,11 +272,26 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
         };
 
-        Button saveBtn = new() { Content = "Save" };
+        Button saveBtn = new()
+        {
+            Content = "  _Save  ",
+            IsDefault = true,
+            Classes = { "accent" }
+        };
         saveBtn.Click += (_, _) => { result = 1; dialog.Close(); };
-        Button dontSaveBtn = new() { Content = "Don't Save" };
+
+        Button dontSaveBtn = new()
+        {
+            Content = "  _Don't Save  ",
+            Foreground = Brushes.IndianRed
+        };
         dontSaveBtn.Click += (_, _) => { result = 0; dialog.Close(); };
-        Button cancelBtn = new() { Content = "Cancel" };
+
+        Button cancelBtn = new()
+        {
+            Content = "  Cancel  ",
+            IsCancel = true
+        };
         cancelBtn.Click += (_, _) => { result = -1; dialog.Close(); };
 
         buttons.Children.Add(saveBtn);
@@ -267,6 +299,12 @@ public sealed partial class MainWindow : Window
         buttons.Children.Add(cancelBtn);
         panel.Children.Add(buttons);
         dialog.Content = panel;
+
+        dialog.Opened += (_, _) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => saveBtn.Focus(),
+                Avalonia.Threading.DispatcherPriority.Input);
+        };
 
         await dialog.ShowDialog(this);
 

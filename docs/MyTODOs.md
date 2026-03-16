@@ -9,7 +9,9 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [x] avalonia front-end: text search. are there ways to speed it up? on very large files it's still quite slow. Also: is it possible to add regex match in addition to the already present case sensitive match?
 
-[ ] avalonia front-end: csv view. search as once again stopped jumping to the right row/column? also: it would be cool if I could hide and show columns. I don't know if this fact should be reflected in the details. Also, could you reduce the padding of the details but maybe make the color of the detail fields striped to make it easier to read? Maybe stripe the columns in the main view as well? Also: do the search matches get highlighted in the details? if not, that would be a nice addition. 
+[x] avalonia front-end: csv view. search as once again stopped jumping to the right row/column? also: it would be cool if I could hide and show columns. I don't know if this fact should be reflected in the details. Also, could you reduce the padding of the details but maybe make the color of the detail fields striped to make it easier to read? Maybe stripe the columns in the main view as well? Also: do the search matches get highlighted in the details? if not, that would be a nice addition. 
+
+[ ] avalonia front-end, csv view. hiding a column or showing it with the detail panel opened does not refreshes the details panel immediately.
 
 [ ] avalonia front-end: now that we have streaming search, do we still need to invalidate the search results when the file changes? can we fix them or rerun the search? also, it would seem that the streaming does not actually apply to the view as the matches are found? it seems that the view only updates after the whole file has been searched. if that's the case, it would be nice if the view updated as the matches are found, so that I can start looking at them right away instead of waiting for the whole search to finish.
 
