@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window
     private FindBar? _findBar;
     private GotoBar? _gotoBar;
     private CommandPaletteOverlay? _commandPalette;
+    private bool _suppressNextMenuFocusRestore;
 
     public MainWindow()
     {
@@ -65,6 +66,16 @@ public sealed partial class MainWindow : Window
 
         // Keyboard shortcuts not bound to menu items
         KeyDown += OnGlobalKeyDown;
+        MainMenu.Closed += (_, _) =>
+        {
+            if (_suppressNextMenuFocusRestore)
+            {
+                _suppressNextMenuFocusRestore = false;
+                return;
+            }
+
+            FocusActiveViewAsync();
+        };
     }
 
     private void WireMenuEvents()
@@ -95,11 +106,23 @@ public sealed partial class MainWindow : Window
         MenuAbout.Click += (_, _) => ShowAboutDialog();
         MenuKeyboardShortcuts.Click += (_, _) => ShowKeyboardShortcuts();
 
-        MenuFind.Click += (_, _) => ShowFindBar();
+        MenuFind.Click += (_, _) =>
+        {
+            SuppressNextMenuFocusRestore();
+            ShowFindBar();
+        };
         MenuFindNext.Click += (_, _) => FindNext();
         MenuFindPrev.Click += (_, _) => FindPrevious();
-        MenuGoto.Click += (_, _) => ShowGotoBar();
-        MenuCsvSettings.Click += async (_, _) => await ShowCsvSettingsDialog();
+        MenuGoto.Click += (_, _) =>
+        {
+            SuppressNextMenuFocusRestore();
+            ShowGotoPalette();
+        };
+        MenuCsvSettings.Click += async (_, _) =>
+        {
+            SuppressNextMenuFocusRestore();
+            await ShowCsvSettingsDialog();
+        };
         MenuCopy.Click += (_, _) => DoCopy();
         MenuPaste.Click += (_, _) => DoPaste();
         MenuSelectAll.Click += (_, _) => DoSelectAll();
@@ -287,6 +310,7 @@ public sealed partial class MainWindow : Window
 
         UpdateViewVisibility();
         BuildMruList();
+        RefreshCommandPaletteCommands();
         UpdateTitle();
         UpdateStatusBar();
         UpdateViewModeChecks();
@@ -305,6 +329,7 @@ public sealed partial class MainWindow : Window
         _textView.StateChanged = UpdateStatusBar;
         _csvView.StateChanged = UpdateStatusBar;
         _csvView.OnRecordDetail = ShowCsvRecordDetail;
+        _state.SearchInvalidated = () => _findBar?.UpdateMatchStatus();
 
         // Create scrollbarsand compose each view + scrollbar in a Grid
         ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb =>
@@ -382,10 +407,37 @@ public sealed partial class MainWindow : Window
                     ViewMode.Csv => _csvView!,
                     _ => _hexView
                 };
-                activeView.Focus();
+                FocusActiveView();
                 activeView.InvalidateVisual();
             }
         }
+    }
+
+    private void FocusActiveView()
+    {
+        if (_state.Document is null || _hexView is null || _textView is null || _csvView is null)
+            return;
+
+        Control activeView = _state.ActiveView switch
+        {
+            ViewMode.Hex => _hexView,
+            ViewMode.Text => _textView,
+            ViewMode.Csv => _csvView,
+            _ => _hexView
+        };
+
+        if (activeView.IsVisible)
+            activeView.Focus();
+    }
+
+    private void FocusActiveViewAsync()
+    {
+        Dispatcher.UIThread.Post(FocusActiveView, DispatcherPriority.Input);
+    }
+
+    private void SuppressNextMenuFocusRestore()
+    {
+        _suppressNextMenuFocusRestore = true;
     }
 
     // ─── View options ───
@@ -578,17 +630,9 @@ public sealed partial class MainWindow : Window
                 string path = recent[i];
                 string fileName = Path.GetFileName(path);
                 int number = i + 1;
-                MenuItem mruItem = new() { Header = $"_{number} {fileName}" };
+                MenuItem mruItem = new() { Header = $"_{number} {fileName}", StaysOpenOnClick = false };
                 string capturedPath = path;
-                mruItem.Click += async (_, _) =>
-                {
-                    if (!await GuardUnsavedChanges()) return;
-                    if (File.Exists(capturedPath))
-                    {
-                        _state.OpenFile(capturedPath);
-                        OnFileOpened();
-                    }
-                };
+                mruItem.Click += async (_, _) => await OpenRecentFileAsync(capturedPath, closeFileMenu: true);
                 FileMenu.Items.Insert(insertIdx + i, mruItem);
             }
         }
@@ -632,17 +676,25 @@ public sealed partial class MainWindow : Window
         mruListBox.DoubleTapped += async (_, _) =>
         {
             if (mruListBox.SelectedItem is ListBoxItem sel && sel.Tag is string filePath)
-            {
-                if (!await GuardUnsavedChanges()) return;
-                if (File.Exists(filePath))
-                {
-                    _state.OpenFile(filePath);
-                    OnFileOpened();
-                }
-            }
+                await OpenRecentFileAsync(filePath);
         };
 
         MruListPanel.Children.Add(mruListBox);
+    }
+
+    private async Task OpenRecentFileAsync(string path, bool closeFileMenu = false)
+    {
+        if (closeFileMenu)
+            MainMenu.Close();
+
+        if (!await GuardUnsavedChanges())
+            return;
+
+        if (!File.Exists(path))
+            return;
+
+        _state.OpenFile(path);
+        OnFileOpened();
     }
 
     // ─── Keyboard shortcuts ───
@@ -687,12 +739,8 @@ public sealed partial class MainWindow : Window
             if (digit > 0 && digit <= _state.Settings.RecentFiles.Count)
             {
                 string path = _state.Settings.RecentFiles[digit - 1];
-                if (File.Exists(path))
-                {
-                    _state.OpenFile(path);
-                    OnFileOpened();
-                    e.Handled = true;
-                }
+                _ = OpenRecentFileAsync(path);
+                e.Handled = true;
             }
         }
     }
@@ -714,14 +762,22 @@ public sealed partial class MainWindow : Window
     private void ShowCommandPalette()
     {
         EnsureOverlaysCreated();
+        RefreshCommandPaletteCommands();
         _commandPalette!.Show();
+    }
+
+    private void ShowGotoPalette()
+    {
+        EnsureOverlaysCreated();
+        RefreshCommandPaletteCommands();
+        _commandPalette!.ShowGoto();
     }
 
     private void EnsureOverlaysCreated()
     {
         if (_findBar is not null) return;
 
-        _findBar = new FindBar(_state, StartSearch, FindNext, FindPrevious);
+        _findBar = new FindBar(_state, StartSearch, FindNext, FindPrevious, FocusActiveViewAsync);
         _findBar.IsVisible = false;
 
         _gotoBar = new GotoBar(_state,
@@ -731,34 +787,69 @@ public sealed partial class MainWindow : Window
 
         _commandPalette = new CommandPaletteOverlay(_state,
             offset => _hexView?.GotoOffset(offset),
-            line => _textView?.GotoLine(line));
+            (line, column) => _textView?.GotoLine(line, column),
+            offset => _textView?.GotoOffset(offset),
+            row => _csvView?.GotoRow(row),
+            FocusActiveViewAsync);
         _commandPalette.IsVisible = false;
-        RegisterCommands();
+        RefreshCommandPaletteCommands();
 
         ContentArea.Children.Add(_findBar);
         ContentArea.Children.Add(_gotoBar);
         ContentArea.Children.Add(_commandPalette);
     }
 
-    private void RegisterCommands()
+    private void RefreshCommandPaletteCommands()
     {
         if (_commandPalette is null) return;
 
+        _commandPalette.ClearCommands();
         _commandPalette.RegisterCommand("Open File", "Open a file (Ctrl+O)", () => _ = ShowOpenDialog());
-        _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile);
-        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Hex ? "● Hex View" : "  Hex View", "Switch to hex view (F5)", () => SwitchView(ViewMode.Hex));
-        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Text ? "● Text View" : "  Text View", "Switch to text view (F6)", () => SwitchView(ViewMode.Text));
-        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Csv ? "● CSV View" : "  CSV View", "Switch to CSV view (F7)", () => SwitchView(ViewMode.Csv));
+        _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.ActiveView == ViewMode.Hex ? "● Hex View" : "○ Hex View",
+            "Switch to hex view (F5)",
+            () => SwitchView(ViewMode.Hex),
+            searchName: "Hex View",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.ActiveView == ViewMode.Text ? "● Text View" : "○ Text View",
+            "Switch to text view (F6)",
+            () => SwitchView(ViewMode.Text),
+            searchName: "Text View",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.ActiveView == ViewMode.Csv ? "● CSV View" : "○ CSV View",
+            "Switch to CSV view (F7)",
+            () => SwitchView(ViewMode.Csv),
+            searchName: "CSV View",
+            restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Find", "Search in file (Ctrl+F)", ShowFindBar);
-        _commandPalette.RegisterCommand("Find Next", "Go to next match (F3)", FindNext);
-        _commandPalette.RegisterCommand("Find Previous", "Go to previous match (Shift+F3)", FindPrevious);
-        _commandPalette.RegisterCommand("Go to", "Go to offset or line (Ctrl+G)", ShowGotoBar);
-        _commandPalette.RegisterCommand(() => _state.WordWrap ? "✓ Line Wrap" : "  Line Wrap", "Toggle line wrapping", ToggleWordWrap);
-        _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy);
-        _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste);
-        _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll);
+        _commandPalette.RegisterCommand("Find Next", "Go to next match (F3)", FindNext, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Find Previous", "Go to previous match (Shift+F3)", FindPrevious, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Go to", "Jump to offset, line, or row (Ctrl+G)", ShowGotoPalette, closeOnExecute: false);
+        _commandPalette.RegisterCommand(
+            () => _state.WordWrap ? "☑ Line Wrap" : "☐ Line Wrap",
+            "Wrap long lines in text view",
+            ToggleWordWrap,
+            searchName: "Line Wrap",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
+
+        foreach (string recentPath in _state.Settings.RecentFiles.Take(10))
+        {
+            string capturedPath = recentPath;
+            string fileName = Path.GetFileName(capturedPath);
+            _commandPalette.RegisterCommand(
+                () => $"Open Recent: {fileName}",
+                capturedPath,
+                () => _ = OpenRecentFileAsync(capturedPath),
+                searchName: $"Open Recent {fileName}");
+        }
     }
 
     private void StartSearch()
@@ -842,8 +933,7 @@ public sealed partial class MainWindow : Window
         }
         else if (_state.ActiveView == ViewMode.Csv)
         {
-            _state.HexCursorOffset = offset;
-            _hexView?.GotoOffset(offset);
+            _csvView?.GotoOffset(offset);
         }
     }
 
@@ -926,6 +1016,7 @@ public sealed partial class MainWindow : Window
         long rowOffset = _csvView.GetRowByteOffset(_state.CsvCursorRow);
         CsvRecordDetailDialog dialog = new(_state, _state.CsvCursorRow, rowOffset);
         await dialog.ShowDialog(this);
+        FocusActiveViewAsync();
     }
 
     // ─── CSV dialogs ───
@@ -939,6 +1030,7 @@ public sealed partial class MainWindow : Window
             _csvView?.InvalidateVisual();
             UpdateStatusBar();
         }
+        FocusActiveViewAsync();
     }
 
     // ─── Dialogs ───
@@ -1031,6 +1123,14 @@ public sealed partial class MainWindow : Window
         };
 
         helpWindow.Content = scroll;
+        helpWindow.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                helpWindow.Close();
+                e.Handled = true;
+            }
+        };
         helpWindow.ShowDialog(this);
     }
 

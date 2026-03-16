@@ -133,4 +133,11 @@ public class Utf8UtilsTests
     var rune = new System.Text.Rune(0x4E2D);
     Assert.Equal(2, Utf8Utils.RuneColumnWidth(rune));
   }
+
+  [Fact]
+  public void RuneColumnWidth_Bom_ReturnsZero()
+  {
+    var rune = new System.Text.Rune(0xFEFF);
+    Assert.Equal(0, Utf8Utils.RuneColumnWidth(rune));
+  }
 }

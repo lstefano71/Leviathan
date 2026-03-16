@@ -78,6 +78,18 @@ public class LineWrapEngineTests
   }
 
   [Fact]
+  public void SoftWrap_WithBom_IgnoresBomWidth()
+  {
+    byte[] data = [0xEF, 0xBB, 0xBF, 0x41, 0x42, 0x43, 0x44, 0x45];
+    Span<VisualLine> output = stackalloc VisualLine[10];
+    int count = _engine.ComputeVisualLines(data, 0, 5, wrap: true, output, _decoder);
+
+    Assert.Equal(1, count);
+    Assert.Equal(data.Length, output[0].ByteLength);
+    Assert.Equal(5, output[0].ColumnCount);
+  }
+
+  [Fact]
   public void NoWrap_IgnoresColumnLimit()
   {
     byte[] data = "ABCDEFGHIJ"u8.ToArray();

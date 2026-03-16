@@ -261,6 +261,23 @@ public sealed class AppState
     }
 
     /// <summary>
+    /// Invalidates search results after a document edit. Clears all match data
+    /// and notifies the UI so the find bar shows the stale-results state.
+    /// </summary>
+    public void InvalidateSearchResults()
+    {
+        if (SearchResults.Count == 0 && CurrentMatchIndex < 0) return;
+        CancelSearch();
+        SearchResults = [];
+        CurrentMatchIndex = -1;
+        SearchStatus = SearchStatus.Length > 0 ? "Results invalidated — search again" : "";
+        SearchInvalidated?.Invoke();
+    }
+
+    /// <summary>Callback invoked when search results are invalidated by an edit.</summary>
+    public Action? SearchInvalidated { get; set; }
+
+    /// <summary>
     /// Initialises CSV view state for the currently open file.
     /// </summary>
     public void InitCsvView()
@@ -467,34 +484,42 @@ public sealed class AppState
 
     private static int ComputePreviewDisplayWidth(ReadOnlySpan<byte> record, CsvField field, CsvDialect dialect, int maxWidth)
     {
-        ReadOnlySpan<byte> raw = record.Slice(field.Offset, field.Length);
-        if (raw.IsEmpty || maxWidth <= 0)
+        if (field.Length <= 0 || maxWidth <= 0)
             return 0;
 
-        if (field.IsQuoted)
-        {
-            byte quote = dialect.Quote;
-            if (raw.Length >= 2 && raw[0] == quote && raw[^1] == quote)
-                raw = raw[1..^1];
-            else if (raw.Length >= 1 && raw[0] == quote)
-                raw = raw[1..];
-        }
-
+        Span<byte> unescaped = field.Length <= 1024
+            ? stackalloc byte[1024]
+            : new byte[field.Length];
+        int written = CsvFieldParser.UnescapeField(record, field, dialect, unescaped);
+        ReadOnlySpan<byte> data = unescaped[..written];
         int width = 0;
-        byte escape = dialect.Escape;
-        byte quoteChar = dialect.Quote;
-
-        for (int i = 0; i < raw.Length && width < maxWidth; i++)
+        int offset = 0;
+        while (offset < data.Length && width < maxWidth)
         {
-            byte current = raw[i];
-            if (current == escape && i + 1 < raw.Length && raw[i + 1] == quoteChar)
+            System.Buffers.OperationStatus status =
+                System.Text.Rune.DecodeFromUtf8(data[offset..], out System.Text.Rune rune, out int consumed);
+            if (status != System.Buffers.OperationStatus.Done || consumed <= 0)
             {
-                current = quoteChar;
-                i++;
+                offset++;
+                width++;
+                continue;
             }
 
-            if (current == (byte)'\n' || current == (byte)'\r')
-                break;
+            if (rune.Value == '\r')
+            {
+                offset += consumed;
+                if (offset < data.Length && data[offset] == (byte)'\n')
+                    offset++;
+                width++;
+                continue;
+            }
+
+            offset += consumed;
+            if (rune.Value == '\n')
+            {
+                width++;
+                continue;
+            }
 
             width++;
         }

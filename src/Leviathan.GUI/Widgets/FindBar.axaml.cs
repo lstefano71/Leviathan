@@ -14,13 +14,15 @@ public sealed partial class FindBar : UserControl
     private readonly Action _onSearchStarted;
     private readonly Action _onFindNext;
     private readonly Action _onFindPrev;
+    private readonly Action? _onHide;
 
-    public FindBar(AppState state, Action onSearchStarted, Action onFindNext, Action onFindPrev)
+    public FindBar(AppState state, Action onSearchStarted, Action onFindNext, Action onFindPrev, Action? onHide = null)
     {
         _state = state;
         _onSearchStarted = onSearchStarted;
         _onFindNext = onFindNext;
         _onFindPrev = onFindPrev;
+        _onHide = onHide;
 
         InitializeComponent();
 
@@ -40,7 +42,7 @@ public sealed partial class FindBar : UserControl
         };
     }
 
-    public FindBar() : this(new AppState(), () => { }, () => { }, () => { }) { }
+    public FindBar() : this(new AppState(), () => { }, () => { }, () => { }, () => { }) { }
 
     /// <summary>Shows the find bar and focuses the search input.</summary>
     public void ShowBar()
@@ -56,9 +58,13 @@ public sealed partial class FindBar : UserControl
     }
 
     /// <summary>Hides the find bar.</summary>
-    public void Hide()
+    public void Hide(bool restoreFocus = true)
     {
         IsVisible = false;
+        if (restoreFocus && _onHide is not null)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(_onHide, Avalonia.Threading.DispatcherPriority.Input);
+        }
     }
 
     /// <summary>Updates the match status display.</summary>

@@ -88,6 +88,7 @@ public static class Utf8Utils
   {
     int cp = rune.Value;
     if (cp == '\t') return tabWidth;
+    if (cp == 0xFEFF) return 0; // BOM / zero-width no-break space
     if (cp < 0x20) return 1; // Control chars rendered as replacement
 
     // CJK Unified Ideographs and common wide ranges

@@ -156,6 +156,9 @@ internal sealed class HexViewControl : Control
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
 
+        // Binary-search for the first match visible in or after the viewport
+        int matchCursor = BinarySearchFirstMatch(matches, startOffset);
+
         for (int row = 0; row < visibleRows; row++)
         {
             long rowOffset = startOffset + (long)row * bytesPerRow;
@@ -182,20 +185,24 @@ internal sealed class HexViewControl : Control
                 int groupSep = col / 8;
                 double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
 
-                // Match highlight
+                // Match highlight (sliding cursor — O(1) amortized per byte)
                 bool isActiveMatch = false;
                 bool isMatch = false;
-                for (int m = 0; m < matches.Count; m++)
+                while (matchCursor < matches.Count)
                 {
-                    long mStart = matches[m].Offset;
-                    long mEnd = mStart + matches[m].Length - 1;
-                    if (byteOffset >= mStart && byteOffset <= mEnd)
+                    long mStart = matches[matchCursor].Offset;
+                    long mEnd = mStart + matches[matchCursor].Length - 1;
+                    if (byteOffset > mEnd)
+                    {
+                        matchCursor++;
+                        continue;
+                    }
+                    if (byteOffset >= mStart)
                     {
                         isMatch = true;
-                        isActiveMatch = m == activeMatchIdx;
-                        break;
+                        isActiveMatch = matchCursor == activeMatchIdx;
                     }
-                    if (mStart > byteOffset) break; // matches are sorted
+                    break;
                 }
                 if (isMatch)
                 {
@@ -459,6 +466,8 @@ internal sealed class HexViewControl : Control
             _state.Document.Insert(offset, [value]);
         }
 
+        _state.InvalidateSearchResults();
+
         if (!_state.NibbleLow)
         {
             _state.HexCursorOffset = Math.Min(offset + 1, _state.Document.Length - 1);
@@ -485,4 +494,30 @@ internal sealed class HexViewControl : Control
         Key.F => 15,
         _ => -1
     };
+
+    /// <summary>
+    /// Binary-searches for the first match whose end offset is &gt;= <paramref name="startOffset"/>.
+    /// Returns the index into <paramref name="matches"/>, or <c>matches.Count</c> if none.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int BinarySearchFirstMatch(List<SearchResult> matches, long startOffset)
+    {
+        int lo = 0, hi = matches.Count - 1;
+        int result = matches.Count;
+        while (lo <= hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            long mEnd = matches[mid].Offset + matches[mid].Length - 1;
+            if (mEnd >= startOffset)
+            {
+                result = mid;
+                hi = mid - 1;
+            }
+            else
+            {
+                lo = mid + 1;
+            }
+        }
+        return result;
+    }
 }

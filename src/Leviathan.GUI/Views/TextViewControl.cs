@@ -196,11 +196,15 @@ internal sealed class TextViewControl : Control
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
 
+        // Binary-search for the first match visible in or after the viewport
+        int matchCursor = BinarySearchFirstMatch(matches, topOffset);
+
         // Selection range
         long selStart = _state.TextSelStart;
         long selEnd = _state.TextSelEnd;
 
         long currentLineNumber = ComputeLineNumber(topOffset) - 1;
+        bool clipToViewport = !_state.WordWrap;
 
         for (int row = 0; row < lineCount; row++)
         {
@@ -238,10 +242,11 @@ internal sealed class TextViewControl : Control
             {
                 // Wrap continuation: show ↪ indicator
                 string wrapIndicator = "↪";
-                double wrapX = gutterWidth - 2 * charWidth;
                 FormattedText wrapText = new(wrapIndicator,
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, MonoTypeface, FontSize, theme.TextMuted);
+                double separatorX = gutterWidth - charWidth;
+                double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
                 context.DrawText(wrapText, new Point(wrapX, y));
             }
 
@@ -256,26 +261,38 @@ internal sealed class TextViewControl : Control
             int byteIdx = 0;
             while (byteIdx < lineData.Length)
             {
+                if (clipToViewport && charCol >= textAreaCols)
+                    break;
+
                 (System.Text.Rune rune, int runeBytes) = _state.Decoder.DecodeRune(lineData, byteIdx);
                 if (runeBytes <= 0) { byteIdx++; continue; }
 
                 int codePoint = rune.Value;
                 long absOffset = lineAbsOffset + byteIdx;
+                if (codePoint == 0xFEFF)
+                {
+                    byteIdx += runeBytes;
+                    continue;
+                }
 
-                // Match highlight
+                // Match highlight (sliding cursor — O(1) amortized per character)
                 bool isMatch = false;
                 bool isActiveMatch = false;
-                for (int m = 0; m < matches.Count; m++)
+                while (matchCursor < matches.Count)
                 {
-                    long mStart = matches[m].Offset;
-                    long mEnd = mStart + matches[m].Length - 1;
-                    if (absOffset >= mStart && absOffset <= mEnd)
+                    long mStart = matches[matchCursor].Offset;
+                    long mEnd = mStart + matches[matchCursor].Length - 1;
+                    if (absOffset > mEnd)
+                    {
+                        matchCursor++;
+                        continue;
+                    }
+                    if (absOffset >= mStart)
                     {
                         isMatch = true;
-                        isActiveMatch = m == activeMatchIdx;
-                        break;
+                        isActiveMatch = matchCursor == activeMatchIdx;
                     }
-                    if (mStart > absOffset) break;
+                    break;
                 }
                 if (isMatch)
                 {
@@ -397,24 +414,24 @@ internal sealed class TextViewControl : Control
             case Key.Right:
                 _desiredColumn = -1;
                 newCursor = Math.Min(oldCursor + _state.Decoder.MinCharBytes, _state.FileLength);
+                newCursor = SkipCrLf(newCursor, 1);
                 break;
             case Key.Left:
                 _desiredColumn = -1;
                 newCursor = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
+                newCursor = SkipCrLf(newCursor, -1);
                 break;
             case Key.Down:
-                newCursor = MoveDown(oldCursor);
+                newCursor = MoveVerticalNoWrap(oldCursor, 1, 1);
                 break;
             case Key.Up:
-                newCursor = MoveUp(oldCursor);
+                newCursor = MoveVerticalNoWrap(oldCursor, -1, 1);
                 break;
             case Key.PageDown:
-                for (int i = 0; i < _state.VisibleRows; i++)
-                    newCursor = MoveDown(newCursor);
+                newCursor = MoveVerticalNoWrap(oldCursor, 1, Math.Max(1, _state.VisibleRows));
                 break;
             case Key.PageUp:
-                for (int i = 0; i < _state.VisibleRows; i++)
-                    newCursor = MoveUp(newCursor);
+                newCursor = MoveVerticalNoWrap(oldCursor, -1, Math.Max(1, _state.VisibleRows));
                 break;
             case Key.Home:
                 _desiredColumn = -1;
@@ -432,6 +449,7 @@ internal sealed class TextViewControl : Control
                     long deleteLen = oldCursor - deleteAt;
                     _state.Document.Delete(deleteAt, deleteLen);
                     newCursor = deleteAt;
+                    _state.InvalidateSearchResults();
                 }
                 break;
             case Key.Delete:
@@ -439,12 +457,14 @@ internal sealed class TextViewControl : Control
                 if (oldCursor < _state.FileLength)
                 {
                     _state.Document.Delete(oldCursor, _state.Decoder.MinCharBytes);
+                    _state.InvalidateSearchResults();
                 }
                 break;
             case Key.Enter:
                 _desiredColumn = -1;
                 _state.Document.Insert(oldCursor, _state.Decoder.EncodeString("\n"));
                 newCursor = oldCursor + _state.Decoder.MinCharBytes;
+                _state.InvalidateSearchResults();
                 break;
             default:
                 base.OnKeyDown(e);
@@ -475,6 +495,7 @@ internal sealed class TextViewControl : Control
         byte[] encoded = _state.Decoder.EncodeString(e.Text);
         _state.Document.Insert(_state.TextCursorOffset, encoded);
         _state.TextCursorOffset += encoded.Length;
+        _state.InvalidateSearchResults();
         OnStateChanged();
     }
 
@@ -548,12 +569,16 @@ internal sealed class TextViewControl : Control
     }
 
     /// <summary>Navigates to a specific line number (1-based).</summary>
-    internal void GotoLine(long lineNumber)
+    internal void GotoLine(long lineNumber, int? columnNumber = null)
     {
         if (_state.Document is null || lineNumber < 1) return;
         _desiredColumn = -1;
         long offset = FindOffsetOfLine(lineNumber);
-        _state.TextCursorOffset = Math.Max(offset, _state.BomLength);
+        offset = Math.Max(offset, _state.BomLength);
+        if (columnNumber is int column && column > 1)
+            offset = AdvanceOffsetByDisplayColumns(offset, column - 1);
+
+        _state.TextCursorOffset = offset;
         _state.TextSelectionAnchor = -1;
         OnStateChanged();
     }
@@ -565,6 +590,37 @@ internal sealed class TextViewControl : Control
         _state.TextCursorOffset = Math.Clamp(offset, _state.BomLength, _state.Document.Length);
         _state.TextSelectionAnchor = -1;
         OnStateChanged();
+    }
+
+    private long AdvanceOffsetByDisplayColumns(long lineStartOffset, int targetColumn)
+    {
+        Core.Document? doc = _state.Document;
+        if (doc is null || targetColumn <= 0)
+            return Math.Max(lineStartOffset, _state.BomLength);
+
+        long maxReadable = Math.Min(doc.Length - lineStartOffset, int.MaxValue);
+        int readLen = (int)Math.Min(8192L, maxReadable);
+        if (readLen <= 0)
+            return Math.Max(lineStartOffset, _state.BomLength);
+
+        while (true)
+        {
+            EnsureBuffer(readLen);
+            int read = doc.Read(lineStartOffset, _readBuffer.AsSpan(0, readLen));
+            if (read <= 0)
+                return Math.Max(lineStartOffset, _state.BomLength);
+
+            ReadOnlySpan<byte> lineBytes = _readBuffer.AsSpan(0, read);
+            int byteOffset = DisplayColumnToByteOffset(lineBytes, targetColumn, _state.Decoder);
+            int availableColumns = ByteOffsetToDisplayColumn(lineBytes, byteOffset, _state.Decoder);
+            bool hitLineEnd = byteOffset < read && _state.Decoder.IsNewline(lineBytes, byteOffset, out _);
+
+            long targetOffset = lineStartOffset + byteOffset;
+            if (availableColumns >= targetColumn || hitLineEnd || readLen >= maxReadable)
+                return Math.Clamp(targetOffset, _state.BomLength, doc.Length);
+
+            readLen = (int)Math.Min(maxReadable, (long)readLen * 2);
+        }
     }
 
     private void EnsureCursorVisible()
@@ -671,6 +727,9 @@ internal sealed class TextViewControl : Control
             return;
         }
 
+        if (rowDelta > 0 && TryScrollDownUsingRenderedLines(rowDelta))
+            return;
+
         long off = _state.TextTopOffset;
         if (rowDelta > 0)
         {
@@ -708,6 +767,119 @@ internal sealed class TextViewControl : Control
         long lineStart = FindLineStart(offset);
         if (lineStart <= _state.BomLength) return _state.BomLength;
         return FindLineStart(Math.Max(_state.BomLength, lineStart - minChar));
+    }
+
+    private long MoveVerticalNoWrap(long offset, int direction, int lineCount)
+    {
+        if (_state.Document is null || lineCount <= 0 || direction == 0)
+            return offset;
+
+        int targetColumn = GetDesiredColumnForNoWrap(offset);
+        long currentOffset = offset;
+        for (int step = 0; step < lineCount; step++)
+        {
+            long nextOffset = direction < 0
+                ? MoveToPreviousLineAtColumn(currentOffset, targetColumn)
+                : MoveToNextLineAtColumn(currentOffset, targetColumn);
+            if (nextOffset == currentOffset)
+                break;
+
+            currentOffset = nextOffset;
+        }
+
+        return currentOffset;
+    }
+
+    private int GetDesiredColumnForNoWrap(long offset)
+    {
+        if (_desiredColumn >= 0)
+            return _desiredColumn;
+
+        if (_state.Document is null)
+            return 0;
+
+        long lineStart = Math.Max(FindLineStart(offset), _state.BomLength);
+        long lineEnd = FindLineEnd(offset);
+        int lineLength = (int)Math.Min(lineEnd - lineStart + NewlineLengthAt(lineEnd), int.MaxValue);
+        if (lineLength <= 0)
+        {
+            _desiredColumn = 0;
+            return 0;
+        }
+
+        EnsureBuffer(lineLength);
+        _state.Document.Read(lineStart, _readBuffer.AsSpan(0, lineLength));
+        int displayColumn = ByteOffsetToDisplayColumn(
+            _readBuffer.AsSpan(0, lineLength),
+            Math.Max(0, offset - lineStart),
+            _state.Decoder);
+        _desiredColumn = displayColumn;
+        return displayColumn;
+    }
+
+    private long MoveToPreviousLineAtColumn(long offset, int targetColumn)
+    {
+        if (_state.Document is null)
+            return offset;
+
+        int bom = _state.BomLength;
+        long lineStart = FindLineStart(offset);
+        if (lineStart <= bom)
+            return offset;
+
+        int minChar = _state.Decoder.MinCharBytes;
+        long prevLineEnd = Math.Max(bom, lineStart - minChar);
+        long prevLineStart = Math.Max(FindLineStart(prevLineEnd), bom);
+        int prevLength = (int)Math.Min(prevLineEnd - prevLineStart + NewlineLengthAt(prevLineEnd), int.MaxValue);
+        if (prevLength <= 0)
+            return prevLineStart;
+
+        EnsureBuffer(prevLength);
+        _state.Document.Read(prevLineStart, _readBuffer.AsSpan(0, prevLength));
+        int byteColumn = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, prevLength), targetColumn, _state.Decoder);
+        return Math.Min(prevLineStart + byteColumn, prevLineEnd);
+    }
+
+    private long MoveToNextLineAtColumn(long offset, int targetColumn)
+    {
+        if (_state.Document is null)
+            return offset;
+
+        long lineEnd = FindLineEnd(offset);
+        if (lineEnd >= _state.Document.Length)
+            return offset;
+
+        long nextLineStart = Math.Min(
+            lineEnd + Math.Max(NewlineLengthAt(lineEnd), _state.Decoder.MinCharBytes),
+            _state.Document.Length);
+        if (nextLineStart >= _state.Document.Length)
+            return _state.Document.Length;
+
+        long nextLineEnd = FindLineEnd(nextLineStart);
+        int nextLength = (int)Math.Min(nextLineEnd - nextLineStart + NewlineLengthAt(nextLineEnd), int.MaxValue);
+        if (nextLength <= 0)
+            return nextLineStart;
+
+        EnsureBuffer(nextLength);
+        _state.Document.Read(nextLineStart, _readBuffer.AsSpan(0, nextLength));
+        int byteColumn = DisplayColumnToByteOffset(_readBuffer.AsSpan(0, nextLength), targetColumn, _state.Decoder);
+        return Math.Min(nextLineStart + byteColumn, nextLineEnd);
+    }
+
+    private bool TryScrollDownUsingRenderedLines(int rowDelta)
+    {
+        if (_lastRenderedLineCount <= rowDelta || rowDelta <= 0)
+            return false;
+
+        if (_visualLines[0].DocOffset != _state.TextTopOffset)
+            return false;
+
+        long newTop = _visualLines[rowDelta].DocOffset;
+        if (newTop <= _state.TextTopOffset)
+            return false;
+
+        _state.TextTopOffset = Math.Clamp(newTop, _state.BomLength, Math.Max(_state.BomLength, _state.FileLength));
+        return true;
     }
 
     /// <summary>Returns the number of character columns available in the text area.</summary>
@@ -1307,6 +1479,33 @@ internal sealed class TextViewControl : Control
         return 0;
     }
 
+    /// <summary>
+    /// Skips the invisible \r in a \r\n pair so the cursor doesn't appear stuck.
+    /// For direction +1 (right): if landing on \r followed by \n, advance past \r.
+    /// For direction -1 (left): if landing on \r preceded by nothing special and followed by \n, retreat one more.
+    /// </summary>
+    private long SkipCrLf(long offset, int direction)
+    {
+        if (_state.Document is null || _state.Decoder.MinCharBytes != 1) return offset;
+        if (offset < _state.BomLength || offset >= _state.Document.Length) return offset;
+
+        Span<byte> buf = stackalloc byte[2];
+        int readable = (int)Math.Min(2, _state.Document.Length - offset);
+        int read = _state.Document.Read(offset, buf[..readable]);
+        if (read < 1) return offset;
+
+        if (buf[0] == 0x0D && read >= 2 && buf[1] == 0x0A)
+        {
+            // Cursor is on \r of a \r\n pair — skip it
+            if (direction > 0)
+                return Math.Min(offset + 1, _state.FileLength); // advance to \n
+            else
+                return Math.Max(offset - 1, _state.BomLength); // retreat past \r
+        }
+
+        return offset;
+    }
+
     private long ComputeLineNumber(long offset)
     {
         if (_state.Document is null) return 1;
@@ -1494,5 +1693,31 @@ internal sealed class TextViewControl : Control
         EnsureCursorVisible();
         InvalidateVisual();
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Binary-searches for the first match whose end offset is &gt;= <paramref name="startOffset"/>.
+    /// Returns the index into <paramref name="matches"/>, or <c>matches.Count</c> if none.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int BinarySearchFirstMatch(List<SearchResult> matches, long startOffset)
+    {
+        int lo = 0, hi = matches.Count - 1;
+        int result = matches.Count;
+        while (lo <= hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            long mEnd = matches[mid].Offset + matches[mid].Length - 1;
+            if (mEnd >= startOffset)
+            {
+                result = mid;
+                hi = mid - 1;
+            }
+            else
+            {
+                lo = mid + 1;
+            }
+        }
+        return result;
     }
 }

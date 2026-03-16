@@ -1,4 +1,6 @@
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Threading;
 using Leviathan.Core.Csv;
 
 namespace Leviathan.GUI.Widgets;
@@ -25,9 +27,25 @@ public sealed partial class CsvSettingsDialog : Window
 
         ApplyButton.Click += OnApply;
         CancelButton.Click += (_, _) => Close();
+        Opened += (_, _) =>
+        {
+            Dispatcher.UIThread.Post(() => SeparatorCombo.Focus(), DispatcherPriority.Input);
+        };
     }
 
     public CsvSettingsDialog() : this(new AppState()) { }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        base.OnKeyDown(e);
+    }
 
     private void OnApply(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -36,9 +54,6 @@ public sealed partial class CsvSettingsDialog : Window
         bool hasHeader = HasHeaderCheck.IsChecked == true;
 
         _state.CsvDialect = new CsvDialect(separator, quote, quote, hasHeader);
-
-        // Re-initialize CSV view with new dialect
-        _state.InitCsvView();
 
         // Save per-file settings
         if (_state.CurrentFilePath is not null)
@@ -51,6 +66,9 @@ public sealed partial class CsvSettingsDialog : Window
                 HasHeader = hasHeader
             });
         }
+
+        // Re-initialize CSV view with the updated dialect
+        _state.InitCsvView();
 
         Applied = true;
         Close();

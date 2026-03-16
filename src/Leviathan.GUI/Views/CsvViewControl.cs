@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -95,8 +96,10 @@ internal sealed class CsvViewControl : Control
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
 
-        double charWidth = MeasureCharWidth();
+        FormattedText measurement = CreateFormattedText("0", Brushes.White);
+        double charWidth = measurement.Width;
         double lineHeight = FontSize + LinePadding;
+        double textBaseline = Math.Max(0, (lineHeight - measurement.Height) / 2) + measurement.Baseline;
 
         // Row number gutter
         long totalDataRows = _state.CsvRowIndex.TotalRowCount;
@@ -139,9 +142,8 @@ internal sealed class CsvViewControl : Control
                 if (headerText.Length > colWidths[c])
                     headerText = headerText[..colWidths[c]];
 
-                FormattedText ft = new(headerText, System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoTypeface, FontSize, headerBrush);
-                context.DrawText(ft, new Point(hx + CellPaddingX / 2, 0));
+                FormattedText ft = CreateFormattedText(headerText, headerBrush);
+                context.DrawText(ft, new Point(hx + CellPaddingX / 2, GetTextOriginY(0, textBaseline, ft)));
 
                 hx += cellWidth;
                 context.DrawLine(gridLinePen, new Point(hx, 0), new Point(hx, bounds.Height));
@@ -175,9 +177,8 @@ internal sealed class CsvViewControl : Control
             // Row number in gutter
             string rowNumStr = (dataRow + 1).ToString();
             double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
-            FormattedText rowNumFt = new(rowNumStr, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, MonoTypeface, FontSize, theme.TextSecondary);
-            context.DrawText(rowNumFt, new Point(rowNumX, y));
+            FormattedText rowNumFt = CreateFormattedText(rowNumStr, theme.TextSecondary);
+            context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
 
             // Cursor/selection highlight
             if (dataRow == _state.CsvCursorRow)
@@ -213,9 +214,7 @@ internal sealed class CsvViewControl : Control
                 if (c < fieldCount)
                 {
                     int written = CsvFieldParser.UnescapeField(rowData, fields[c], dialect, unescaped);
-                    string cellText = System.Text.Encoding.UTF8.GetString(unescaped[..written]);
-                    if (cellText.Length > colWidths[c])
-                        cellText = cellText[..colWidths[c]];
+                    string cellText = FormatCellPreview(Encoding.UTF8.GetString(unescaped[..written]), colWidths[c]);
 
                     IBrush cellBrush = textBrush;
                     if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol)
@@ -224,9 +223,8 @@ internal sealed class CsvViewControl : Control
                             new Rect(cellX, y, cellWidth, lineHeight));
                     }
 
-                    FormattedText ft = new(cellText, System.Globalization.CultureInfo.InvariantCulture,
-                        FlowDirection.LeftToRight, MonoTypeface, FontSize, cellBrush);
-                    context.DrawText(ft, new Point(cellX + CellPaddingX / 2, y));
+                    FormattedText ft = CreateFormattedText(cellText, cellBrush);
+                    context.DrawText(ft, new Point(cellX + CellPaddingX / 2, GetTextOriginY(y, textBaseline, ft)));
                 }
 
                 cellX += cellWidth;
@@ -239,10 +237,16 @@ internal sealed class CsvViewControl : Control
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private double MeasureCharWidth()
     {
-        FormattedText measurement = new("0", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, MonoTypeface, FontSize, Brushes.White);
-        return measurement.Width;
+        return CreateFormattedText("0", Brushes.White).Width;
     }
+
+    private static FormattedText CreateFormattedText(string text, IBrush brush) =>
+        new(text, System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, MonoTypeface, FontSize, brush);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double GetTextOriginY(double rowY, double baseline, FormattedText text) =>
+        rowY + baseline - text.Baseline;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
@@ -371,6 +375,35 @@ internal sealed class CsvViewControl : Control
         InvalidateVisual();
     }
 
+    /// <summary>Navigates to the CSV row containing the given byte offset.</summary>
+    internal void GotoOffset(long byteOffset)
+    {
+        if (_state.CsvRowIndex is null || _state.Document is null || _state.CsvRowIndex.TotalRowCount <= 0)
+            return;
+
+        long estimatedRow = _state.CsvRowIndex.EstimateRowForOffset(byteOffset, _state.Document.Length);
+        // EstimateRowForOffset returns a 0-based data row count; clamp to valid range
+        long targetRow = Math.Clamp(estimatedRow, 0, _state.CsvRowIndex.TotalRowCount - 1);
+        _state.CsvCursorRow = targetRow;
+        _state.CsvSelectionAnchorRow = -1;
+        EnsureCursorVisible();
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
+    internal void GotoRow(long rowNumber)
+    {
+        if (_state.CsvRowIndex is null || rowNumber < 1 || _state.CsvRowIndex.TotalRowCount <= 0)
+            return;
+
+        long targetRow = Math.Clamp(rowNumber - 1, 0, _state.CsvRowIndex.TotalRowCount - 1);
+        _state.CsvCursorRow = targetRow;
+        _state.CsvSelectionAnchorRow = -1;
+        EnsureCursorVisible();
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
     private void EnsureCursorVisible()
     {
         long cursor = _state.CsvCursorRow;
@@ -389,6 +422,47 @@ internal sealed class CsvViewControl : Control
         // approximate visible columns
         else if (cursorCol >= _state.CsvHorizontalScroll + 8)
             _state.CsvHorizontalScroll = cursorCol - 7;
+    }
+
+    private static string FormatCellPreview(string value, int maxWidth)
+    {
+        if (string.IsNullOrEmpty(value) || maxWidth <= 0)
+            return string.Empty;
+
+        StringBuilder preview = new(Math.Min(value.Length, maxWidth + 1));
+        for (int i = 0; i < value.Length && preview.Length < maxWidth + 1; i++)
+        {
+            char current = value[i];
+            if (current == '\r')
+            {
+                if (i + 1 < value.Length && value[i + 1] == '\n')
+                    i++;
+
+                preview.Append('\u23CE');
+                continue;
+            }
+
+            if (current == '\n')
+            {
+                preview.Append('\u23CE');
+                continue;
+            }
+
+            if (char.IsControl(current))
+            {
+                preview.Append('\u00B7');
+                continue;
+            }
+
+            preview.Append(current);
+        }
+
+        if (preview.Length <= maxWidth)
+            return preview.ToString();
+
+        preview.Length = Math.Max(0, maxWidth - 1);
+        preview.Append('\u2026');
+        return preview.ToString();
     }
 
     private static int FindRowEnd(ReadOnlySpan<byte> data, CsvDialect dialect)
