@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Views;
 
@@ -18,6 +19,7 @@ internal sealed class HexViewControl : Control
 
     private readonly AppState _state;
     private readonly byte[] _readBuffer = new byte[65536];
+    private ViewTheme _theme = ViewTheme.Resolve();
 
     /// <summary>Lookup table for zero-alloc byte-to-hex conversion.</summary>
     private static ReadOnlySpan<byte> HexChars => "0123456789ABCDEF"u8;
@@ -27,6 +29,11 @@ internal sealed class HexViewControl : Control
         _state = state;
         Focusable = true;
         ClipToBounds = true;
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            _theme = ViewTheme.Resolve();
+            InvalidateVisual();
+        };
     }
 
     public override void Render(DrawingContext context)
@@ -36,6 +43,11 @@ internal sealed class HexViewControl : Control
         if (_state.Document is null) return;
 
         Rect bounds = Bounds;
+        ViewTheme theme = _theme;
+
+        // Paint control background
+        context.FillRectangle(theme.Background, bounds);
+
         double charWidth = MeasureCharWidth();
         double lineHeight = FontSize + LinePadding;
 
@@ -58,7 +70,7 @@ internal sealed class HexViewControl : Control
         double asciiX = separatorX + 3 * charWidth;
 
         // Draw separator line
-        IPen separatorPen = new Pen(Brushes.Gray, 1);
+        IPen separatorPen = theme.GridLinePen;
         context.DrawLine(separatorPen, new Point(separatorX + charWidth, 0),
             new Point(separatorX + charWidth, bounds.Height));
 
@@ -75,11 +87,11 @@ internal sealed class HexViewControl : Control
         long selStart = _state.HexSelStart;
         long selEnd = _state.HexSelEnd;
 
-        IBrush textBrush = Brushes.White;
-        IBrush addressBrush = new SolidColorBrush(Color.FromRgb(128, 128, 200));
-        IBrush asciiBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180));
-        IBrush selectionBrush = new SolidColorBrush(Color.FromArgb(80, 51, 153, 255));
-        IBrush cursorBrush = new SolidColorBrush(Color.FromArgb(120, 255, 200, 50));
+        IBrush textBrush = theme.TextPrimary;
+        IBrush addressBrush = theme.TextSecondary;
+        IBrush asciiBrush = theme.TextMuted;
+        IBrush selectionBrush = theme.SelectionHighlight;
+        IBrush cursorBrush = theme.CursorHighlight;
 
         for (int row = 0; row < visibleRows; row++)
         {

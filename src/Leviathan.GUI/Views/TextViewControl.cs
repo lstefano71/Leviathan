@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Leviathan.Core.Text;
+using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Views;
 
@@ -21,6 +22,7 @@ internal sealed class TextViewControl : Control
     private readonly byte[] _readBuffer = new byte[131072]; // 128 KB
     private readonly VisualLine[] _visualLines = new VisualLine[2048];
     private readonly LineWrapEngine _wrapEngine;
+    private ViewTheme _theme = ViewTheme.Resolve();
 
     public TextViewControl(AppState state)
     {
@@ -28,6 +30,11 @@ internal sealed class TextViewControl : Control
         _wrapEngine = new LineWrapEngine(state.TabWidth);
         Focusable = true;
         ClipToBounds = true;
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            _theme = ViewTheme.Resolve();
+            InvalidateVisual();
+        };
     }
 
     public override void Render(DrawingContext context)
@@ -37,6 +44,11 @@ internal sealed class TextViewControl : Control
         if (_state.Document is null) return;
 
         Rect bounds = Bounds;
+        ViewTheme theme = _theme;
+
+        // Paint control background
+        context.FillRectangle(theme.Background, bounds);
+
         double charWidth = MeasureCharWidth();
         double lineHeight = FontSize + LinePadding;
 
@@ -49,12 +61,10 @@ internal sealed class TextViewControl : Control
         double gutterWidth = (gutterDigits + 2) * charWidth;
 
         // Draw gutter background
-        IBrush gutterBg = new SolidColorBrush(Color.FromArgb(30, 128, 128, 128));
-        context.FillRectangle(gutterBg, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
+        context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
 
         // Draw gutter separator
-        IPen gutterPen = new Pen(Brushes.Gray, 1);
-        context.DrawLine(gutterPen, new Point(gutterWidth - charWidth, 0),
+        context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
             new Point(gutterWidth - charWidth, bounds.Height));
 
         // Read visible data
@@ -74,10 +84,10 @@ internal sealed class TextViewControl : Control
         lineCount = Math.Min(lineCount, visibleRows);
 
         // Brushes
-        IBrush textBrush = Brushes.White;
-        IBrush gutterTextBrush = new SolidColorBrush(Color.FromRgb(128, 128, 160));
-        IBrush selectionBrush = new SolidColorBrush(Color.FromArgb(80, 51, 153, 255));
-        IBrush cursorBrush = new SolidColorBrush(Color.FromArgb(180, 255, 255, 255));
+        IBrush textBrush = theme.TextPrimary;
+        IBrush gutterTextBrush = theme.TextSecondary;
+        IBrush selectionBrush = theme.SelectionHighlight;
+        IBrush cursorBrush = theme.CursorBar;
 
         // Selection range
         long selStart = _state.TextSelStart;

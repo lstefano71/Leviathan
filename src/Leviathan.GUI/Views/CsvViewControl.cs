@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Leviathan.Core.Csv;
+using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Views;
 
@@ -20,12 +21,18 @@ internal sealed class CsvViewControl : Control
 
     private readonly AppState _state;
     private readonly byte[] _readBuffer = new byte[65536];
+    private ViewTheme _theme = ViewTheme.Resolve();
 
     public CsvViewControl(AppState state)
     {
         _state = state;
         Focusable = true;
         ClipToBounds = true;
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            _theme = ViewTheme.Resolve();
+            InvalidateVisual();
+        };
     }
 
     public override void Render(DrawingContext context)
@@ -35,6 +42,11 @@ internal sealed class CsvViewControl : Control
         if (_state.Document is null || _state.CsvRowIndex is null) return;
 
         Rect bounds = Bounds;
+        ViewTheme theme = _theme;
+
+        // Paint control background
+        context.FillRectangle(theme.Background, bounds);
+
         double charWidth = MeasureCharWidth();
         double lineHeight = FontSize + LinePadding;
         int[] colWidths = _state.CsvColumnWidths ?? [];
@@ -45,13 +57,12 @@ internal sealed class CsvViewControl : Control
         CsvDialect dialect = _state.CsvDialect;
 
         // Brushes
-        IBrush textBrush = Brushes.White;
-        IBrush headerBrush = new SolidColorBrush(Color.FromRgb(200, 200, 255));
-        IBrush headerBg = new SolidColorBrush(Color.FromArgb(40, 100, 100, 200));
-        IBrush gridPen = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128));
-        IBrush cursorBrush = new SolidColorBrush(Color.FromArgb(80, 51, 153, 255));
-        IBrush selectionBrush = new SolidColorBrush(Color.FromArgb(50, 51, 153, 255));
-        IPen gridLinePen = new Pen(gridPen, 1);
+        IBrush textBrush = theme.TextPrimary;
+        IBrush headerBrush = theme.HeaderText;
+        IBrush headerBg = theme.HeaderBackground;
+        IBrush cursorBrush = theme.SelectionHighlight;
+        IBrush selectionBrush = theme.SelectionHighlight;
+        IPen gridLinePen = theme.GridLinePen;
 
         int hScroll = _state.CsvHorizontalScroll;
 
@@ -171,7 +182,7 @@ internal sealed class CsvViewControl : Control
                     IBrush cellBrush = textBrush;
                     if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol)
                     {
-                        context.FillRectangle(new SolidColorBrush(Color.FromArgb(60, 255, 200, 50)),
+                        context.FillRectangle(theme.CursorHighlight,
                             new Rect(cellX, y, cellWidth, lineHeight));
                     }
 

@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <AssemblyMetadata Include="BuildDateUtc" Value="$(BuildDateUtc)" />
+    <InternalsVisibleTo Include="Leviathan.GUI.Tests" />
   </ItemGroup>
 
   <ItemGroup>
