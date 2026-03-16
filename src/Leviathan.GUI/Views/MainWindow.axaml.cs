@@ -838,11 +838,7 @@ public sealed partial class MainWindow : Window
         }
         else if (_state.ActiveView == ViewMode.Text)
         {
-            _state.TextCursorOffset = offset;
-            _state.TextSelectionAnchor = -1;
-            // Reposition the text view so cursor is visible
-            _state.TextTopOffset = Math.Max(0, offset - 4096);
-            _textView?.InvalidateVisual();
+            _textView?.GotoOffset(offset);
         }
         else if (_state.ActiveView == ViewMode.Csv)
         {
