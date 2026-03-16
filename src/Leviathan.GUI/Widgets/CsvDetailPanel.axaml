@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Leviathan.GUI.Widgets.CsvDetailPanel"
+             x:CompileBindings="True"
+             MinWidth="200">
+
+    <DockPanel>
+        <!-- Title bar -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,4">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock x:Name="TitleText" Text="Record Detail"
+                           FontWeight="SemiBold" FontSize="13"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="✕" x:Name="CloseButton"
+                        FontSize="12" Padding="6,2"
+                        Background="Transparent"
+                        VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- Field list -->
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="FieldsPanel" Spacing="2" Margin="8,4" />
+        </ScrollViewer>
+    </DockPanel>
+
+</UserControl>

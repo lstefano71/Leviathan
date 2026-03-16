@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private HexViewControl? _hexView;
     private TextViewControl? _textView;
     private CsvViewControl? _csvView;
+    private CsvDetailPanel? _csvDetailPanel;
     private DispatcherTimer? _indexingTimer;
     private FindBar? _findBar;
     private GotoBar? _gotoBar;
@@ -170,6 +171,9 @@ public sealed partial class MainWindow : Window
         if (_findBar is not null) _findBar.IsVisible = false;
         if (_gotoBar is not null) _gotoBar.IsVisible = false;
         if (_commandPalette is not null) _commandPalette.IsVisible = false;
+
+        // Close detail panel
+        SetCsvDetailPanelVisible(false);
 
         UpdateViewVisibility();
         BuildFileMenuMru();
@@ -355,11 +359,11 @@ public sealed partial class MainWindow : Window
 
         _hexView.StateChanged = UpdateStatusBar;
         _textView.StateChanged = UpdateStatusBar;
-        _csvView.StateChanged = UpdateStatusBar;
-        _csvView.OnRecordDetail = ShowCsvRecordDetail;
+        _csvView.StateChanged = OnCsvStateChanged;
+        _csvView.OnRecordDetail = ToggleCsvDetailPanel;
         _state.SearchInvalidated = () => _findBar?.UpdateMatchStatus();
 
-        // Create scrollbarsand compose each view + scrollbar in a Grid
+        // Create scrollbars and compose each view + scrollbar in a Grid
         ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb =>
         {
             _hexView.ScrollBar = sb;
@@ -370,11 +374,37 @@ public sealed partial class MainWindow : Window
             _textView.ScrollBar = sb;
             sb.ValueChanged += _textView.OnScrollBarValueChanged;
         }));
-        ContentArea.Children.Add(CreateViewWithScrollBar(_csvView, sb =>
+
+        // CSV view + detail panel composed in an outer Grid with splitter
+        Grid csvInner = CreateViewWithScrollBar(_csvView, sb =>
         {
             _csvView.ScrollBar = sb;
             sb.ValueChanged += _csvView.OnScrollBarValueChanged;
-        }));
+        });
+
+        _csvDetailPanel = new CsvDetailPanel();
+        _csvDetailPanel.CloseRequested = () => SetCsvDetailPanelVisible(false);
+        _csvDetailPanel.IsVisible = false;
+
+        GridSplitter splitter = new()
+        {
+            Width = 4,
+            Background = Brushes.Transparent,
+            IsVisible = false
+        };
+
+        Grid csvOuter = new()
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto,300")
+        };
+        Grid.SetColumn(csvInner, 0);
+        Grid.SetColumn(splitter, 1);
+        Grid.SetColumn(_csvDetailPanel, 2);
+        csvOuter.Children.Add(csvInner);
+        csvOuter.Children.Add(splitter);
+        csvOuter.Children.Add(_csvDetailPanel);
+
+        ContentArea.Children.Add(csvOuter);
     }
 
     private static Grid CreateViewWithScrollBar(Control view, Action<Avalonia.Controls.Primitives.ScrollBar> configure)
@@ -970,10 +1000,10 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        // F2 for CSV record detail
+        // F2 for CSV record detail panel toggle
         if (e.Key == Key.F2 && _state.ActiveView == ViewMode.Csv)
         {
-            ShowCsvRecordDetail();
+            ToggleCsvDetailPanel();
             e.Handled = true;
             return;
         }
@@ -1128,6 +1158,12 @@ public sealed partial class MainWindow : Window
             restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Font Size +", "Increase font size", () => AdjustFontSize(+1), restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Font Size -", "Decrease font size", () => AdjustFontSize(-1), restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.CsvDetailPanelVisible ? "☑ Record Detail Panel" : "☐ Record Detail Panel",
+            "Toggle CSV record detail side panel (F2)",
+            ToggleCsvDetailPanel,
+            searchName: "Record Detail Panel",
+            restoreFocusAfterExecute: true);
 
         foreach (string pinnedPath in _state.Settings.PinnedFiles)
         {
@@ -1310,13 +1346,38 @@ public sealed partial class MainWindow : Window
         // TODO: implement CSV row deletion
     }
 
-    private async void ShowCsvRecordDetail()
+    private void ToggleCsvDetailPanel()
     {
-        if (_state.Document is null || _state.CsvRowIndex is null || _csvView is null) return;
-        long rowOffset = _csvView.GetRowByteOffset(_state.CsvCursorRow);
-        CsvRecordDetailDialog dialog = new(_state, _state.CsvCursorRow, rowOffset);
-        await dialog.ShowDialog(this);
+        SetCsvDetailPanelVisible(!_state.CsvDetailPanelVisible);
+    }
+
+    private void SetCsvDetailPanelVisible(bool visible)
+    {
+        _state.CsvDetailPanelVisible = visible;
+        if (_csvDetailPanel is null) return;
+
+        _csvDetailPanel.IsVisible = visible;
+
+        // The GridSplitter is the sibling at column 1
+        if (_csvDetailPanel.Parent is Grid outerGrid && outerGrid.Children.Count >= 2)
+        {
+            if (outerGrid.Children[1] is GridSplitter splitter)
+                splitter.IsVisible = visible;
+        }
+
+        if (visible && _csvView is not null)
+            _csvDetailPanel.UpdateRecord(_state, _csvView);
+        else if (!visible)
+            _csvDetailPanel.ClearPanel();
+
         FocusActiveViewAsync();
+    }
+
+    private void OnCsvStateChanged()
+    {
+        UpdateStatusBar();
+        if (_state.CsvDetailPanelVisible && _csvDetailPanel is { IsVisible: true } && _csvView is not null)
+            _csvDetailPanel.UpdateRecord(_state, _csvView);
     }
 
     // ─── CSV dialogs ───
