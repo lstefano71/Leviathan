@@ -125,8 +125,22 @@ internal sealed class HexViewControl : Control
         _state.VisibleRows = visibleRows;
 
         // Determine address column width (grows for large files)
-        int addressDigits = _state.FileLength > 0xFFFF_FFFFL ? 16 : 8;
-        double addressWidth = (addressDigits + 2) * charWidth; // "XXXXXXXX  "
+        bool decimalOffset = _state.HexOffsetDecimal;
+        bool gutterVisible = _state.GutterVisible;
+        int addressDigits;
+        if (decimalOffset)
+            addressDigits = Math.Max(8, (int)Math.Ceiling(Math.Log10(Math.Max(2, _state.FileLength + 1))));
+        else
+            addressDigits = _state.FileLength > 0xFFFF_FFFFL ? 16 : 8;
+        double addressWidth = gutterVisible ? (addressDigits + 3) * charWidth : 0;
+
+        // Draw gutter background + separator (matching Text/CSV views)
+        if (gutterVisible)
+        {
+            double gutterSepX = addressWidth - charWidth;
+            context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterSepX, bounds.Height));
+            context.DrawLine(theme.GutterPen, new Point(gutterSepX, 0), new Point(gutterSepX, bounds.Height));
+        }
 
         // Hex column: 3 chars per byte (XX + space), extra space every 8 bytes
         int groupCount = (bytesPerRow + 7) / 8;
@@ -145,9 +159,13 @@ internal sealed class HexViewControl : Control
         context.FillRectangle(headerBgBrush, new Rect(0, 0, bounds.Width, headerHeight));
 
         // "Offset" label in address column
-        FormattedText offsetLabel = new("Offset", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
-        context.DrawText(offsetLabel, new Point(charWidth, 0));
+        if (gutterVisible)
+        {
+            string offsetLabelText = decimalOffset ? "Offset (dec)" : "Offset";
+            FormattedText offsetLabel = new(offsetLabelText, System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            context.DrawText(offsetLabel, new Point(charWidth, 0));
+        }
 
         // Hex column offsets: 00 01 02 … 0F (matching byte positions)
         for (int col = 0; col < bytesPerRow; col++)
@@ -224,12 +242,15 @@ internal sealed class HexViewControl : Control
             if (rowBytes <= 0) break;
 
             // Address column
-            string address = addressDigits == 16
-                ? rowOffset.ToString("X16")
-                : rowOffset.ToString("X8");
-            FormattedText addressText = new(address, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, addressBrush);
-            context.DrawText(addressText, new Point(charWidth, y));
+            if (gutterVisible)
+            {
+                string address = decimalOffset
+                    ? rowOffset.ToString().PadLeft(addressDigits)
+                    : (addressDigits == 16 ? rowOffset.ToString("X16") : rowOffset.ToString("X8"));
+                FormattedText addressText = new(address, System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, addressBrush);
+                context.DrawText(addressText, new Point(charWidth, y));
+            }
 
             // Hex bytes
             for (int col = 0; col < rowBytes; col++)
@@ -469,8 +490,12 @@ internal sealed class HexViewControl : Control
         int row = (int)((point.Y - headerHeight) / lineHeight);
         if (row < 0 || row >= _state.VisibleRows) return -1;
 
-        int addressDigits = _state.FileLength > 0xFFFF_FFFFL ? 16 : 8;
-        double addressWidth = (addressDigits + 2) * charWidth;
+        int addressDigits;
+        if (_state.HexOffsetDecimal)
+            addressDigits = Math.Max(8, (int)Math.Ceiling(Math.Log10(Math.Max(2, _state.FileLength + 1))));
+        else
+            addressDigits = _state.FileLength > 0xFFFF_FFFFL ? 16 : 8;
+        double addressWidth = _state.GutterVisible ? (addressDigits + 3) * charWidth : 0;
 
         double hexX = point.X - addressWidth;
         if (hexX >= 0)

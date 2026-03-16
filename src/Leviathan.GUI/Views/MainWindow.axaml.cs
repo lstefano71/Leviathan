@@ -31,6 +31,9 @@ public sealed partial class MainWindow : Window
     private GotoBar? _gotoBar;
     private CommandPaletteOverlay? _commandPalette;
     private bool _suppressNextMenuFocusRestore;
+    private string? _lineEndingCachePath;
+    private long _lineEndingCacheLength = -1;
+    private string _lineEndingCache = "";
 
     public MainWindow()
     {
@@ -47,6 +50,8 @@ public sealed partial class MainWindow : Window
         BuildThemeMenu();
         UpdateViewVisibility();
         UpdateWordWrapCheck();
+        UpdateGutterCheck();
+        UpdateDecimalOffsetsCheck();
         UpdateBprChecks();
         UpdateEncodingChecks();
         UpdateViewModeChecks();
@@ -99,6 +104,8 @@ public sealed partial class MainWindow : Window
         MenuViewCsv.Click += (_, _) => SwitchView(ViewMode.Csv);
 
         MenuWordWrap.Click += (_, _) => ToggleWordWrap();
+        MenuGutter.Click += (_, _) => ToggleGutter();
+        MenuDecimalOffsets.Click += (_, _) => ToggleDecimalOffsets();
 
         MenuEncodingUtf8.Click += (_, _) => SwitchEncoding(TextEncoding.Utf8);
         MenuEncodingUtf16Le.Click += (_, _) => SwitchEncoding(TextEncoding.Utf16Le);
@@ -775,6 +782,37 @@ public sealed partial class MainWindow : Window
             : null;
     }
 
+    private void ToggleGutter()
+    {
+        _state.GutterVisible = !_state.GutterVisible;
+        UpdateGutterCheck();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        _csvView?.InvalidateVisual();
+    }
+
+    private void UpdateGutterCheck()
+    {
+        MenuGutter.Icon = _state.GutterVisible
+            ? new TextBlock { Text = "✓", FontSize = 12 }
+            : null;
+    }
+
+    private void ToggleDecimalOffsets()
+    {
+        _state.HexOffsetDecimal = !_state.HexOffsetDecimal;
+        UpdateDecimalOffsetsCheck();
+        _hexView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
+    private void UpdateDecimalOffsetsCheck()
+    {
+        MenuDecimalOffsets.Icon = _state.HexOffsetDecimal
+            ? new TextBlock { Text = "✓", FontSize = 12 }
+            : null;
+    }
+
     private void UpdateViewModeChecks()
     {
         MenuViewHex.Icon = _state.ActiveView == ViewMode.Hex
@@ -846,8 +884,12 @@ public sealed partial class MainWindow : Window
 
         if (_state.Document is null)
         {
-            StatusLeft.Text = " Leviathan";
-            StatusRight.Text = "";
+            SbFile.Text = " Leviathan";
+            SbViewMode.Text = "";
+            SbEncoding.Text = "";
+            SbPosition.Text = "";
+            SbLines.Text = "";
+            SbSize.Text = "";
             return;
         }
 
@@ -855,7 +897,7 @@ public sealed partial class MainWindow : Window
             ? Path.GetFileName(_state.CurrentFilePath)
             : "(untitled)";
         string modified = _state.IsModified ? " [modified]" : "";
-        StatusLeft.Text = $" {fileName}{modified}";
+        SbFile.Text = $" {fileName}{modified}";
 
         string viewMode = _state.ActiveView switch
         {
@@ -874,25 +916,123 @@ public sealed partial class MainWindow : Window
         };
 
         string size = FormatFileSize(_state.FileLength);
-        string offset = $"0x{_state.CurrentCursorOffset:X}";
-        string lines = _state.EstimatedTotalLines > 0 ? $"{_state.EstimatedTotalLines:N0} lines" : "";
+        string selection = GetSelectionStatus();
+
+        SbViewMode.Text = viewMode;
+        SbSize.Text = size;
 
         if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null)
         {
             long totalCsvRows = _state.CsvRowIndex.TotalRowCount;
-            string sepName = _state.CsvDialect.Separator switch
-            {
-                (byte)',' => "Comma",
-                (byte)'\t' => "Tab",
-                (byte)'|' => "Pipe",
-                (byte)';' => "Semicolon",
-                _ => $"'{(char)_state.CsvDialect.Separator}'"
-            };
-            StatusRight.Text = $"CSV  |  Row {_state.CsvCursorRow + 1}/{totalCsvRows}  |  Col {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}  |  Sep: {sepName}  |  {size}";
+            string sepName = GetSeparatorName(_state.CsvDialect.Separator);
+            SbEncoding.Text = $"Sep: {sepName}";
+            SbPosition.Text = $"R {_state.CsvCursorRow + 1:N0}/{totalCsvRows:N0}  C {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
+            SbLines.Text = selection.Length > 0 ? selection : $"Rows: {totalCsvRows:N0}";
             return;
         }
 
-        StatusRight.Text = $"{viewMode}  |  {encoding}  |  {size}  |  Offset: {offset}  |  {lines}";
+        string offset = "-";
+        if (_state.CurrentCursorOffset >= 0)
+        {
+            bool dec = _state.ActiveView == ViewMode.Hex && _state.HexOffsetDecimal;
+            offset = dec ? _state.CurrentCursorOffset.ToString("N0") : $"0x{_state.CurrentCursorOffset:X}";
+        }
+
+        SbEncoding.Text = encoding;
+        SbPosition.Text = $"Offset: {offset}";
+        string linesInfo = _state.EstimatedTotalLines > 0 ? $"{_state.EstimatedTotalLines:N0} lines" : "Indexing...";
+        if (_state.ActiveView == ViewMode.Text)
+        {
+            string eol = GetLineEndingStatus();
+            if (eol.Length > 0)
+                linesInfo = $"{linesInfo} · {eol}";
+        }
+        SbLines.Text = selection.Length > 0
+            ? selection
+            : linesInfo;
+    }
+
+    private string GetSelectionStatus()
+    {
+        return _state.ActiveView switch
+        {
+            ViewMode.Hex when _state.HexSelStart >= 0 && _state.HexSelEnd >= _state.HexSelStart
+                => $"Sel: {_state.HexSelEnd - _state.HexSelStart + 1:N0} B",
+            ViewMode.Text when _state.TextSelStart >= 0 && _state.TextSelEnd >= _state.TextSelStart
+                => $"Sel: {_state.TextSelEnd - _state.TextSelStart + 1:N0} B",
+            ViewMode.Csv when _state.CsvSelectionAnchorRow >= 0
+                => $"Sel: {Math.Abs(_state.CsvCursorRow - _state.CsvSelectionAnchorRow) + 1:N0} rows",
+            _ => ""
+        };
+    }
+
+    private static string GetSeparatorName(byte separator)
+    {
+        return separator switch
+        {
+            (byte)',' => "Comma",
+            (byte)'\t' => "Tab",
+            (byte)'|' => "Pipe",
+            (byte)';' => "Semicolon",
+            _ => $"'{(char)separator}'"
+        };
+    }
+
+    private string GetLineEndingStatus()
+    {
+        if (_state.Document is null) return "";
+
+        string path = _state.CurrentFilePath ?? "";
+        long length = _state.FileLength;
+        if (_lineEndingCachePath == path && _lineEndingCacheLength == length)
+            return _lineEndingCache;
+
+        _lineEndingCachePath = path;
+        _lineEndingCacheLength = length;
+        _lineEndingCache = ComputeLineEndingStatus();
+        return _lineEndingCache;
+    }
+
+    private string ComputeLineEndingStatus()
+    {
+        if (_state.Document is null) return "";
+
+        int minChar = _state.Decoder.MinCharBytes;
+        int readLen = (int)Math.Min(256 * 1024, _state.FileLength);
+        if (readLen < minChar) return "";
+
+        byte[] buf = new byte[readLen];
+        _state.Document.Read(0, buf);
+
+        bool sawCrLf = false;
+        bool sawLf = false;
+
+        for (int i = 0; i <= readLen - minChar; i += minChar)
+        {
+            if (!IsLfCodeUnit(buf, i, minChar))
+                continue;
+
+            bool isCrLf = minChar == 1
+                ? (i > 0 && buf[i - 1] == 0x0D)
+                : (i >= 2 && buf[i - 2] == 0x0D && buf[i - 1] == 0x00);
+
+            if (isCrLf) sawCrLf = true;
+            else sawLf = true;
+
+            if (sawCrLf && sawLf)
+                return "EOL: Mixed";
+        }
+
+        if (sawCrLf) return "EOL: CRLF";
+        if (sawLf) return "EOL: LF";
+        return "";
+    }
+
+    private static bool IsLfCodeUnit(ReadOnlySpan<byte> buffer, int index, int minChar)
+    {
+        return minChar == 2
+            ? (index + 1 < buffer.Length && buffer[index] == 0x0A && buffer[index + 1] == 0x00)
+            : buffer[index] == 0x0A;
     }
 
     private void UpdateIndexingStatus()
@@ -1038,6 +1178,13 @@ public sealed partial class MainWindow : Window
                     e.Handled = true;
                     return;
             }
+        }
+
+        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.G)
+        {
+            ToggleGutter();
+            e.Handled = true;
+            return;
         }
 
         // F2 for CSV record detail panel toggle

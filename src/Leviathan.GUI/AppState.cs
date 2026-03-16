@@ -21,6 +21,12 @@ public sealed class AppState
     // --- View mode ---
     public ViewMode ActiveView { get; set; } = ViewMode.Hex;
 
+    // --- Display options ---
+    /// <summary>Whether the row-number / offset gutter is visible.</summary>
+    public bool GutterVisible { get; set; } = true;
+    /// <summary>When true, hex view shows file offsets in decimal instead of hex.</summary>
+    public bool HexOffsetDecimal { get; set; }
+
     // --- Encoding ---
     public ITextDecoder Decoder { get; set; } = new Utf8TextDecoder();
 

@@ -26,6 +26,8 @@
                 <MenuItem Header="_CSV View" x:Name="MenuViewCsv" HotKey="F7" />
                 <Separator />
                 <MenuItem Header="_Line Wrap" x:Name="MenuWordWrap" />
+                <MenuItem Header="Show _Gutter" x:Name="MenuGutter" HotKey="Ctrl+Shift+G" />
+                <MenuItem Header="_Decimal Offsets" x:Name="MenuDecimalOffsets" />
                 <MenuItem Header="_Encoding" x:Name="MenuEncoding">
                     <MenuItem Header="UTF-8" x:Name="MenuEncodingUtf8" />
                     <MenuItem Header="UTF-16 LE" x:Name="MenuEncodingUtf16Le" />
@@ -73,12 +75,52 @@
         <!-- Status Bar -->
         <Border x:Name="StatusBar" DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
-                Padding="8,2" Height="24">
-            <Grid ColumnDefinitions="*,Auto">
-                <TextBlock x:Name="StatusLeft" Text=" Leviathan" Grid.Column="0"
-                           VerticalAlignment="Center" FontSize="12" />
-                <TextBlock x:Name="StatusRight" Text="" Grid.Column="1"
-                           VerticalAlignment="Center" FontSize="12" />
+                Padding="4,2" Height="24">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                <!-- Col 0: File name (fills remaining) -->
+                <TextBlock x:Name="SbFile" Text=" Leviathan" Grid.Column="0"
+                           VerticalAlignment="Center" FontSize="12"
+                           TextTrimming="CharacterEllipsis" />
+                <!-- Col 1: separator -->
+                <TextBlock Text="|" Grid.Column="1" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           Margin="6,0" />
+                <!-- Col 2: View mode -->
+                <TextBlock x:Name="SbViewMode" Grid.Column="2" Width="44"
+                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <!-- Col 3: separator -->
+                <TextBlock Text="|" Grid.Column="3" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           Margin="6,0" />
+                <!-- Col 4: Encoding / Separator -->
+                <TextBlock x:Name="SbEncoding" Grid.Column="4" Width="96"
+                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <!-- Col 5: separator -->
+                <TextBlock Text="|" Grid.Column="5" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           Margin="6,0" />
+                <!-- Col 6: Position (offset / row,col) -->
+                <TextBlock x:Name="SbPosition" Grid.Column="6" Width="180"
+                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <!-- Col 7: separator -->
+                <TextBlock Text="|" Grid.Column="7" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           Margin="6,0" />
+                <!-- Col 8: Lines/Rows -->
+                <TextBlock x:Name="SbLines" Grid.Column="8" Width="132"
+                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <!-- Col 9: separator -->
+                <TextBlock Text="|" Grid.Column="9" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                           Margin="6,0" />
+                <!-- Col 10: File size -->
+                <TextBlock x:Name="SbSize" Grid.Column="10" Width="88"
+                           VerticalAlignment="Center" FontSize="12" TextAlignment="Right"
+                           Margin="0,0,4,0" />
             </Grid>
         </Border>
 

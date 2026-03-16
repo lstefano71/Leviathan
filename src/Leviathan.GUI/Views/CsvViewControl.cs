@@ -166,14 +166,18 @@ internal sealed class CsvViewControl : Control
         double textBaseline = Math.Max(0, (lineHeight - measurement.Height) / 2) + measurement.Baseline;
 
         // Row number gutter
+        bool gutterVisible = _state.GutterVisible;
         long totalDataRows = _state.CsvRowIndex.TotalRowCount;
         int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(Math.Max(2, totalDataRows + 1))));
-        double gutterWidth = (gutterDigits + 2) * charWidth;
+        double gutterWidth = gutterVisible ? (gutterDigits + 3) * charWidth : 0;
 
         // Draw gutter background
-        context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
-        context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
-            new Point(gutterWidth - charWidth, bounds.Height));
+        if (gutterVisible)
+        {
+            context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
+            context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
+                new Point(gutterWidth - charWidth, bounds.Height));
+        }
 
         int[] colWidths = _state.CsvColumnWidths ?? [];
         int colCount = _state.CsvColumnCount;
@@ -256,10 +260,13 @@ internal sealed class CsvViewControl : Control
                 context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
 
             // Row number in gutter
-            string rowNumStr = (dataRow + 1).ToString();
-            double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
-            FormattedText rowNumFt = CreateFormattedText(rowNumStr, theme.TextSecondary);
-            context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
+            if (gutterVisible)
+            {
+                string rowNumStr = (dataRow + 1).ToString();
+                double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
+                FormattedText rowNumFt = CreateFormattedText(rowNumStr, theme.TextSecondary);
+                context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
+            }
 
             // Cursor/selection highlight
             if (dataRow == _state.CsvCursorRow)
@@ -451,7 +458,7 @@ internal sealed class CsvViewControl : Control
         // Account for gutter
         long totalRows = _state.CsvRowIndex.TotalRowCount;
         int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(Math.Max(2, totalRows + 1))));
-        double gutterWidth = (gutterDigits + 2) * charWidth;
+        double gutterWidth = _state.GutterVisible ? (gutterDigits + 3) * charWidth : 0;
 
         bool hasHeader = _state.CsvDialect.HasHeader;
         double dataY = hasHeader ? lineHeight : 0;

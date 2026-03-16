@@ -150,16 +150,18 @@ internal sealed class TextViewControl : Control
         _state.VisibleRows = visibleRows;
 
         // Gutter width (line numbers)
+        bool gutterVisible = _state.GutterVisible;
         long totalLines = Math.Max(1, _state.EstimatedTotalLines);
         int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
-        double gutterWidth = (gutterDigits + 2) * charWidth;
+        double gutterWidth = gutterVisible ? (gutterDigits + 3) * charWidth : 0;
 
-        // Draw gutter background
-        context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
-
-        // Draw gutter separator
-        context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
-            new Point(gutterWidth - charWidth, bounds.Height));
+        // Draw gutter background + separator
+        if (gutterVisible)
+        {
+            context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
+            context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
+                new Point(gutterWidth - charWidth, bounds.Height));
+        }
 
         double textAreaWidth = bounds.Width - gutterWidth;
         int textAreaCols = Math.Max(1, (int)(textAreaWidth / charWidth));
@@ -237,26 +239,29 @@ internal sealed class TextViewControl : Control
                 currentLineNumber++;
 
             // Gutter: show line number on hard lines, wrap indicator on continuations
-            if (isHardLine)
+            if (gutterVisible)
             {
-                string lineNumStr = currentLineNumber.ToString();
-                double lineNumX = gutterWidth - (lineNumStr.Length + 1) * charWidth;
+                if (isHardLine)
+                {
+                    string lineNumStr = currentLineNumber.ToString();
+                    double lineNumX = gutterWidth - (lineNumStr.Length + 1) * charWidth;
 
-                FormattedText lineNumText = new(lineNumStr,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, gutterTextBrush);
-                context.DrawText(lineNumText, new Point(lineNumX, y));
-            }
-            else
-            {
-                // Wrap continuation: show ↪ indicator
-                string wrapIndicator = "↪";
-                FormattedText wrapText = new(wrapIndicator,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, theme.TextMuted);
-                double separatorX = gutterWidth - charWidth;
-                double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
-                context.DrawText(wrapText, new Point(wrapX, y));
+                    FormattedText lineNumText = new(lineNumStr,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, gutterTextBrush);
+                    context.DrawText(lineNumText, new Point(lineNumX, y));
+                }
+                else
+                {
+                    // Wrap continuation: show ↪ indicator
+                    string wrapIndicator = "↪";
+                    FormattedText wrapText = new(wrapIndicator,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, theme.TextMuted);
+                    double separatorX = gutterWidth - charWidth;
+                    double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
+                    context.DrawText(wrapText, new Point(wrapX, y));
+                }
             }
 
             // Render text content
@@ -521,9 +526,9 @@ internal sealed class TextViewControl : Control
         // Compute gutter width
         long totalLines = Math.Max(1, _state.EstimatedTotalLines);
         int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
-        double gutterWidth = (gutterDigits + 2) * charWidth;
+        double gutterWidth = _state.GutterVisible ? (gutterDigits + 3) * charWidth : 0;
 
-        if (pos.X < gutterWidth) return; // clicked in gutter
+        if (gutterWidth > 0 && pos.X < gutterWidth) return; // clicked in gutter
 
         int row = (int)(pos.Y / lineHeight);
         int col = (int)((pos.X - gutterWidth) / charWidth);
@@ -897,8 +902,7 @@ internal sealed class TextViewControl : Control
         double charWidth = MeasureCharWidth();
         long totalLines = Math.Max(1, _state.EstimatedTotalLines);
         int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
-        double gutterWidth = (gutterDigits + 2) * charWidth;
-        double textAreaWidth = Bounds.Width - gutterWidth;
+        double gutterWidth = _state.GutterVisible ? (gutterDigits + 3) * charWidth : 0;        double textAreaWidth = Bounds.Width - gutterWidth;
         return Math.Max(1, (int)(textAreaWidth / charWidth));
     }
 
