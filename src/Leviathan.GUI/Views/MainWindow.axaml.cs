@@ -39,6 +39,7 @@ public sealed partial class MainWindow : Window
         UpdateViewVisibility();
         UpdateWordWrapCheck();
         UpdateBprChecks();
+        UpdateEncodingChecks();
         UpdateViewModeChecks();
         UpdateStatusBar();
 
@@ -272,6 +273,18 @@ public sealed partial class MainWindow : Window
     private void OnFileOpened()
     {
         EnsureViewControlsCreated();
+
+        // Auto-detect CSV by file extension
+        if (_state.CurrentFilePath is { } fp)
+        {
+            string ext = Path.GetExtension(fp).ToLowerInvariant();
+            if (ext is ".csv" or ".tsv" or ".tab")
+            {
+                _state.InitCsvView();
+                _state.ActiveView = ViewMode.Csv;
+            }
+        }
+
         UpdateViewVisibility();
         BuildMruList();
         UpdateTitle();
@@ -286,7 +299,12 @@ public sealed partial class MainWindow : Window
         _textView = new TextViewControl(_state);
         _csvView = new CsvViewControl(_state);
 
-        // Create scrollbars and compose each view + scrollbar in a Grid
+        _hexView.StateChanged = UpdateStatusBar;
+        _textView.StateChanged = UpdateStatusBar;
+        _csvView.StateChanged = UpdateStatusBar;
+        _csvView.OnRecordDetail = ShowCsvRecordDetail;
+
+        // Create scrollbarsand compose each view + scrollbar in a Grid
         ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb =>
         {
             _hexView.ScrollBar = sb;
@@ -396,6 +414,17 @@ public sealed partial class MainWindow : Window
             ? new TextBlock { Text = "●", FontSize = 10 } : null;
     }
 
+    private void UpdateEncodingChecks()
+    {
+        TextEncoding current = _state.Decoder.Encoding;
+        MenuEncodingUtf8.Icon = current == TextEncoding.Utf8
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuEncodingUtf16Le.Icon = current == TextEncoding.Utf16Le
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuEncodingWin1252.Icon = current == TextEncoding.Windows1252
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+    }
+
     private void UpdateBprChecks()
     {
         int current = _state.BytesPerRowSetting;
@@ -413,6 +442,7 @@ public sealed partial class MainWindow : Window
         _state.SwitchEncoding(encoding);
         _textView?.InvalidateVisual();
         _hexView?.InvalidateVisual();
+        UpdateEncodingChecks();
         UpdateStatusBar();
     }
 
@@ -473,6 +503,21 @@ public sealed partial class MainWindow : Window
         string size = FormatFileSize(_state.FileLength);
         string offset = $"0x{_state.CurrentCursorOffset:X}";
         string lines = _state.EstimatedTotalLines > 0 ? $"{_state.EstimatedTotalLines:N0} lines" : "";
+
+        if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null)
+        {
+            long totalCsvRows = _state.CsvRowIndex.TotalRowCount;
+            string sepName = _state.CsvDialect.Separator switch
+            {
+                (byte)',' => "Comma",
+                (byte)'\t' => "Tab",
+                (byte)'|' => "Pipe",
+                (byte)';' => "Semicolon",
+                _ => $"'{(char)_state.CsvDialect.Separator}'"
+            };
+            StatusRight.Text = $"CSV  |  Row {_state.CsvCursorRow + 1}/{totalCsvRows}  |  Col {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}  |  Sep: {sepName}  |  {size}";
+            return;
+        }
 
         StatusRight.Text = $"{viewMode}  |  {encoding}  |  {size}  |  Offset: {offset}  |  {lines}";
     }
@@ -609,10 +654,22 @@ public sealed partial class MainWindow : Window
                     ShowCommandPalette();
                     e.Handled = true;
                     return;
+                case Key.Q:
+                    Close();
+                    e.Handled = true;
+                    return;
             }
         }
 
-        // Digit shortcuts for MRU on welcome screen
+        // F2 for CSV record detail
+        if (e.Key == Key.F2 && _state.ActiveView == ViewMode.Csv)
+        {
+            ShowCsvRecordDetail();
+            e.Handled = true;
+            return;
+        }
+
+        // Digit shortcutsfor MRU on welcome screen
         if (_state.Document is null && e.KeyModifiers == KeyModifiers.None)
         {
             int digit = e.Key switch
@@ -685,14 +742,14 @@ public sealed partial class MainWindow : Window
 
         _commandPalette.RegisterCommand("Open File", "Open a file (Ctrl+O)", () => _ = ShowOpenDialog());
         _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile);
-        _commandPalette.RegisterCommand("Hex View", "Switch to hex view (F5)", () => SwitchView(ViewMode.Hex));
-        _commandPalette.RegisterCommand("Text View", "Switch to text view (F6)", () => SwitchView(ViewMode.Text));
-        _commandPalette.RegisterCommand("CSV View", "Switch to CSV view (F7)", () => SwitchView(ViewMode.Csv));
+        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Hex ? "● Hex View" : "  Hex View", "Switch to hex view (F5)", () => SwitchView(ViewMode.Hex));
+        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Text ? "● Text View" : "  Text View", "Switch to text view (F6)", () => SwitchView(ViewMode.Text));
+        _commandPalette.RegisterCommand(() => _state.ActiveView == ViewMode.Csv ? "● CSV View" : "  CSV View", "Switch to CSV view (F7)", () => SwitchView(ViewMode.Csv));
         _commandPalette.RegisterCommand("Find", "Search in file (Ctrl+F)", ShowFindBar);
         _commandPalette.RegisterCommand("Find Next", "Go to next match (F3)", FindNext);
         _commandPalette.RegisterCommand("Find Previous", "Go to previous match (Shift+F3)", FindPrevious);
         _commandPalette.RegisterCommand("Go to", "Go to offset or line (Ctrl+G)", ShowGotoBar);
-        _commandPalette.RegisterCommand("Toggle Word Wrap", "Toggle line wrapping", ToggleWordWrap);
+        _commandPalette.RegisterCommand(() => _state.WordWrap ? "✓ Line Wrap" : "  Line Wrap", "Toggle line wrapping", ToggleWordWrap);
         _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy);
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll);
@@ -792,9 +849,46 @@ public sealed partial class MainWindow : Window
 
     // ─── Edit operations ───
 
-    private void DoCopy()
+    private async void DoCopy()
     {
-        // TODO: implement clipboard copy for selection
+        if (_state.Document is null) return;
+
+        string? text = null;
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            long selStart = _state.HexSelStart;
+            long selEnd = _state.HexSelEnd;
+            if (selStart >= 0 && selEnd >= selStart)
+            {
+                int len = (int)Math.Min(selEnd - selStart + 1, 65536);
+                byte[] buf = new byte[len];
+                _state.Document.Read(selStart, buf);
+                text = string.Join(' ', buf.Select(b => b.ToString("X2")));
+            }
+        }
+        else if (_state.ActiveView == ViewMode.Text)
+        {
+            long selStart = _state.TextSelStart;
+            long selEnd = _state.TextSelEnd;
+            if (selStart >= 0 && selEnd >= selStart)
+            {
+                int len = (int)Math.Min(selEnd - selStart + 1, 131072);
+                byte[] buf = new byte[len];
+                _state.Document.Read(selStart, buf);
+                System.Text.Encoding enc = _state.Decoder.Encoding switch
+                {
+                    TextEncoding.Utf16Le => System.Text.Encoding.Unicode,
+                    TextEncoding.Windows1252 => System.Text.Encoding.Latin1,
+                    _ => System.Text.Encoding.UTF8
+                };
+                text = enc.GetString(buf);
+            }
+        }
+
+        if (text is not null && Clipboard is { } clipboard)
+        {
+            await clipboard.SetTextAsync(text);
+        }
     }
 
     private void DoPaste()
@@ -824,6 +918,13 @@ public sealed partial class MainWindow : Window
     private void DoDeleteCsvRows()
     {
         // TODO: implement CSV row deletion
+    }
+
+    private async void ShowCsvRecordDetail()
+    {
+        if (_state.Document is null || _state.CsvRowIndex is null) return;
+        CsvRecordDetailDialog dialog = new(_state, _state.CsvCursorRow);
+        await dialog.ShowDialog(this);
     }
 
     // ─── CSV dialogs ───

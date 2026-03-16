@@ -46,11 +46,18 @@ internal sealed class ViewTheme
     /// <summary>Cursor bar / caret in text mode.</summary>
     public IBrush CursorBar { get; }
 
+    /// <summary>Search match highlight (all matches).</summary>
+    public IBrush MatchHighlight { get; }
+
+    /// <summary>Active search match highlight (current match).</summary>
+    public IBrush ActiveMatchHighlight { get; }
+
     private ViewTheme(
         IBrush textPrimary, IBrush textSecondary, IBrush textMuted,
         IBrush background, IBrush selectionHighlight, IBrush cursorHighlight,
         IBrush gridLine, IBrush headerBackground, IBrush headerText,
-        IBrush gutterBackground, IBrush cursorBar)
+        IBrush gutterBackground, IBrush cursorBar,
+        IBrush matchHighlight, IBrush activeMatchHighlight)
     {
         TextPrimary = textPrimary;
         TextSecondary = textSecondary;
@@ -63,6 +70,8 @@ internal sealed class ViewTheme
         HeaderText = headerText;
         GutterBackground = gutterBackground;
         CursorBar = cursorBar;
+        MatchHighlight = matchHighlight;
+        ActiveMatchHighlight = activeMatchHighlight;
     }
 
     // ── Palette definitions ──────────────────────────────────────────
@@ -79,7 +88,9 @@ internal sealed class ViewTheme
         headerBackground:  new SolidColorBrush(Color.FromArgb(40, 100, 100, 200)), // faint blue
         headerText:        new SolidColorBrush(Color.FromRgb(200, 200, 255)),      // light lavender
         gutterBackground:  new SolidColorBrush(Color.FromArgb(30, 128, 128, 128)), // near-transparent gray
-        cursorBar:         new SolidColorBrush(Color.FromArgb(200, 220, 220, 220)) // bright caret
+        cursorBar:         new SolidColorBrush(Color.FromArgb(200, 220, 220, 220)), // bright caret
+        matchHighlight:    new SolidColorBrush(Color.FromArgb(90, 255, 255, 0)),   // translucent yellow
+        activeMatchHighlight: new SolidColorBrush(Color.FromArgb(140, 255, 165, 0)) // translucent orange
     );
 
     /// <summary>Light theme palette — dark text on light background.</summary>
@@ -94,7 +105,9 @@ internal sealed class ViewTheme
         headerBackground:  new SolidColorBrush(Color.FromArgb(30, 60, 60, 160)),   // faint blue
         headerText:        new SolidColorBrush(Color.FromRgb(40, 40, 120)),        // dark blue
         gutterBackground:  new SolidColorBrush(Color.FromArgb(20, 80, 80, 80)),    // near-transparent
-        cursorBar:         new SolidColorBrush(Color.FromArgb(220, 30, 30, 30))    // dark caret
+        cursorBar:         new SolidColorBrush(Color.FromArgb(220, 30, 30, 30)),   // dark caret
+        matchHighlight:    new SolidColorBrush(Color.FromArgb(70, 255, 220, 0)),   // translucent yellow
+        activeMatchHighlight: new SolidColorBrush(Color.FromArgb(100, 255, 140, 0)) // translucent orange
     );
 
     /// <summary>

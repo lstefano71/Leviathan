@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
+using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Views;
@@ -21,9 +23,12 @@ internal sealed class HexViewControl : Control
     private readonly byte[] _readBuffer = new byte[65536];
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    internal Action? StateChanged;
+
     /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
     internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
     private bool _updatingScroll;
+    private bool _scrollUpdateQueued;
 
     /// <summary>Lookup table for zero-alloc byte-to-hex conversion.</summary>
     private static ReadOnlySpan<byte> HexChars => "0123456789ABCDEF"u8;
@@ -55,13 +60,30 @@ internal sealed class HexViewControl : Control
     {
         if (_state.Document is null || ScrollBar is null) return;
         _updatingScroll = true;
-        long totalRows = (_state.FileLength + _state.BytesPerRow - 1) / _state.BytesPerRow;
-        long currentRow = _state.HexBaseOffset / Math.Max(1, _state.BytesPerRow);
-        long maxRow = Math.Max(0, totalRows - _state.VisibleRows);
-        ScrollBar.Maximum = 10000;
-        ScrollBar.Value = maxRow > 0 ? (double)currentRow / maxRow * 10000 : 0;
-        ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
-        _updatingScroll = false;
+        try
+        {
+            long totalRows = (_state.FileLength + _state.BytesPerRow - 1) / _state.BytesPerRow;
+            long currentRow = _state.HexBaseOffset / Math.Max(1, _state.BytesPerRow);
+            long maxRow = Math.Max(0, totalRows - _state.VisibleRows);
+            ScrollBar.Maximum = 10000;
+            ScrollBar.Value = maxRow > 0 ? (double)currentRow / maxRow * 10000 : 0;
+            ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
+        }
+        finally
+        {
+            _updatingScroll = false;
+        }
+    }
+
+    private void QueueScrollBarUpdate()
+    {
+        if (_scrollUpdateQueued) return;
+        _scrollUpdateQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollUpdateQueued = false;
+            UpdateScrollBar();
+        }, DispatcherPriority.Background);
     }
 
     public override void Render(DrawingContext context)
@@ -77,6 +99,15 @@ internal sealed class HexViewControl : Control
         context.FillRectangle(theme.Background, bounds);
 
         double charWidth = MeasureCharWidth();
+
+        // Auto-fit bytes per row when setting is 0 (Auto)
+        if (_state.BytesPerRowSetting == 0)
+        {
+            int autoFit = _state.ComputeBytesPerRow(bounds.Width, charWidth);
+            if (autoFit != _state.BytesPerRow)
+                _state.BytesPerRow = autoFit;
+        }
+
         double lineHeight = FontSize + LinePadding;
 
         int bytesPerRow = _state.BytesPerRow;
@@ -120,6 +151,10 @@ internal sealed class HexViewControl : Control
         IBrush asciiBrush = theme.TextMuted;
         IBrush selectionBrush = theme.SelectionHighlight;
         IBrush cursorBrush = theme.CursorHighlight;
+        IBrush matchBrush = theme.MatchHighlight;
+        IBrush activeMatchBrush = theme.ActiveMatchHighlight;
+        List<SearchResult> matches = _state.SearchResults;
+        int activeMatchIdx = _state.CurrentMatchIndex;
 
         for (int row = 0; row < visibleRows; row++)
         {
@@ -146,6 +181,27 @@ internal sealed class HexViewControl : Control
                 long byteOffset = rowOffset + col;
                 int groupSep = col / 8;
                 double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
+
+                // Match highlight
+                bool isActiveMatch = false;
+                bool isMatch = false;
+                for (int m = 0; m < matches.Count; m++)
+                {
+                    long mStart = matches[m].Offset;
+                    long mEnd = mStart + matches[m].Length - 1;
+                    if (byteOffset >= mStart && byteOffset <= mEnd)
+                    {
+                        isMatch = true;
+                        isActiveMatch = m == activeMatchIdx;
+                        break;
+                    }
+                    if (mStart > byteOffset) break; // matches are sorted
+                }
+                if (isMatch)
+                {
+                    context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
+                        new Rect(hexX, y, charWidth * 2, lineHeight));
+                }
 
                 // Selection/cursor highlight
                 if (byteOffset == _state.HexCursorOffset)
@@ -194,7 +250,7 @@ internal sealed class HexViewControl : Control
             }
         }
 
-        UpdateScrollBar();
+        QueueScrollBarUpdate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -274,6 +330,7 @@ internal sealed class HexViewControl : Control
         EnsureCursorVisible();
         e.Handled = true;
         InvalidateVisual();
+        StateChanged?.Invoke();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -291,6 +348,7 @@ internal sealed class HexViewControl : Control
             _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
             InvalidateVisual();
+            StateChanged?.Invoke();
         }
     }
 

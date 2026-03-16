@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
+using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 
@@ -24,9 +26,12 @@ internal sealed class TextViewControl : Control
     private readonly LineWrapEngine _wrapEngine;
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    internal Action? StateChanged;
+
     /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
     internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
     private bool _updatingScroll;
+    private bool _scrollUpdateQueued;
 
     public TextViewControl(AppState state)
     {
@@ -55,12 +60,29 @@ internal sealed class TextViewControl : Control
     {
         if (_state.Document is null || ScrollBar is null) return;
         _updatingScroll = true;
-        long fileLen = _state.FileLength;
-        ScrollBar.Maximum = 10000;
-        ScrollBar.Value = fileLen > 0 ? (double)_state.TextTopOffset / fileLen * 10000 : 0;
-        long windowSize = _readBuffer.Length;
-        ScrollBar.ViewportSize = fileLen > 0 ? (double)windowSize / fileLen * 10000 : 10000;
-        _updatingScroll = false;
+        try
+        {
+            long fileLen = _state.FileLength;
+            ScrollBar.Maximum = 10000;
+            ScrollBar.Value = fileLen > 0 ? (double)_state.TextTopOffset / fileLen * 10000 : 0;
+            long windowSize = _readBuffer.Length;
+            ScrollBar.ViewportSize = fileLen > 0 ? (double)windowSize / fileLen * 10000 : 10000;
+        }
+        finally
+        {
+            _updatingScroll = false;
+        }
+    }
+
+    private void QueueScrollBarUpdate()
+    {
+        if (_scrollUpdateQueued) return;
+        _scrollUpdateQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollUpdateQueued = false;
+            UpdateScrollBar();
+        }, DispatcherPriority.Background);
     }
 
     public override void Render(DrawingContext context)
@@ -114,6 +136,10 @@ internal sealed class TextViewControl : Control
         IBrush gutterTextBrush = theme.TextSecondary;
         IBrush selectionBrush = theme.SelectionHighlight;
         IBrush cursorBrush = theme.CursorBar;
+        IBrush matchBrush = theme.MatchHighlight;
+        IBrush activeMatchBrush = theme.ActiveMatchHighlight;
+        List<SearchResult> matches = _state.SearchResults;
+        int activeMatchIdx = _state.CurrentMatchIndex;
 
         // Selection range
         long selStart = _state.TextSelStart;
@@ -182,6 +208,27 @@ internal sealed class TextViewControl : Control
                 int codePoint = rune.Value;
                 long absOffset = lineAbsOffset + byteIdx;
 
+                // Match highlight
+                bool isMatch = false;
+                bool isActiveMatch = false;
+                for (int m = 0; m < matches.Count; m++)
+                {
+                    long mStart = matches[m].Offset;
+                    long mEnd = mStart + matches[m].Length - 1;
+                    if (absOffset >= mStart && absOffset <= mEnd)
+                    {
+                        isMatch = true;
+                        isActiveMatch = m == activeMatchIdx;
+                        break;
+                    }
+                    if (mStart > absOffset) break;
+                }
+                if (isMatch)
+                {
+                    context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
+                        new Rect(textX + charCol * charWidth, y, charWidth, lineHeight));
+                }
+
                 // Selection highlight
                 if (selStart >= 0 && absOffset >= selStart && absOffset <= selEnd)
                 {
@@ -229,7 +276,7 @@ internal sealed class TextViewControl : Control
             }
         }
 
-        UpdateScrollBar();
+        QueueScrollBarUpdate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -315,6 +362,7 @@ internal sealed class TextViewControl : Control
         EnsureCursorVisible();
         e.Handled = true;
         InvalidateVisual();
+        StateChanged?.Invoke();
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
@@ -333,6 +381,59 @@ internal sealed class TextViewControl : Control
     {
         base.OnPointerPressed(e);
         Focus();
+        if (_state.Document is null) return;
+
+        Point pos = e.GetPosition(this);
+        double charWidth = MeasureCharWidth();
+        double lineHeight = FontSize + LinePadding;
+
+        // Compute gutter width
+        long totalLines = Math.Max(1, _state.EstimatedTotalLines);
+        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
+        double gutterWidth = (gutterDigits + 2) * charWidth;
+
+        if (pos.X < gutterWidth) return; // clicked in gutter
+
+        int row = (int)(pos.Y / lineHeight);
+        int col = (int)((pos.X - gutterWidth) / charWidth);
+
+        // Read data and compute visual lines (same as Render)
+        long topOffset = _state.TextTopOffset;
+        int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - topOffset);
+        if (readLen <= 0) return;
+        _state.Document.Read(topOffset, _readBuffer.AsSpan(0, readLen));
+        ReadOnlySpan<byte> data = _readBuffer.AsSpan(0, readLen);
+
+        double textAreaWidth = Bounds.Width - gutterWidth;
+        int columnsAvailable = _state.WordWrap ? Math.Max(1, (int)(textAreaWidth / charWidth)) : int.MaxValue;
+        int lineCount = _wrapEngine.ComputeVisualLines(data, topOffset, columnsAvailable, _state.WordWrap, _visualLines.AsSpan(), _state.Decoder);
+
+        if (row >= 0 && row < lineCount)
+        {
+            VisualLine vl = _visualLines[row];
+            // Walk bytes to find the column
+            int localOffset = (int)(vl.DocOffset - topOffset);
+            if (localOffset < 0 || localOffset + vl.ByteLength > data.Length) return;
+            ReadOnlySpan<byte> lineData = data.Slice(localOffset, vl.ByteLength);
+            int charCol = 0;
+            int byteIdx = 0;
+            long targetOffset = vl.DocOffset; // default to line start
+            while (byteIdx < lineData.Length && charCol < col)
+            {
+                (System.Text.Rune rune, int runeBytes) = _state.Decoder.DecodeRune(lineData, byteIdx);
+                if (runeBytes <= 0) { byteIdx++; continue; }
+                targetOffset = vl.DocOffset + byteIdx;
+                charCol++;
+                byteIdx += runeBytes;
+            }
+            if (charCol >= col && byteIdx < lineData.Length)
+                targetOffset = vl.DocOffset + byteIdx;
+
+            _state.TextCursorOffset = targetOffset;
+            _state.TextSelectionAnchor = -1;
+            InvalidateVisual();
+            StateChanged?.Invoke();
+        }
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)

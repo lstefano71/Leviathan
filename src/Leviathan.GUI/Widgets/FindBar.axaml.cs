@@ -47,8 +47,12 @@ public sealed partial class FindBar : UserControl
     {
         IsVisible = true;
         SearchInput.Text = _state.FindInput;
-        SearchInput.Focus();
-        SearchInput.SelectAll();
+        // Delay focus to after layout pass so control is visible
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            SearchInput.Focus();
+            SearchInput.SelectAll();
+        }, Avalonia.Threading.DispatcherPriority.Input);
     }
 
     /// <summary>Hides the find bar.</summary>
@@ -83,8 +87,18 @@ public sealed partial class FindBar : UserControl
         switch (e.Key)
         {
             case Key.Enter:
-                _state.FindInput = SearchInput.Text ?? "";
-                _onSearchStarted();
+                string query = (SearchInput.Text ?? "").Trim();
+                if (!string.IsNullOrEmpty(query) && query == _state.FindInput && _state.SearchResults.Count > 0)
+                {
+                    // Same query with existing results → navigate to next match
+                    _onFindNext();
+                }
+                else
+                {
+                    // New or changed query → start fresh search
+                    _state.FindInput = query;
+                    _onSearchStarted();
+                }
                 e.Handled = true;
                 break;
             case Key.Escape:

@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Leviathan.Core.Csv;
 using Leviathan.GUI.Helpers;
 
@@ -23,9 +24,13 @@ internal sealed class CsvViewControl : Control
     private readonly byte[] _readBuffer = new byte[65536];
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    internal Action? StateChanged;
+    internal Action? OnRecordDetail;
+
     /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
     internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
     private bool _updatingScroll;
+    private bool _scrollUpdateQueued;
 
     public CsvViewControl(AppState state)
     {
@@ -53,12 +58,29 @@ internal sealed class CsvViewControl : Control
     {
         if (_state.CsvRowIndex is null || ScrollBar is null) return;
         _updatingScroll = true;
-        long totalRows = _state.CsvRowIndex.TotalRowCount;
-        long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
-        ScrollBar.Maximum = 10000;
-        ScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
-        ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
-        _updatingScroll = false;
+        try
+        {
+            long totalRows = _state.CsvRowIndex.TotalRowCount;
+            long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
+            ScrollBar.Maximum = 10000;
+            ScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
+            ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
+        }
+        finally
+        {
+            _updatingScroll = false;
+        }
+    }
+
+    private void QueueScrollBarUpdate()
+    {
+        if (_scrollUpdateQueued) return;
+        _scrollUpdateQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollUpdateQueued = false;
+            UpdateScrollBar();
+        }, DispatcherPriority.Background);
     }
 
     public override void Render(DrawingContext context)
@@ -75,6 +97,17 @@ internal sealed class CsvViewControl : Control
 
         double charWidth = MeasureCharWidth();
         double lineHeight = FontSize + LinePadding;
+
+        // Row number gutter
+        long totalDataRows = _state.CsvRowIndex.TotalRowCount;
+        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(Math.Max(2, totalDataRows + 1))));
+        double gutterWidth = (gutterDigits + 2) * charWidth;
+
+        // Draw gutter background
+        context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
+        context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
+            new Point(gutterWidth - charWidth, bounds.Height));
+
         int[] colWidths = _state.CsvColumnWidths ?? [];
         int colCount = _state.CsvColumnCount;
         if (colCount == 0 || colWidths.Length == 0) return;
@@ -97,7 +130,7 @@ internal sealed class CsvViewControl : Control
         {
             context.FillRectangle(headerBg, new Rect(0, 0, bounds.Width, lineHeight));
 
-            double hx = 0;
+            double hx = gutterWidth;
             for (int c = hScroll; c < colCount && hx < bounds.Width; c++)
             {
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
@@ -137,6 +170,13 @@ internal sealed class CsvViewControl : Control
             if (dataRow >= totalRows) break;
 
             double y = dataY + rowIdx * lineHeight;
+
+            // Row number in gutter
+            string rowNumStr = (dataRow + 1).ToString();
+            double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
+            FormattedText rowNumFt = new(rowNumStr, System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, MonoTypeface, FontSize, theme.TextSecondary);
+            context.DrawText(rowNumFt, new Point(rowNumX, y));
 
             // Cursor/selection highlight
             if (dataRow == _state.CsvCursorRow)
@@ -195,7 +235,7 @@ internal sealed class CsvViewControl : Control
             int fieldCount = CsvFieldParser.ParseRecord(rowData, dialect, fields);
 
             // Render cells
-            double cellX = 0;
+            double cellX = gutterWidth;
             for (int c = hScroll; c < colCount && cellX < bounds.Width; c++)
             {
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
@@ -223,7 +263,7 @@ internal sealed class CsvViewControl : Control
             }
         }
 
-        UpdateScrollBar();
+        QueueScrollBarUpdate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -275,6 +315,16 @@ internal sealed class CsvViewControl : Control
                 else
                     _state.CsvCursorCol = colCount - 1;
                 break;
+            case Key.F2:
+                OnRecordDetail?.Invoke();
+                e.Handled = true;
+                return;
+            case Key.Tab:
+                if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                    _state.CsvCursorCol = Math.Max(_state.CsvCursorCol - 1, 0);
+                else
+                    _state.CsvCursorCol = Math.Min(_state.CsvCursorCol + 1, colCount - 1);
+                break;
             default:
                 base.OnKeyDown(e);
                 return;
@@ -294,12 +344,50 @@ internal sealed class CsvViewControl : Control
         EnsureCursorVisible();
         e.Handled = true;
         InvalidateVisual();
+        StateChanged?.Invoke();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
         Focus();
+        if (_state.Document is null || _state.CsvRowIndex is null) return;
+
+        Point pos = e.GetPosition(this);
+        double charWidth = MeasureCharWidth();
+        double lineHeight = FontSize + LinePadding;
+        int[] colWidths = _state.CsvColumnWidths ?? [];
+        if (colWidths.Length == 0) return;
+
+        // Account for gutter
+        long totalRows = _state.CsvRowIndex.TotalRowCount;
+        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(Math.Max(2, totalRows + 1))));
+        double gutterWidth = (gutterDigits + 2) * charWidth;
+
+        bool hasHeader = _state.CsvDialect.HasHeader;
+        double dataY = hasHeader ? lineHeight : 0;
+
+        int row = (int)((pos.Y - dataY) / lineHeight);
+        long dataRow = _state.CsvTopRowIndex + row;
+        if (dataRow < 0 || dataRow >= totalRows) return;
+
+        // Determine column from X position
+        double cellX = gutterWidth;
+        int hScroll = _state.CsvHorizontalScroll;
+        int clickedCol = -1;
+        for (int c = hScroll; c < _state.CsvColumnCount; c++)
+        {
+            double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
+            if (pos.X >= cellX && pos.X < cellX + cellWidth) { clickedCol = c; break; }
+            cellX += cellWidth;
+        }
+
+        _state.CsvCursorRow = dataRow;
+        if (clickedCol >= 0) _state.CsvCursorCol = clickedCol;
+        _state.CsvSelectionAnchorRow = -1;
+        EnsureCursorVisible();
+        InvalidateVisual();
+        StateChanged?.Invoke();
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)

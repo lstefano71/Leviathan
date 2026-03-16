@@ -30,10 +30,14 @@ public sealed partial class CommandPaletteOverlay : UserControl
     public CommandPaletteOverlay() : this(new AppState(), _ => { }, _ => { }) { }
 
     /// <summary>Registers a command in the palette.</summary>
-    public void RegisterCommand(string name, string description, Action execute)
+    public void RegisterCommand(Func<string> name, string description, Action execute)
     {
         _allCommands.Add(new CommandEntry(name, description, execute));
     }
+
+    /// <summary>Registers a command in the palette (convenience overload).</summary>
+    public void RegisterCommand(string name, string description, Action execute) =>
+        RegisterCommand(() => name, description, execute);
 
     /// <summary>Shows the palette and focuses the input.</summary>
     public void Show()
@@ -111,15 +115,15 @@ public sealed partial class CommandPaletteOverlay : UserControl
     {
         if (string.IsNullOrEmpty(query))
         {
-            CommandList.ItemsSource = _allCommands.Select(c => $"{c.Name} — {c.Description}").ToArray();
+            CommandList.ItemsSource = _allCommands.Select(c => $"{c.Name()} — {c.Description}").ToArray();
         }
         else
         {
             string lowerQuery = query.ToLowerInvariant();
             string[] filtered = _allCommands
-                .Where(c => c.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)
+                .Where(c => c.Name().Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)
                          || c.Description.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
-                .Select(c => $"{c.Name} — {c.Description}")
+                .Select(c => $"{c.Name()} — {c.Description}")
                 .ToArray();
             CommandList.ItemsSource = filtered;
         }
@@ -168,5 +172,5 @@ public sealed partial class CommandPaletteOverlay : UserControl
         ExecuteSelected();
     }
 
-    private sealed record CommandEntry(string Name, string Description, Action Execute);
+    private sealed record CommandEntry(Func<string> Name, string Description, Action Execute);
 }
