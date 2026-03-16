@@ -11,7 +11,8 @@ namespace Leviathan.GUI.Widgets;
 public sealed partial class ColumnVisibilityDialog : Window
 {
     private readonly AppState _state;
-    private readonly string[] _headers;
+    private readonly int _columnCount;
+    private readonly string[] _columnNames;
     private readonly List<CheckBox> _checkBoxes = [];
 
     /// <summary>True if the user changed any column visibility.</summary>
@@ -20,7 +21,13 @@ public sealed partial class ColumnVisibilityDialog : Window
     public ColumnVisibilityDialog(AppState state)
     {
         _state = state;
-        _headers = state.CsvHeaderNames;
+        _columnCount = state.CsvColumnCount;
+        string[] headers = state.CsvHeaderNames;
+        _columnNames = new string[_columnCount];
+        for (int i = 0; i < _columnCount; i++)
+            _columnNames[i] = i < headers.Length && !string.IsNullOrEmpty(headers[i])
+                ? headers[i]
+                : $"Column {i + 1}";
         InitializeComponent();
 
         BuildColumnList(filter: null);
@@ -57,9 +64,9 @@ public sealed partial class ColumnVisibilityDialog : Window
 
         HashSet<int> hidden = _state.CsvHiddenColumns;
 
-        for (int i = 0; i < _headers.Length; i++)
+        for (int i = 0; i < _columnCount; i++)
         {
-            string name = _headers[i];
+            string name = _columnNames[i];
             if (!string.IsNullOrEmpty(filter) &&
                 !name.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -97,7 +104,7 @@ public sealed partial class ColumnVisibilityDialog : Window
 
     private void OnHideAll(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        for (int i = 0; i < _headers.Length; i++)
+        for (int i = 0; i < _columnCount; i++)
             _state.CsvHiddenColumns.Add(i);
         Changed = true;
         foreach (CheckBox cb in _checkBoxes)

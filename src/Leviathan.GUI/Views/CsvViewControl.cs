@@ -460,12 +460,14 @@ internal sealed class CsvViewControl : Control
         long dataRow = _state.CsvTopRowIndex + row;
         if (dataRow < 0 || dataRow >= totalRows) return;
 
-        // Determine column from X position
+        // Determine column from X position (skip hidden columns to match render layout)
         double cellX = gutterWidth;
         int hScroll = _state.CsvHorizontalScroll;
+        HashSet<int> hiddenCols = _state.CsvHiddenColumns;
         int clickedCol = -1;
         for (int c = hScroll; c < _state.CsvColumnCount; c++)
         {
+            if (hiddenCols.Contains(c)) continue;
             double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
             if (pos.X >= cellX && pos.X < cellX + cellWidth) { clickedCol = c; break; }
             cellX += cellWidth;

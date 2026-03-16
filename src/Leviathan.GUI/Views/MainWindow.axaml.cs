@@ -1435,6 +1435,8 @@ public sealed partial class MainWindow : Window
         }
         else
         {
+            Grid.SetColumn(_csvSplitter, 0);
+            Grid.SetColumn(_csvDetailPanel, 0);
             _csvOuterGrid.ColumnDefinitions = new ColumnDefinitions("*");
             _csvDetailPanel.ClearPanel();
         }
