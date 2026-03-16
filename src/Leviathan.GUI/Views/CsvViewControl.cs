@@ -113,6 +113,7 @@ internal sealed class CsvViewControl : Control
         if (colCount == 0 || colWidths.Length == 0) return;
 
         int visibleRows = Math.Max(1, (int)((bounds.Height - lineHeight) / lineHeight)); // -1 for header
+        _state.VisibleRows = visibleRows;
         CsvDialect dialect = _state.CsvDialect;
 
         // Brushes
@@ -188,40 +189,9 @@ internal sealed class CsvViewControl : Control
                 context.FillRectangle(selectionBrush, new Rect(0, y, bounds.Width, lineHeight));
             }
 
-            // Read row data from document — use sparse index estimation
-            long adjustedRow = dataRow + (dialect.HasHeader ? 1 : 0);
-            int sparseIdx = (int)(adjustedRow / _state.CsvRowIndex.SparseFactor);
-            long rowOffset = sparseIdx < _state.CsvRowIndex.SparseEntryCount
-                ? _state.CsvRowIndex.GetSparseOffset(sparseIdx)
-                : -1;
+            // Navigate to the row using the correct sparse index lookup
+            long rowOffset = GetRowByteOffset(dataRow);
             if (rowOffset < 0 || rowOffset >= _state.FileLength) continue;
-
-            // Walk forward from sparse offset to exact row (chunked for large gaps)
-            long targetWithinBlock = adjustedRow - (long)sparseIdx * _state.CsvRowIndex.SparseFactor;
-            long rowsSkipped = 0;
-            while (rowsSkipped < targetWithinBlock && rowOffset < _state.FileLength)
-            {
-                int scanLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
-                if (scanLen <= 0) break;
-                _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, scanLen));
-                int pos = 0;
-                bool inQ = false;
-                byte q = dialect.Quote;
-                while (pos < scanLen && rowsSkipped < targetWithinBlock)
-                {
-                    byte b = _readBuffer[pos];
-                    if (inQ) { if (b == q) { if (pos + 1 < scanLen && _readBuffer[pos + 1] == q) { pos += 2; continue; } inQ = false; } pos++; continue; }
-                    if (b == q && q != 0) { inQ = true; pos++; continue; }
-                    if (b == (byte)'\n') { rowsSkipped++; pos++; continue; }
-                    if (b == (byte)'\r') { rowsSkipped++; pos++; if (pos < scanLen && _readBuffer[pos] == (byte)'\n') pos++; continue; }
-                    pos++;
-                }
-                rowOffset += pos;
-                if (rowsSkipped < targetWithinBlock && pos == scanLen)
-                    continue; // Need another chunk
-                break;
-            }
-            if (rowOffset >= _state.FileLength) continue;
 
             int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
             if (readLen <= 0) continue;
@@ -443,5 +413,93 @@ internal sealed class CsvViewControl : Control
         }
 
         return data.Length;
+    }
+
+    /// <summary>
+    /// Returns the byte offset of the start of <paramref name="dataRowIndex"/> (0-based data row).
+    /// Mirrors the proven TUI2 logic: correct sparse index mapping with clamping,
+    /// fallback to offset 0, and quoted-field state preserved across buffer boundaries.
+    /// </summary>
+    internal long GetRowByteOffset(long dataRowIndex)
+    {
+        if (_state.Document is null) return -1;
+
+        CsvRowIndex? index = _state.CsvRowIndex;
+        if (index is null) return -1;
+
+        CsvDialect dialect = _state.CsvDialect;
+        long actualRow = dialect.HasHeader ? dataRowIndex + 1 : dataRowIndex;
+
+        if (actualRow == 0) return 0;
+        if (actualRow > index.TotalRowCount) return -1;
+
+        // Use sparse index to get close, clamping to last available entry
+        int sparseIdx = (int)((actualRow - 1) / index.SparseFactor);
+        int effectiveSparseIdx = Math.Min(sparseIdx, index.SparseEntryCount);
+        long offset;
+        long rowsScanned;
+
+        if (effectiveSparseIdx > 0)
+        {
+            offset = index.GetSparseOffset(effectiveSparseIdx - 1);
+            rowsScanned = (long)effectiveSparseIdx * index.SparseFactor;
+        }
+        else if (actualRow == 1 && index.FirstDataRowOffset > 0)
+        {
+            return index.FirstDataRowOffset;
+        }
+        else
+        {
+            offset = 0;
+            rowsScanned = 0;
+        }
+
+        // Linear scan from the sparse entry to the target row
+        long remaining = actualRow - rowsScanned;
+        if (remaining <= 0) return offset;
+
+        long fileLen = _state.FileLength;
+        bool inQuoted = false;
+        byte quote = dialect.Quote;
+
+        while (remaining > 0 && offset < fileLen)
+        {
+            int toRead = (int)Math.Min(_readBuffer.Length, fileLen - offset);
+            if (toRead <= 0) break;
+            _state.Document.Read(offset, _readBuffer.AsSpan(0, toRead));
+
+            for (int i = 0; i < toRead && remaining > 0; i++)
+            {
+                byte b = _readBuffer[i];
+
+                if (inQuoted)
+                {
+                    if (b == quote)
+                    {
+                        if (i + 1 < toRead && _readBuffer[i + 1] == quote) { i++; continue; }
+                        inQuoted = false;
+                    }
+                    continue;
+                }
+
+                if (b == quote && quote != 0) { inQuoted = true; continue; }
+
+                if (b == (byte)'\n')
+                {
+                    remaining--;
+                    if (remaining == 0) return offset + i + 1;
+                }
+                else if (b == (byte)'\r')
+                {
+                    if (i + 1 < toRead && _readBuffer[i + 1] == (byte)'\n') i++;
+                    remaining--;
+                    if (remaining == 0) return offset + i + 1;
+                }
+            }
+
+            offset += toRead;
+        }
+
+        return offset;
     }
 }

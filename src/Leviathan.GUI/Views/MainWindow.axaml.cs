@@ -289,6 +289,8 @@ public sealed partial class MainWindow : Window
         BuildMruList();
         UpdateTitle();
         UpdateStatusBar();
+        UpdateViewModeChecks();
+        UpdateEncodingChecks();
     }
 
     private void EnsureViewControlsCreated()
@@ -449,6 +451,8 @@ public sealed partial class MainWindow : Window
     private void SetBytesPerRow(int value)
     {
         _state.BytesPerRowSetting = value;
+        if (value > 0)
+            _state.BytesPerRow = value;
         _state.Settings.BytesPerRow = value;
         _state.Settings.Save();
         UpdateBprChecks();
@@ -922,8 +926,9 @@ public sealed partial class MainWindow : Window
 
     private async void ShowCsvRecordDetail()
     {
-        if (_state.Document is null || _state.CsvRowIndex is null) return;
-        CsvRecordDetailDialog dialog = new(_state, _state.CsvCursorRow);
+        if (_state.Document is null || _state.CsvRowIndex is null || _csvView is null) return;
+        long rowOffset = _csvView.GetRowByteOffset(_state.CsvCursorRow);
+        CsvRecordDetailDialog dialog = new(_state, _state.CsvCursorRow, rowOffset);
         await dialog.ShowDialog(this);
     }
 

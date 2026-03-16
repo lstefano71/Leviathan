@@ -21,9 +21,11 @@ internal sealed class TextViewControl : Control
     private const double LinePadding = 2;
 
     private readonly AppState _state;
-    private readonly byte[] _readBuffer = new byte[131072]; // 128 KB
+    private byte[] _readBuffer = new byte[131072]; // 128 KB initial, grows up to 16 MB
     private readonly VisualLine[] _visualLines = new VisualLine[2048];
+    private VisualLine[] _navVisualLines = new VisualLine[256];
     private readonly LineWrapEngine _wrapEngine;
+    private const int MaxReadSize = 16 * 1024 * 1024; // 16 MB max buffer
     private ViewTheme _theme = ViewTheme.Resolve();
 
     internal Action? StateChanged;
@@ -480,14 +482,71 @@ internal sealed class TextViewControl : Control
 
     private void ScrollByRows(int rowDelta)
     {
-        long bytesPerRow = 80;
-        long newTop = _state.TextTopOffset + rowDelta * bytesPerRow;
-        newTop = Math.Clamp(newTop, 0, Math.Max(0, _state.FileLength - 1));
-        _state.TextTopOffset = FindLineStart(newTop);
+        if (_state.WordWrap)
+        {
+            int maxCols = GetColumnsAvailable();
+            long offset = _state.TextTopOffset;
+            if (rowDelta > 0)
+            {
+                for (int i = 0; i < rowDelta && offset < _state.FileLength; i++)
+                {
+                    if (FindNextVisualLine(offset, maxCols, out VisualLine vl))
+                    {
+                        long next = vl.DocOffset + vl.ByteLength;
+                        if (next <= offset) break;
+                        offset = next;
+                    }
+                    else break;
+                }
+            }
+            else
+            {
+                int steps = -rowDelta;
+                for (int i = 0; i < steps && offset > _state.BomLength; i++)
+                {
+                    if (FindPreviousVisualLine(offset, maxCols, out VisualLine prev))
+                        offset = prev.DocOffset;
+                    else break;
+                }
+            }
+            _state.TextTopOffset = Math.Clamp(offset, _state.BomLength, Math.Max(_state.BomLength, _state.FileLength));
+            return;
+        }
+
+        // Non-wrap: skip by hard lines
+        long off = _state.TextTopOffset;
+        if (rowDelta > 0)
+        {
+            for (int i = 0; i < rowDelta && off < _state.FileLength; i++)
+            {
+                long lineEnd = FindLineEnd(off);
+                off = Math.Min(lineEnd + _state.Decoder.MinCharBytes, _state.FileLength);
+            }
+        }
+        else
+        {
+            int steps = -rowDelta;
+            for (int i = 0; i < steps && off > _state.BomLength; i++)
+            {
+                long prevEnd = Math.Max(0, off - _state.Decoder.MinCharBytes);
+                off = FindLineStart(prevEnd);
+            }
+        }
+        _state.TextTopOffset = Math.Clamp(off, _state.BomLength, Math.Max(_state.BomLength, _state.FileLength));
     }
 
     private long MoveDown(long offset)
     {
+        if (_state.WordWrap)
+        {
+            int maxCols = GetColumnsAvailable();
+            if (FindNextVisualLine(offset, maxCols, out VisualLine vl))
+            {
+                long next = vl.DocOffset + vl.ByteLength;
+                if (next > offset) return Math.Min(next, _state.FileLength);
+            }
+            return offset;
+        }
         long end = FindLineEnd(offset);
         if (end < _state.FileLength)
             return Math.Min(end + _state.Decoder.MinCharBytes, _state.FileLength);
@@ -496,9 +555,119 @@ internal sealed class TextViewControl : Control
 
     private long MoveUp(long offset)
     {
+        if (_state.WordWrap)
+        {
+            int maxCols = GetColumnsAvailable();
+            if (FindPreviousVisualLine(offset, maxCols, out VisualLine prev))
+                return prev.DocOffset;
+            return _state.BomLength;
+        }
         long lineStart = FindLineStart(offset);
         if (lineStart <= _state.BomLength) return _state.BomLength;
         return FindLineStart(lineStart - _state.Decoder.MinCharBytes);
+    }
+
+    /// <summary>Returns the number of character columns available in the text area.</summary>
+    private int GetColumnsAvailable()
+    {
+        double charWidth = MeasureCharWidth();
+        long totalLines = Math.Max(1, _state.EstimatedTotalLines);
+        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
+        double gutterWidth = (gutterDigits + 2) * charWidth;
+        double textAreaWidth = Bounds.Width - gutterWidth;
+        return Math.Max(1, (int)(textAreaWidth / charWidth));
+    }
+
+    /// <summary>
+    /// Finds the first visual line starting at <paramref name="fromOffset"/>
+    /// when word wrap is active. Returns its extent so the caller knows where
+    /// the next visual line starts.
+    /// </summary>
+    private bool FindNextVisualLine(long fromOffset, int maxCols, out VisualLine result)
+    {
+        result = default;
+        if (_state.Document is null || fromOffset >= _state.FileLength) return false;
+
+        int readLen = (int)Math.Min((long)maxCols * 8 + 64, _state.FileLength - fromOffset);
+        if (readLen <= 0) return false;
+
+        EnsureBuffer(readLen);
+        _state.Document.Read(fromOffset, _readBuffer.AsSpan(0, readLen));
+
+        Span<VisualLine> output = stackalloc VisualLine[2];
+        int count = _wrapEngine.ComputeVisualLines(
+            _readBuffer.AsSpan(0, readLen), fromOffset, maxCols, true, output, _state.Decoder);
+        if (count == 0) return false;
+
+        result = output[0];
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the visual line immediately before the one at <paramref name="vlStartOffset"/>.
+    /// Scans forward from the hard-line start, returning the last visual line whose
+    /// DocOffset is strictly less than <paramref name="vlStartOffset"/>.
+    /// </summary>
+    private bool FindPreviousVisualLine(long vlStartOffset, int maxCols, out VisualLine result)
+    {
+        result = default;
+        if (_state.Document is null || vlStartOffset <= _state.BomLength) return false;
+
+        ITextDecoder decoder = _state.Decoder;
+        long hardLineStart = FindLineStart(vlStartOffset);
+        if (vlStartOffset == hardLineStart)
+        {
+            long prevPos = Math.Max(0, vlStartOffset - decoder.MinCharBytes);
+            hardLineStart = FindLineStart(prevPos);
+        }
+        if (hardLineStart < _state.BomLength) hardLineStart = _state.BomLength;
+
+        bool found = false;
+        long scanPos = hardLineStart;
+
+        while (scanPos < vlStartOffset)
+        {
+            int readLen = (int)Math.Min(
+                Math.Max((long)maxCols * 256, vlStartOffset - scanPos + (long)maxCols * 8),
+                _state.FileLength - scanPos);
+            if (readLen <= 0) break;
+
+            EnsureBuffer(readLen);
+            _state.Document.Read(scanPos, _readBuffer.AsSpan(0, readLen));
+
+            if (_navVisualLines.Length < 256)
+                _navVisualLines = new VisualLine[256];
+
+            int count = _wrapEngine.ComputeVisualLines(
+                _readBuffer.AsSpan(0, readLen), scanPos, maxCols, true, _navVisualLines, decoder);
+            if (count == 0) break;
+
+            for (int i = 0; i < count; i++)
+            {
+                if (_navVisualLines[i].DocOffset >= vlStartOffset) return found;
+                result = _navVisualLines[i];
+                found = true;
+            }
+
+            VisualLine lastVl = _navVisualLines[count - 1];
+            long newScan = lastVl.DocOffset + lastVl.ByteLength;
+            if (newScan <= scanPos) break;
+            scanPos = newScan;
+        }
+
+        return found;
+    }
+
+    /// <summary>Grows the read buffer if needed, up to <see cref="MaxReadSize"/>.</summary>
+    private void EnsureBuffer(int minSize)
+    {
+        if (_readBuffer.Length >= minSize) return;
+        int newSize = _readBuffer.Length;
+        while (newSize < minSize && newSize < MaxReadSize)
+            newSize *= 2;
+        newSize = Math.Min(newSize, MaxReadSize);
+        if (newSize > _readBuffer.Length)
+            _readBuffer = new byte[newSize];
     }
 
     private long FindLineStart(long offset)
