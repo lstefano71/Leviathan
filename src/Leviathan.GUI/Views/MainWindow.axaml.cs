@@ -24,6 +24,8 @@ public sealed partial class MainWindow : Window
     private TextViewControl? _textView;
     private CsvViewControl? _csvView;
     private CsvDetailPanel? _csvDetailPanel;
+    private Grid? _csvOuterGrid;
+    private GridSplitter? _csvSplitter;
     private DispatcherTimer? _indexingTimer;
     private FindBar? _findBar;
     private GotoBar? _gotoBar;
@@ -392,14 +394,14 @@ public sealed partial class MainWindow : Window
             Background = Brushes.Transparent,
             IsVisible = false
         };
+        _csvSplitter = splitter;
 
         Grid csvOuter = new()
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto,300")
+            ColumnDefinitions = new ColumnDefinitions("*")
         };
+        _csvOuterGrid = csvOuter;
         Grid.SetColumn(csvInner, 0);
-        Grid.SetColumn(splitter, 1);
-        Grid.SetColumn(_csvDetailPanel, 2);
         csvOuter.Children.Add(csvInner);
         csvOuter.Children.Add(splitter);
         csvOuter.Children.Add(_csvDetailPanel);
@@ -1354,21 +1356,24 @@ public sealed partial class MainWindow : Window
     private void SetCsvDetailPanelVisible(bool visible)
     {
         _state.CsvDetailPanelVisible = visible;
-        if (_csvDetailPanel is null) return;
+        if (_csvDetailPanel is null || _csvOuterGrid is null || _csvSplitter is null) return;
 
         _csvDetailPanel.IsVisible = visible;
+        _csvSplitter.IsVisible = visible;
 
-        // The GridSplitter is the sibling at column 1
-        if (_csvDetailPanel.Parent is Grid outerGrid && outerGrid.Children.Count >= 2)
+        // Toggle column definitions: "*" when hidden, "*,Auto,300" when visible
+        if (visible)
         {
-            if (outerGrid.Children[1] is GridSplitter splitter)
-                splitter.IsVisible = visible;
+            _csvOuterGrid.ColumnDefinitions = new ColumnDefinitions("*,Auto,300");
+            Grid.SetColumn(_csvSplitter, 1);
+            Grid.SetColumn(_csvDetailPanel, 2);
+            _csvDetailPanel.UpdateRecord(_state, _csvView!);
         }
-
-        if (visible && _csvView is not null)
-            _csvDetailPanel.UpdateRecord(_state, _csvView);
-        else if (!visible)
+        else
+        {
+            _csvOuterGrid.ColumnDefinitions = new ColumnDefinitions("*");
             _csvDetailPanel.ClearPanel();
+        }
 
         FocusActiveViewAsync();
     }
