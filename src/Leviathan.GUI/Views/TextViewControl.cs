@@ -24,6 +24,10 @@ internal sealed class TextViewControl : Control
     private readonly LineWrapEngine _wrapEngine;
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
+    private bool _updatingScroll;
+
     public TextViewControl(AppState state)
     {
         _state = state;
@@ -35,6 +39,28 @@ internal sealed class TextViewControl : Control
             _theme = ViewTheme.Resolve();
             InvalidateVisual();
         };
+    }
+
+    internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingScroll || _state.Document is null || ScrollBar is null) return;
+        long fileLen = _state.FileLength;
+        long newOffset = (long)(e.NewValue / Math.Max(1, ScrollBar.Maximum) * fileLen);
+        newOffset = Math.Clamp(newOffset, 0, Math.Max(0, fileLen - 1));
+        _state.TextTopOffset = FindLineStart(newOffset);
+        InvalidateVisual();
+    }
+
+    private void UpdateScrollBar()
+    {
+        if (_state.Document is null || ScrollBar is null) return;
+        _updatingScroll = true;
+        long fileLen = _state.FileLength;
+        ScrollBar.Maximum = 10000;
+        ScrollBar.Value = fileLen > 0 ? (double)_state.TextTopOffset / fileLen * 10000 : 0;
+        long windowSize = _readBuffer.Length;
+        ScrollBar.ViewportSize = fileLen > 0 ? (double)windowSize / fileLen * 10000 : 10000;
+        _updatingScroll = false;
     }
 
     public override void Render(DrawingContext context)
@@ -101,10 +127,25 @@ internal sealed class TextViewControl : Control
             double y = row * lineHeight;
             long lineAbsOffset = vl.DocOffset;
 
-            // Line number (only on first wrap segment)
-            if (row == 0 || _visualLines[row].DocOffset != _visualLines[row - 1].DocOffset)
+            // Detect hard line start: first row, or preceded by a newline
+            bool isHardLine;
+            if (row == 0)
             {
+                isHardLine = topOffset == 0 || IsNewlineBefore(topOffset);
+            }
+            else
+            {
+                // Check if the byte just before this visual line is a newline
+                long prevEnd = _visualLines[row - 1].DocOffset + _visualLines[row - 1].ByteLength;
+                isHardLine = vl.DocOffset != prevEnd || IsNewlineAt(data, (int)(prevEnd - topOffset - 1));
+            }
+
+            if (isHardLine)
                 currentLineNumber++;
+
+            // Gutter: show line number on hard lines, wrap indicator on continuations
+            if (isHardLine)
+            {
                 string lineNumStr = currentLineNumber.ToString();
                 double lineNumX = gutterWidth - (lineNumStr.Length + 1) * charWidth;
 
@@ -112,6 +153,16 @@ internal sealed class TextViewControl : Control
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, MonoTypeface, FontSize, gutterTextBrush);
                 context.DrawText(lineNumText, new Point(lineNumX, y));
+            }
+            else
+            {
+                // Wrap continuation: show ↪ indicator
+                string wrapIndicator = "↪";
+                double wrapX = gutterWidth - 2 * charWidth;
+                FormattedText wrapText = new(wrapIndicator,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, MonoTypeface, FontSize, theme.TextMuted);
+                context.DrawText(wrapText, new Point(wrapX, y));
             }
 
             // Render text content
@@ -177,6 +228,8 @@ internal sealed class TextViewControl : Control
                 byteIdx += runeBytes;
             }
         }
+
+        UpdateScrollBar();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -390,5 +443,21 @@ internal sealed class TextViewControl : Control
             return index.EstimateLineForOffset(offset, _state.FileLength);
 
         return offset / 80;
+    }
+
+    /// <summary>Checks if the byte before the given document offset is a newline.</summary>
+    private bool IsNewlineBefore(long docOffset)
+    {
+        if (_state.Document is null || docOffset <= 0) return true;
+        Span<byte> b = stackalloc byte[1];
+        _state.Document.Read(docOffset - 1, b);
+        return b[0] == (byte)'\n' || b[0] == (byte)'\r';
+    }
+
+    /// <summary>Checks if the byte at the given index in the data span is a newline.</summary>
+    private static bool IsNewlineAt(ReadOnlySpan<byte> data, int index)
+    {
+        if (index < 0 || index >= data.Length) return true;
+        return data[index] == (byte)'\n' || data[index] == (byte)'\r';
     }
 }

@@ -40,8 +40,12 @@ public sealed partial class CommandPaletteOverlay : UserControl
     {
         IsVisible = true;
         PaletteInput.Text = "";
-        PaletteInput.Focus();
         FilterCommands("");
+        // Delay focus to after layout pass so the control is visible
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            PaletteInput.Focus();
+        }, Avalonia.Threading.DispatcherPriority.Input);
     }
 
     /// <summary>Shows the palette in goto mode.</summary>
@@ -49,8 +53,12 @@ public sealed partial class CommandPaletteOverlay : UserControl
     {
         IsVisible = true;
         PaletteInput.Text = ":";
-        PaletteInput.Focus();
-        PaletteInput.CaretIndex = 1;
+        // Delay focus to after layout pass
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            PaletteInput.Focus();
+            PaletteInput.CaretIndex = 1;
+        }, Avalonia.Threading.DispatcherPriority.Input);
     }
 
     /// <summary>Hides the palette.</summary>

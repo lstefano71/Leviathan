@@ -75,14 +75,15 @@
         <!-- Content Area -->
         <Panel x:Name="ContentArea">
             <!-- Welcome View (visible when no file is open) -->
-            <StackPanel x:Name="WelcomeView" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Spacing="12">
+            <StackPanel x:Name="WelcomeView" VerticalAlignment="Center"
+                        Margin="40,0" Spacing="12" MaxWidth="600"
+                        HorizontalAlignment="Center">
                 <TextBlock Text="Leviathan" FontSize="28" FontWeight="Bold"
-                           HorizontalAlignment="Center" Opacity="0.7" />
+                           Opacity="0.7" />
                 <TextBlock Text="Large File Editor — Avalonia GUI" FontSize="14"
-                           HorizontalAlignment="Center" Opacity="0.5" />
-                <TextBlock Text="Ctrl+O to open a file" FontSize="12"
-                           HorizontalAlignment="Center" Opacity="0.4" Margin="0,8,0,0" />
+                           Opacity="0.5" />
+                <TextBlock Text="Ctrl+O to open a file, or select a recent file below"
+                           FontSize="12" Opacity="0.4" Margin="0,8,0,0" />
                 <StackPanel x:Name="MruListPanel" Spacing="4" Margin="0,16,0,0" />
             </StackPanel>
         </Panel>

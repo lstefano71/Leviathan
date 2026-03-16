@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -36,6 +37,9 @@ public sealed partial class MainWindow : Window
         WireMenuEvents();
         BuildMruList();
         UpdateViewVisibility();
+        UpdateWordWrapCheck();
+        UpdateBprChecks();
+        UpdateViewModeChecks();
         UpdateStatusBar();
 
         // Start background indexing timer
@@ -282,9 +286,43 @@ public sealed partial class MainWindow : Window
         _textView = new TextViewControl(_state);
         _csvView = new CsvViewControl(_state);
 
-        ContentArea.Children.Add(_hexView);
-        ContentArea.Children.Add(_textView);
-        ContentArea.Children.Add(_csvView);
+        // Create scrollbars and compose each view + scrollbar in a Grid
+        ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb =>
+        {
+            _hexView.ScrollBar = sb;
+            sb.ValueChanged += _hexView.OnScrollBarValueChanged;
+        }));
+        ContentArea.Children.Add(CreateViewWithScrollBar(_textView, sb =>
+        {
+            _textView.ScrollBar = sb;
+            sb.ValueChanged += _textView.OnScrollBarValueChanged;
+        }));
+        ContentArea.Children.Add(CreateViewWithScrollBar(_csvView, sb =>
+        {
+            _csvView.ScrollBar = sb;
+            sb.ValueChanged += _csvView.OnScrollBarValueChanged;
+        }));
+    }
+
+    private static Grid CreateViewWithScrollBar(Control view, Action<Avalonia.Controls.Primitives.ScrollBar> configure)
+    {
+        Grid grid = new()
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto")
+        };
+        Grid.SetColumn(view, 0);
+        grid.Children.Add(view);
+
+        Avalonia.Controls.Primitives.ScrollBar sb = new()
+        {
+            Orientation = Avalonia.Layout.Orientation.Vertical,
+            Minimum = 0,
+            Width = 14
+        };
+        Grid.SetColumn(sb, 1);
+        grid.Children.Add(sb);
+        configure(sb);
+        return grid;
     }
 
     private void SwitchView(ViewMode mode)
@@ -297,6 +335,7 @@ public sealed partial class MainWindow : Window
         _state.ActiveView = mode;
         EnsureViewControlsCreated();
         UpdateViewVisibility();
+        UpdateViewModeChecks();
         UpdateStatusBar();
 
         MenuCsvSettings.IsVisible = mode == ViewMode.Csv;
@@ -309,9 +348,10 @@ public sealed partial class MainWindow : Window
 
         if (_hexView is not null)
         {
-            _hexView.IsVisible = hasFile && _state.ActiveView == ViewMode.Hex;
-            _textView!.IsVisible = hasFile && _state.ActiveView == ViewMode.Text;
-            _csvView!.IsVisible = hasFile && _state.ActiveView == ViewMode.Csv;
+            // Toggle the Grid wrappers (parent of each view control)
+            ((Control)_hexView.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Hex;
+            ((Control)_textView!.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Text;
+            ((Control)_csvView!.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Csv;
 
             if (hasFile)
             {
@@ -335,7 +375,37 @@ public sealed partial class MainWindow : Window
         _state.WordWrap = !_state.WordWrap;
         _state.Settings.WordWrap = _state.WordWrap;
         _state.Settings.Save();
+        UpdateWordWrapCheck();
         _textView?.InvalidateVisual();
+    }
+
+    private void UpdateWordWrapCheck()
+    {
+        MenuWordWrap.Icon = _state.WordWrap
+            ? new TextBlock { Text = "✓", FontSize = 12 }
+            : null;
+    }
+
+    private void UpdateViewModeChecks()
+    {
+        MenuViewHex.Icon = _state.ActiveView == ViewMode.Hex
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuViewText.Icon = _state.ActiveView == ViewMode.Text
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuViewCsv.Icon = _state.ActiveView == ViewMode.Csv
+            ? new TextBlock { Text = "●", FontSize = 10 } : null;
+    }
+
+    private void UpdateBprChecks()
+    {
+        int current = _state.BytesPerRowSetting;
+        MenuBprAuto.Icon = current == 0 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr8.Icon = current == 8 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr16.Icon = current == 16 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr24.Icon = current == 24 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr32.Icon = current == 32 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr48.Icon = current == 48 ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        MenuBpr64.Icon = current == 64 ? new TextBlock { Text = "●", FontSize = 10 } : null;
     }
 
     private void SwitchEncoding(TextEncoding encoding)
@@ -351,6 +421,7 @@ public sealed partial class MainWindow : Window
         _state.BytesPerRowSetting = value;
         _state.Settings.BytesPerRow = value;
         _state.Settings.Save();
+        UpdateBprChecks();
         _hexView?.InvalidateVisual();
     }
 
@@ -429,53 +500,100 @@ public sealed partial class MainWindow : Window
 
     private void BuildMruList()
     {
-        MruListPanel.Children.Clear();
+        // ── File menu MRU items ──
+        // Remove any previous dynamic MRU items (between first Separator and MruSeparator)
+        List<Control> toRemove = [];
+        bool inMruZone = false;
+        foreach (Control child in FileMenu.Items.Cast<Control>())
+        {
+            if (child == MruSeparator) break;
+            if (inMruZone) toRemove.Add(child);
+            if (child is Separator && child != MruSeparator && !inMruZone) inMruZone = true;
+        }
+        foreach (Control c in toRemove)
+            FileMenu.Items.Remove(c);
+
         List<string> recent = _state.Settings.RecentFiles;
 
         if (recent.Count == 0)
         {
             MruSeparator.IsVisible = false;
-            return;
+        }
+        else
+        {
+            MruSeparator.IsVisible = true;
+            // Insert MRU items before MruSeparator
+            int insertIdx = FileMenu.Items.IndexOf(MruSeparator);
+            for (int i = 0; i < Math.Min(9, recent.Count); i++)
+            {
+                string path = recent[i];
+                string fileName = Path.GetFileName(path);
+                int number = i + 1;
+                MenuItem mruItem = new() { Header = $"_{number} {fileName}" };
+                string capturedPath = path;
+                mruItem.Click += async (_, _) =>
+                {
+                    if (!await GuardUnsavedChanges()) return;
+                    if (File.Exists(capturedPath))
+                    {
+                        _state.OpenFile(capturedPath);
+                        OnFileOpened();
+                    }
+                };
+                FileMenu.Items.Insert(insertIdx + i, mruItem);
+            }
         }
 
-        MruSeparator.IsVisible = true;
+        // ── Welcome view MRU list ──
+        MruListPanel.Children.Clear();
+        if (recent.Count == 0) return;
 
         MruListPanel.Children.Add(new TextBlock
         {
             Text = "Recent Files:",
             FontSize = 13,
             FontWeight = FontWeight.SemiBold,
-            Opacity = 0.6
+            Opacity = 0.6,
+            Margin = new Thickness(0, 0, 0, 4)
         });
+
+        ListBox mruListBox = new()
+        {
+            SelectionMode = SelectionMode.Single,
+            Background = Brushes.Transparent,
+            MaxHeight = 300
+        };
 
         for (int i = 0; i < Math.Min(9, recent.Count); i++)
         {
             string path = recent[i];
             string fileName = Path.GetFileName(path);
-            int index = i + 1;
-
-            Button btn = new()
+            ListBoxItem item = new()
             {
-                Content = $"{index}. {fileName}",
+                Content = $"[{i + 1}]  {fileName}",
                 Tag = path,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                Padding = new Thickness(12, 4),
-                Background = Brushes.Transparent
+                FontFamily = new FontFamily("Consolas, Courier New, monospace"),
+                FontSize = 13,
+                Padding = new Thickness(8, 4)
             };
-            btn.Click += async (s, _) =>
-            {
-                if (s is Button b && b.Tag is string filePath)
-                {
-                    if (!await GuardUnsavedChanges()) return;
-                    if (File.Exists(filePath))
-                    {
-                        _state.OpenFile(filePath);
-                        OnFileOpened();
-                    }
-                }
-            };
-            MruListPanel.Children.Add(btn);
+            ToolTip.SetTip(item, path);
+            mruListBox.Items.Add(item);
         }
+
+        mruListBox.DoubleTapped += async (_, _) =>
+        {
+            if (mruListBox.SelectedItem is ListBoxItem sel && sel.Tag is string filePath)
+            {
+                if (!await GuardUnsavedChanges()) return;
+                if (File.Exists(filePath))
+                {
+                    _state.OpenFile(filePath);
+                    OnFileOpened();
+                }
+            }
+        };
+
+        MruListPanel.Children.Add(mruListBox);
     }
 
     // ─── Keyboard shortcuts ───
@@ -655,13 +773,20 @@ public sealed partial class MainWindow : Window
 
         if (_state.ActiveView == ViewMode.Hex)
         {
-            _state.HexCursorOffset = offset;
             _hexView?.GotoOffset(offset);
         }
-        else
+        else if (_state.ActiveView == ViewMode.Text)
         {
             _state.TextCursorOffset = offset;
+            _state.TextSelectionAnchor = -1;
+            // Reposition the text view so cursor is visible
+            _state.TextTopOffset = Math.Max(0, offset - 4096);
             _textView?.InvalidateVisual();
+        }
+        else if (_state.ActiveView == ViewMode.Csv)
+        {
+            _state.HexCursorOffset = offset;
+            _hexView?.GotoOffset(offset);
         }
     }
 

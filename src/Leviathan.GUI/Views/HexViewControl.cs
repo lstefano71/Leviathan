@@ -21,6 +21,10 @@ internal sealed class HexViewControl : Control
     private readonly byte[] _readBuffer = new byte[65536];
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
+    private bool _updatingScroll;
+
     /// <summary>Lookup table for zero-alloc byte-to-hex conversion.</summary>
     private static ReadOnlySpan<byte> HexChars => "0123456789ABCDEF"u8;
 
@@ -34,6 +38,30 @@ internal sealed class HexViewControl : Control
             _theme = ViewTheme.Resolve();
             InvalidateVisual();
         };
+    }
+
+    internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingScroll || _state.Document is null || ScrollBar is null) return;
+        long totalRows = (_state.FileLength + _state.BytesPerRow - 1) / _state.BytesPerRow;
+        long row = (long)(e.NewValue / Math.Max(1, ScrollBar.Maximum) * Math.Max(0, totalRows - _state.VisibleRows));
+        long newBase = row * _state.BytesPerRow;
+        newBase = Math.Clamp(newBase, 0, Math.Max(0, _state.FileLength - (long)_state.VisibleRows * _state.BytesPerRow));
+        _state.HexBaseOffset = newBase;
+        InvalidateVisual();
+    }
+
+    private void UpdateScrollBar()
+    {
+        if (_state.Document is null || ScrollBar is null) return;
+        _updatingScroll = true;
+        long totalRows = (_state.FileLength + _state.BytesPerRow - 1) / _state.BytesPerRow;
+        long currentRow = _state.HexBaseOffset / Math.Max(1, _state.BytesPerRow);
+        long maxRow = Math.Max(0, totalRows - _state.VisibleRows);
+        ScrollBar.Maximum = 10000;
+        ScrollBar.Value = maxRow > 0 ? (double)currentRow / maxRow * 10000 : 0;
+        ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
+        _updatingScroll = false;
     }
 
     public override void Render(DrawingContext context)
@@ -165,6 +193,8 @@ internal sealed class HexViewControl : Control
                 context.DrawText(asciiText, new Point(ax, y));
             }
         }
+
+        UpdateScrollBar();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

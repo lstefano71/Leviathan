@@ -23,6 +23,10 @@ internal sealed class CsvViewControl : Control
     private readonly byte[] _readBuffer = new byte[65536];
     private ViewTheme _theme = ViewTheme.Resolve();
 
+    /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
+    private bool _updatingScroll;
+
     public CsvViewControl(AppState state)
     {
         _state = state;
@@ -33,6 +37,28 @@ internal sealed class CsvViewControl : Control
             _theme = ViewTheme.Resolve();
             InvalidateVisual();
         };
+    }
+
+    internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingScroll || _state.CsvRowIndex is null || ScrollBar is null) return;
+        long totalRows = _state.CsvRowIndex.TotalRowCount;
+        long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
+        long newTop = (long)(e.NewValue / Math.Max(1, ScrollBar.Maximum) * maxTop);
+        _state.CsvTopRowIndex = Math.Clamp(newTop, 0, maxTop);
+        InvalidateVisual();
+    }
+
+    private void UpdateScrollBar()
+    {
+        if (_state.CsvRowIndex is null || ScrollBar is null) return;
+        _updatingScroll = true;
+        long totalRows = _state.CsvRowIndex.TotalRowCount;
+        long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
+        ScrollBar.Maximum = 10000;
+        ScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
+        ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
+        _updatingScroll = false;
     }
 
     public override void Render(DrawingContext context)
@@ -128,32 +154,34 @@ internal sealed class CsvViewControl : Control
             long rowOffset = sparseIdx < _state.CsvRowIndex.SparseEntryCount
                 ? _state.CsvRowIndex.GetSparseOffset(sparseIdx)
                 : -1;
-            if (rowOffset < 0) continue;
+            if (rowOffset < 0 || rowOffset >= _state.FileLength) continue;
 
-            // Walk forward from sparse offset to exact row
+            // Walk forward from sparse offset to exact row (chunked for large gaps)
             long targetWithinBlock = adjustedRow - (long)sparseIdx * _state.CsvRowIndex.SparseFactor;
-            if (targetWithinBlock > 0)
+            long rowsSkipped = 0;
+            while (rowsSkipped < targetWithinBlock && rowOffset < _state.FileLength)
             {
-                int scanLen = (int)Math.Min(65536, _state.FileLength - rowOffset);
-                if (scanLen > 0)
+                int scanLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
+                if (scanLen <= 0) break;
+                _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, scanLen));
+                int pos = 0;
+                bool inQ = false;
+                byte q = dialect.Quote;
+                while (pos < scanLen && rowsSkipped < targetWithinBlock)
                 {
-                    _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, scanLen));
-                    int pos = 0;
-                    long rowsSkipped = 0;
-                    bool inQ = false;
-                    byte q = dialect.Quote;
-                    while (pos < scanLen && rowsSkipped < targetWithinBlock)
-                    {
-                        byte b = _readBuffer[pos];
-                        if (inQ) { if (b == q) { if (pos + 1 < scanLen && _readBuffer[pos + 1] == q) { pos += 2; continue; } inQ = false; } pos++; continue; }
-                        if (b == q && q != 0) { inQ = true; pos++; continue; }
-                        if (b == (byte)'\n') { rowsSkipped++; pos++; continue; }
-                        if (b == (byte)'\r') { rowsSkipped++; pos++; if (pos < scanLen && _readBuffer[pos] == (byte)'\n') pos++; continue; }
-                        pos++;
-                    }
-                    rowOffset += pos;
+                    byte b = _readBuffer[pos];
+                    if (inQ) { if (b == q) { if (pos + 1 < scanLen && _readBuffer[pos + 1] == q) { pos += 2; continue; } inQ = false; } pos++; continue; }
+                    if (b == q && q != 0) { inQ = true; pos++; continue; }
+                    if (b == (byte)'\n') { rowsSkipped++; pos++; continue; }
+                    if (b == (byte)'\r') { rowsSkipped++; pos++; if (pos < scanLen && _readBuffer[pos] == (byte)'\n') pos++; continue; }
+                    pos++;
                 }
+                rowOffset += pos;
+                if (rowsSkipped < targetWithinBlock && pos == scanLen)
+                    continue; // Need another chunk
+                break;
             }
+            if (rowOffset >= _state.FileLength) continue;
 
             int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
             if (readLen <= 0) continue;
@@ -194,6 +222,8 @@ internal sealed class CsvViewControl : Control
                 cellX += cellWidth;
             }
         }
+
+        UpdateScrollBar();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
