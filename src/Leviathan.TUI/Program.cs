@@ -816,7 +816,7 @@ void RegisterCommands()
         int val = bpr;
         palette.RegisterCommand("View", $"{bpr} Bytes/Row", "", () => { state.BytesPerRowSetting = val; state.Settings.BytesPerRow = val; state.Settings.Save(); });
     }
-    palette.RegisterCommand("View", "Toggle Word Wrap", "", () => { state.WordWrap = !state.WordWrap; state.Settings.WordWrap = state.WordWrap; state.Settings.Save(); });
+    palette.RegisterCommand("View", "Toggle Line Wrap", "", () => { state.WordWrap = !state.WordWrap; state.Settings.WordWrap = state.WordWrap; state.Settings.Save(); });
     palette.RegisterCommand("View", "Encoding: UTF-8", "", () => state.SwitchEncoding(TextEncoding.Utf8));
     palette.RegisterCommand("View", "Encoding: UTF-16 LE", "", () => state.SwitchEncoding(TextEncoding.Utf16Le));
     palette.RegisterCommand("View", "Encoding: Windows-1252", "", () => state.SwitchEncoding(TextEncoding.Windows1252));

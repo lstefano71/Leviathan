@@ -25,7 +25,7 @@ Leviathan is a large-file editor with Hex, Text, and CSV views.
 - **Decimal offsets** — toggle hex/decimal offset display via `View → Decimal Offsets`, or click the offset value in the status bar.
 
 ### Text view
-- **Word wrap** — toggle via `View → Word Wrap`.
+- **Line wrap** — toggle via `View → Line Wrap`.
 - **Encoding** — switch between UTF-8, UTF-16 LE, and Windows-1252 via `View → Encoding` or by clicking the encoding indicator in the status bar.
 
 ### CSV view
@@ -60,7 +60,7 @@ The status bar at the bottom is interactive — click a field to act on it:
 |---|---|
 | Encoding indicator | Opens encoding switcher menu |
 | View mode indicator | Opens view mode switcher menu |
-| Row / line count | Toggles word wrap (Text) or bytes-per-row menu (Hex) |
+| Row / line count | Toggles line wrap (Text) or bytes-per-row menu (Hex) |
 | Offset indicator | Toggles decimal / hex offset display (Hex) |
 
 ## Themes

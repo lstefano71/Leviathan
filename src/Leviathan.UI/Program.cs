@@ -213,7 +213,7 @@ void RenderMainMenuBar()
         } else {
             // Text view options
             bool wrap = settings.WordWrap;
-            if (ImGui.MenuItem("Word Wrap"u8, ""u8, wrap)) {
+            if (ImGui.MenuItem("Line Wrap"u8, ""u8, wrap)) {
                 settings.WordWrap = !wrap;
                 textView?.WordWrap = settings.WordWrap;
                 settings.Save();
