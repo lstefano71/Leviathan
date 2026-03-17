@@ -4,7 +4,6 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 
-using Leviathan.Core.DataModel;
 using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
@@ -2237,21 +2236,17 @@ internal sealed class TextViewControl : Control
         int minChar = _state.Decoder.MinCharBytes;
         long approx = _state.BomLength;
 
-        if (index is { SparseEntryCount: > 0 })
-        {
+        if (index is { SparseEntryCount: > 0 }) {
             int lastSparseIdx = index.SparseEntryCount - 1;
             long lastSparseOffset = index.GetSparseOffset(lastSparseIdx);
             long sampleNewlines = (long)(lastSparseIdx + 1) * index.SparseFactor;
-            if (sampleNewlines > 0 && lastSparseOffset >= _state.BomLength)
-            {
+            if (sampleNewlines > 0 && lastSparseOffset >= _state.BomLength) {
                 double avgBytesPerLine = Math.Max(1.0, (lastSparseOffset - _state.BomLength + minChar) / (double)sampleNewlines);
                 long sampleLine = sampleNewlines + 1;
                 long remainingLines = Math.Max(0, targetLine - sampleLine);
                 approx = lastSparseOffset + minChar + (long)(remainingLines * avgBytesPerLine);
             }
-        }
-        else
-        {
+        } else {
             long estimatedLines = Math.Max(targetLine, _state.EstimatedTotalLines);
             double ratio = (targetLine - 1) / (double)Math.Max(1, estimatedLines);
             approx = _state.BomLength + (long)((docLength - _state.BomLength) * Math.Clamp(ratio, 0d, 1d));

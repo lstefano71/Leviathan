@@ -1,5 +1,4 @@
 using Hex1b;
-using Hex1b.Events;
 using Hex1b.Input;
 using Hex1b.Widgets;
 

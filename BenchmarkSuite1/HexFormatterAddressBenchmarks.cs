@@ -1,8 +1,11 @@
 using BenchmarkDotNet.Attributes;
+
 using Leviathan.GUI.Helpers;
+
 using Microsoft.VSDiagnostics;
 
 namespace Leviathan.GUI.Benchmarks;
+
 [CPUUsageDiagnoser]
 public class HexFormatterAddressBenchmarks
 {

@@ -73,15 +73,13 @@ public sealed partial class WelcomeScreen : UserControl
         _selectedIndex = -1;
 
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string path in pinnedFiles)
-        {
+        foreach (string path in pinnedFiles) {
             if (!seen.Add(path))
                 continue;
             _allEntries.Add(new FileEntry(path, isPinned: true));
         }
 
-        foreach (string path in recentFiles)
-        {
+        foreach (string path in recentFiles) {
             if (!seen.Add(path))
                 continue;
             _allEntries.Add(new FileEntry(path, isPinned: false));

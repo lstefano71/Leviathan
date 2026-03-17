@@ -4,12 +4,10 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 
-using Leviathan.Core.DataModel;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
 

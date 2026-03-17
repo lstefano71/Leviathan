@@ -1,6 +1,6 @@
-using System.Text;
-
 using Leviathan.GUI.Helpers;
+
+using System.Text;
 
 namespace Leviathan.GUI.Tests;
 

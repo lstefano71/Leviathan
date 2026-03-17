@@ -1429,16 +1429,14 @@ public sealed partial class MainWindow : Window
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         List<string> pinned = [];
-        foreach (string path in _state.Settings.PinnedFiles)
-        {
+        foreach (string path in _state.Settings.PinnedFiles) {
             if (!seen.Add(path))
                 continue;
             pinned.Add(path);
         }
 
         List<string> recent = [];
-        foreach (string path in _state.Settings.RecentFiles)
-        {
+        foreach (string path in _state.Settings.RecentFiles) {
             if (!seen.Add(path))
                 continue;
             recent.Add(path);

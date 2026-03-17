@@ -76,10 +76,8 @@ public sealed class CompoundAction : EditAction
     /// <summary>The child actions in execution order.</summary>
     public EditAction[] Children { get; }
 
-    public override long DataBytes
-    {
-        get
-        {
+    public override long DataBytes {
+        get {
             long total = 0;
             for (int i = 0; i < Children.Length; i++)
                 total += Children[i].DataBytes;

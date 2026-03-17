@@ -2,6 +2,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 
 using Leviathan.GUI.Helpers;
+
 using System.Text.Json;
 
 namespace Leviathan.GUI.Tests;
