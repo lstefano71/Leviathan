@@ -508,6 +508,22 @@ internal sealed class CsvViewControl : Control
         StateChanged?.Invoke();
     }
 
+    /// <summary>Sets the top row from a byte anchor, used for linked-tab viewport sync.</summary>
+    internal void SyncTopOffset(long byteOffset)
+    {
+        if (_state.CsvRowIndex is null || _state.Document is null || _state.CsvRowIndex.TotalRowCount <= 0)
+            return;
+
+        long totalRows = _state.CsvRowIndex.TotalRowCount;
+        long targetRow = Math.Clamp(FindPreciseRowForOffset(byteOffset), 0, totalRows - 1);
+        long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
+        _state.CsvTopRowIndex = Math.Clamp(targetRow, 0, maxTop);
+        _state.CsvCursorRow = targetRow;
+        _state.CsvSelectionAnchorRow = -1;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
     /// <summary>
     /// Finds the precise 0-based data row for a byte offset by using the sparse index
     /// to get close, then linear-scanning forward to the exact row.

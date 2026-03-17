@@ -33,7 +33,7 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: multiple file support. It would be nice if I could open multiple files in different tabs? 
 
-[ ] avalonia front-end: it would be nice if I could open a file in the hex view and then open the same file in the text view in a different tab, and have them synchronized. So that if I scroll in one view, the other view scrolls to the same position. This would be very useful for large files where I want to see both the hex and the text representation at the same time.
+[x] avalonia front-end: it would be nice if I could open a file in the hex view and then open the same file in the text view in a different tab, and have them synchronized. So that if I scroll in one view, the other view scrolls to the same position. This would be very useful for large files where I want to see both the hex and the text representation at the same time.
 
 [x] avalonia front-end: status bar toggling of options (like the encoding). It would be nice if I could click on the encoding in the status bar and have a dropdown menu to select a different encoding. Same for other bits of info in the status bar.
 

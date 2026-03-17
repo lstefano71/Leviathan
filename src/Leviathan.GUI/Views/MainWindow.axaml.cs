@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
         InitializeThemeAndFont();
 
         WireMenuEvents();
+        WireViewTabs();
         WireStatusBarInteractions();
         WireWelcomeScreen();
         BuildFileMenuMru();
@@ -175,6 +176,14 @@ public sealed partial class MainWindow : Window
             if (_state.ActiveView == ViewMode.Hex)
                 ToggleDecimalOffsets();
         };
+    }
+
+    private void WireViewTabs()
+    {
+        TabHex.Click += (_, _) => SwitchView(ViewMode.Hex);
+        TabText.Click += (_, _) => SwitchView(ViewMode.Text);
+        TabCsv.Click += (_, _) => SwitchView(ViewMode.Csv);
+        UpdateViewTabsSelection();
     }
 
     // ─── File operations ───
@@ -475,11 +484,17 @@ public sealed partial class MainWindow : Window
     {
         if (_state.Document is null) return;
 
+        EnsureViewControlsCreated();
+
         if (mode == ViewMode.Csv && _state.CsvRowIndexer is null)
             _state.InitCsvView();
 
+        ViewMode previousMode = _state.ActiveView;
+        long anchorOffset = CaptureViewAnchorOffset(previousMode);
         _state.ActiveView = mode;
-        EnsureViewControlsCreated();
+        if (mode != previousMode)
+            ApplyAnchorOffsetToView(mode, anchorOffset);
+
         UpdateViewVisibility();
         UpdateViewModeChecks();
         UpdateStatusBar();
@@ -685,10 +700,12 @@ public sealed partial class MainWindow : Window
         bool hasFile = _state.Document is not null;
         WelcomeScreen.IsVisible = !hasFile;
 
-        // Hide menu bar and status bar on the welcome screen
+        // Hide editor chrome on the welcome screen
         MainMenu.IsVisible = hasFile;
+        ViewTabsBar.IsVisible = hasFile;
         StatusBar.IsVisible = hasFile;
         MenuCommandPalette.IsEnabled = hasFile;
+        UpdateViewTabsSelection();
 
         if (!hasFile)
             PopulateWelcomeScreen();
@@ -795,6 +812,45 @@ public sealed partial class MainWindow : Window
             ? new TextBlock { Text = "●", FontSize = 10 } : null;
         MenuViewCsv.Icon = _state.ActiveView == ViewMode.Csv
             ? new TextBlock { Text = "●", FontSize = 10 } : null;
+        UpdateViewTabsSelection();
+    }
+
+    private void UpdateViewTabsSelection()
+    {
+        bool hasFile = _state.Document is not null;
+        TabHex.IsEnabled = hasFile && _state.ActiveView != ViewMode.Hex;
+        TabText.IsEnabled = hasFile && _state.ActiveView != ViewMode.Text;
+        TabCsv.IsEnabled = hasFile && _state.ActiveView != ViewMode.Csv;
+
+        TabHex.FontWeight = _state.ActiveView == ViewMode.Hex ? FontWeight.SemiBold : FontWeight.Normal;
+        TabText.FontWeight = _state.ActiveView == ViewMode.Text ? FontWeight.SemiBold : FontWeight.Normal;
+        TabCsv.FontWeight = _state.ActiveView == ViewMode.Csv ? FontWeight.SemiBold : FontWeight.Normal;
+    }
+
+    private long CaptureViewAnchorOffset(ViewMode mode)
+    {
+        Func<long, long>? csvRowOffsetProvider = _csvView is null ? null : _csvView.GetRowByteOffset;
+        return ViewAnchorSync.CaptureSourceAnchorOffset(_state, mode, csvRowOffsetProvider);
+    }
+
+    private void ApplyAnchorOffsetToView(ViewMode mode, long anchorOffset)
+    {
+        if (_state.Document is null)
+            return;
+
+        long targetOffset = ViewAnchorSync.MapAnchorToTargetOffset(_state, mode, anchorOffset);
+
+        switch (mode) {
+            case ViewMode.Hex:
+                _hexView?.SyncTopOffset(targetOffset);
+                break;
+            case ViewMode.Text:
+                _textView?.SyncTopOffset(targetOffset);
+                break;
+            case ViewMode.Csv:
+                _csvView?.SyncTopOffset(targetOffset);
+                break;
+        }
     }
 
     private void UpdateEncodingChecks()

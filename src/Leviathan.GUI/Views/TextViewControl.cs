@@ -573,6 +573,21 @@ internal sealed class TextViewControl : Control
         OnStateChanged();
     }
 
+    /// <summary>Sets the top offset from a byte anchor, used for linked-tab viewport sync.</summary>
+    internal void SyncTopOffset(long offset)
+    {
+        if (_state.Document is null)
+            return;
+
+        long clamped = Math.Clamp(offset, _state.BomLength, _state.Document.Length);
+        _state.TextTopOffset = clamped;
+        _state.TextCursorOffset = clamped;
+        _state.TextSelectionAnchor = -1;
+        _desiredColumn = -1;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
     private long AdvanceOffsetByDisplayColumns(long lineStartOffset, int targetColumn)
     {
         Core.Document? doc = _state.Document;

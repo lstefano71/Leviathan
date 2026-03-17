@@ -435,6 +435,24 @@ internal sealed class HexViewControl : Control
         InvalidateVisual();
     }
 
+    /// <summary>Sets the top row from a byte anchor, used for linked-tab viewport sync.</summary>
+    internal void SyncTopOffset(long offset)
+    {
+        if (_state.Document is null)
+            return;
+
+        long clamped = Math.Clamp(offset, 0, Math.Max(0, _state.FileLength - 1));
+        int bytesPerRow = Math.Max(1, _state.BytesPerRow);
+        long newBase = (clamped / bytesPerRow) * bytesPerRow;
+        long maxBase = Math.Max(0, _state.FileLength - (long)_state.VisibleRows * bytesPerRow);
+        _state.HexBaseOffset = Math.Clamp(newBase, 0, maxBase);
+        _state.HexCursorOffset = clamped;
+        _state.HexSelectionAnchor = -1;
+        _state.NibbleLow = false;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
     private void EnsureCursorVisible()
     {
         long cursor = _state.HexCursorOffset;
