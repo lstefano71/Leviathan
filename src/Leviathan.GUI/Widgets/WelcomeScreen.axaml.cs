@@ -34,6 +34,9 @@ public sealed partial class WelcomeScreen : UserControl
     /// <summary>Raised when the user removes a file from the list.</summary>
     public Action<string>? FileRemoved;
 
+    /// <summary>Raised when the user asks to open online help.</summary>
+    public Action? HelpRequested;
+
     public WelcomeScreen()
     {
         InitializeComponent();
@@ -41,6 +44,7 @@ public sealed partial class WelcomeScreen : UserControl
         SearchInput.TextChanged += (_, _) => ApplyFilter();
         SearchInput.KeyDown += OnSearchKeyDown;
         OpenFileButton.Click += (_, _) => OpenFileRequested?.Invoke();
+        HelpLinkButton.Click += (_, _) => HelpRequested?.Invoke();
 
         // Tunnel handler to intercept PageUp/PageDown before the ScrollViewer consumes them
         AddHandler(KeyDownEvent, OnTunnelKeyDown, RoutingStrategies.Tunnel);

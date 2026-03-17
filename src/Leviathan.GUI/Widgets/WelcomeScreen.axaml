@@ -44,7 +44,7 @@
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="20"
                         HorizontalAlignment="Center" Opacity="0.4" Margin="0,8,0,0">
                 <TextBlock Text="Ctrl+O  Open" FontSize="12" />
-                <TextBlock Text="Ctrl+P  Palette" FontSize="12" />
+                <TextBlock Text="F1  Help" FontSize="12" />
                 <TextBlock Text="Ctrl+Q  Quit" FontSize="12" />
             </StackPanel>
         </Grid>
@@ -65,6 +65,17 @@
                     <TextBlock Text="About" FontSize="13" FontWeight="SemiBold" Opacity="0.6" />
                     <TextBlock x:Name="InfoVersion" Text="Version 0.0.0" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
                     <TextBlock x:Name="InfoBuildDate" Text="" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                    <Button x:Name="HelpLinkButton"
+                            HorizontalAlignment="Left"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="0"
+                            Cursor="Hand">
+                        <TextBlock Text="Open online help ↗"
+                                   FontSize="12"
+                                   Opacity="0.7"
+                                   TextDecorations="Underline" />
+                    </Button>
                 </StackPanel>
 
                 <!-- Keyboard shortcuts section -->
@@ -79,7 +90,7 @@
                                    FontFamily="Consolas, Courier New, monospace" />
                         <TextBlock Text="Ctrl+G     Go to" FontSize="11" Opacity="0.45"
                                    FontFamily="Consolas, Courier New, monospace" />
-                        <TextBlock Text="Ctrl+P     Palette" FontSize="11" Opacity="0.45"
+                        <TextBlock Text="F1         Help" FontSize="11" Opacity="0.45"
                                    FontFamily="Consolas, Courier New, monospace" />
                         <TextBlock Text="F5/F6/F7   Views" FontSize="11" Opacity="0.45"
                                    FontFamily="Consolas, Courier New, monospace" />

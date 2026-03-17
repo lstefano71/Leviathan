@@ -11,6 +11,7 @@ using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 using Leviathan.GUI.Widgets;
+using System.Diagnostics;
 using System.Reflection;
 
 namespace Leviathan.GUI.Views;
@@ -20,6 +21,7 @@ namespace Leviathan.GUI.Views;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private const string OnlineHelpUrl = "https://github.com/lstefano71/Leviathan/blob/main/docs/help.md";
     private readonly AppState _state = new();
     private HexViewControl? _hexView;
     private TextViewControl? _textView;
@@ -744,6 +746,7 @@ public sealed partial class MainWindow : Window
         // Hide menu bar and status bar on the welcome screen
         MainMenu.IsVisible = hasFile;
         StatusBar.IsVisible = hasFile;
+        MenuCommandPalette.IsEnabled = hasFile;
 
         if (!hasFile)
             PopulateWelcomeScreen();
@@ -1243,6 +1246,7 @@ public sealed partial class MainWindow : Window
     {
         WelcomeScreen.FileSelected = path => _ = OpenRecentFileAsync(path);
         WelcomeScreen.OpenFileRequested = () => _ = ShowOpenDialog();
+        WelcomeScreen.HelpRequested = OpenOnlineHelp;
         WelcomeScreen.PinChanged = (path, pinned) =>
         {
             if (pinned)
@@ -1331,13 +1335,16 @@ public sealed partial class MainWindow : Window
         // Global shortcuts that work regardless of focus
         if (e.KeyModifiers == KeyModifiers.Control)
         {
-            bool textInputFocused = IsTextInputFocused();
-            switch (e.Key)
-            {
-                case Key.P:
-                    ShowCommandPalette();
-                    e.Handled = true;
-                    return;
+                bool textInputFocused = IsTextInputFocused();
+                switch (e.Key)
+                {
+                    case Key.P:
+                        if (_state.Document is not null)
+                        {
+                            ShowCommandPalette();
+                            e.Handled = true;
+                        }
+                        return;
                 case Key.Q:
                     Close();
                     e.Handled = true;
@@ -1403,6 +1410,9 @@ public sealed partial class MainWindow : Window
 
     private void ShowCommandPalette()
     {
+        if (_state.Document is null)
+            return;
+
         EnsureOverlaysCreated();
         RefreshCommandPaletteCommands();
         _commandPalette!.Show();
@@ -1557,8 +1567,21 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Delete Row(s)", "Delete selected CSV rows", DoDeleteCsvRows, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.IsReadOnly ? "☑ Read-only Mode" : "☐ Read-only Mode",
+            "Toggle read-only editing lock",
+            ToggleReadOnlyMode,
+            searchName: "Read-only Mode",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.Settings.StartReadOnly ? "☑ Start in Read-only" : "☐ Start in Read-only",
+            "Persist startup in read-only mode",
+            ToggleStartReadOnly,
+            searchName: "Start in Read-only",
+            restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
+        _commandPalette.RegisterCommand("Online Help", "Open docs/help.md in browser", OpenOnlineHelp);
 
         // Theme commands
         foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
@@ -2116,6 +2139,23 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OpenOnlineHelp()
+    {
+        try
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = OnlineHelpUrl,
+                UseShellExecute = true
+            };
+            Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            ShowErrorDialog("Open Help Failed", ex.Message);
+        }
+    }
+
     private void ShowKeyboardShortcuts()
     {
         Window helpWindow = new()
@@ -2158,7 +2198,20 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        helpWindow.Content = scroll;
+        Button openHelpButton = new()
+        {
+            Content = "Open Online Help ↗",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Margin = new Thickness(16, 0, 16, 12)
+        };
+        openHelpButton.Click += (_, _) => OpenOnlineHelp();
+
+        DockPanel layout = new();
+        DockPanel.SetDock(openHelpButton, Dock.Bottom);
+        layout.Children.Add(openHelpButton);
+        layout.Children.Add(scroll);
+
+        helpWindow.Content = layout;
         helpWindow.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)

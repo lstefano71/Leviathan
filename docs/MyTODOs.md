@@ -39,11 +39,11 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [x] avalonia front-end: read-only mode to guarantee we don't accidentally modify a file. Maybe also a "safe mode" where the app starts in read-only mode and then you can explicitly enable editing if you want to?
 
-[ ] avalonia front-end: F1 should also include a clickable link which would open an external browser pointing to a help page on the Leviathan origin repo. The page does not exist yet and needs to be created as a markdown file in the docs folder. Maybe also link on the welcome page?
+[x] avalonia front-end: F1 should also include a clickable link which would open an external browser pointing to a help page on the Leviathan origin repo. The page does not exist yet and needs to be created as a markdown file in the docs folder. Maybe also link on the welcome page?
+
+[x] avalonia front-end: no ctrl-p/command palette on welcome page, I think
 
 [ ] avalonia front-end and core: refactoring and complete code review. keep the code a bit DRY-er. Find places where there is duplicated code and try to abstract it away. Anything that makes sense moving to the core should be moved to the core. Some files might benefit from being split into smaller files.
-
-[ ] avalonia front-end: no ctrl-p/command palette on welcome page, I think
 
 [ ] avalonia front-end: search and replace?
 
