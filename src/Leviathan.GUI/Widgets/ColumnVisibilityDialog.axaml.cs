@@ -37,8 +37,7 @@ public sealed partial class ColumnVisibilityDialog : Window
         HideAllButton.Click += OnHideAll;
         CloseButton.Click += (_, _) => Close();
 
-        Opened += (_, _) =>
-        {
+        Opened += (_, _) => {
             Dispatcher.UIThread.Post(() => SearchBox.Focus(), DispatcherPriority.Input);
         };
     }
@@ -47,8 +46,7 @@ public sealed partial class ColumnVisibilityDialog : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
-        {
+        if (e.Key == Key.Escape) {
             Close();
             e.Handled = true;
             return;
@@ -64,24 +62,21 @@ public sealed partial class ColumnVisibilityDialog : Window
 
         HashSet<int> hidden = _state.CsvHiddenColumns;
 
-        for (int i = 0; i < _columnCount; i++)
-        {
+        for (int i = 0; i < _columnCount; i++) {
             string name = _columnNames[i];
             if (!string.IsNullOrEmpty(filter) &&
                 !name.Contains(filter, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             int colIndex = i;
-            CheckBox cb = new()
-            {
+            CheckBox cb = new() {
                 Content = name,
                 IsChecked = !hidden.Contains(colIndex),
                 Tag = colIndex,
                 Margin = new Avalonia.Thickness(2, 1)
             };
 
-            cb.IsCheckedChanged += (_, _) =>
-            {
+            cb.IsCheckedChanged += (_, _) => {
                 if (cb.IsChecked == true)
                     hidden.Remove(colIndex);
                 else

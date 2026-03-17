@@ -88,8 +88,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
         ClearGotoPreviewState();
         PaletteInput.Text = "";
         FilterCommands("");
-        Dispatcher.UIThread.Post(() =>
-        {
+        Dispatcher.UIThread.Post(() => {
             PaletteInput.Focus();
         }, DispatcherPriority.Input);
     }
@@ -101,8 +100,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
         SaveGotoPreviewOrigin();
         PaletteInput.Text = ":";
         UpdateGotoHint(":");
-        Dispatcher.UIThread.Post(() =>
-        {
+        Dispatcher.UIThread.Post(() => {
             PaletteInput.Focus();
             PaletteInput.CaretIndex = 1;
         }, DispatcherPriority.Input);
@@ -112,16 +110,14 @@ public sealed partial class CommandPaletteOverlay : UserControl
     public void Hide(bool restoreFocus = true)
     {
         IsVisible = false;
-        if (restoreFocus && _restoreFocus is not null)
-        {
+        if (restoreFocus && _restoreFocus is not null) {
             Dispatcher.UIThread.Post(_restoreFocus, DispatcherPriority.Input);
         }
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && (e.Key == Key.P || e.Key == Key.G))
-        {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && (e.Key == Key.P || e.Key == Key.G)) {
             if (IsGotoMode)
                 CancelGotoAndHide();
             else
@@ -131,8 +127,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
             return;
         }
 
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Enter:
                 ExecuteSelectionOrConfirmGoto();
                 e.Handled = true;
@@ -155,16 +150,14 @@ public sealed partial class CommandPaletteOverlay : UserControl
                 e.Handled = true;
                 break;
             case Key.PageDown:
-                if (!IsGotoMode && CommandList.ItemCount > 0)
-                {
+                if (!IsGotoMode && CommandList.ItemCount > 0) {
                     CommandList.SelectedIndex = Math.Min(CommandList.SelectedIndex + 10, CommandList.ItemCount - 1);
                     CommandList.ScrollIntoView(CommandList.SelectedIndex);
                 }
                 e.Handled = true;
                 break;
             case Key.PageUp:
-                if (!IsGotoMode && CommandList.ItemCount > 0)
-                {
+                if (!IsGotoMode && CommandList.ItemCount > 0) {
                     CommandList.SelectedIndex = Math.Max(CommandList.SelectedIndex - 10, 0);
                     CommandList.ScrollIntoView(CommandList.SelectedIndex);
                 }
@@ -177,12 +170,9 @@ public sealed partial class CommandPaletteOverlay : UserControl
     {
         string input = PaletteInput.Text ?? "";
 
-        if (input.StartsWith(':'))
-        {
+        if (input.StartsWith(':')) {
             UpdateGotoHint(input);
-        }
-        else
-        {
+        } else {
             FilterCommands(input);
         }
     }
@@ -199,18 +189,15 @@ public sealed partial class CommandPaletteOverlay : UserControl
     private string BuildGotoHint(string rawInput)
     {
         string target = rawInput.Length > 1 ? rawInput[1..].Trim() : string.Empty;
-        if (string.IsNullOrEmpty(target))
-        {
-            return _state.ActiveView switch
-            {
+        if (string.IsNullOrEmpty(target)) {
+            return _state.ActiveView switch {
                 ViewMode.Hex => "Type :0xOFFSET or :OFFSET then press Enter",
                 ViewMode.Csv => "Type :row then press Enter",
                 _ => "Type :line or :line:column then press Enter"
             };
         }
 
-        return _state.ActiveView switch
-        {
+        return _state.ActiveView switch {
             ViewMode.Hex => TryParseOffset(target, out long offset)
                 ? $"Press Enter to jump to offset 0x{offset:X}"
                 : "Enter a valid byte offset like :0x1A3F or :6703",
@@ -238,24 +225,19 @@ public sealed partial class CommandPaletteOverlay : UserControl
     private void FilterCommands(string query)
     {
         _filteredCommands.Clear();
-        if (string.IsNullOrEmpty(query))
-        {
-            foreach (string recent in _recentCommands)
-            {
+        if (string.IsNullOrEmpty(query)) {
+            foreach (string recent in _recentCommands) {
                 CommandEntry? recentEntry = _allCommands.FirstOrDefault(c =>
                     string.Equals(c.SearchName, recent, StringComparison.OrdinalIgnoreCase));
                 if (recentEntry is not null && !_filteredCommands.Contains(recentEntry))
                     _filteredCommands.Add(recentEntry);
             }
 
-            foreach (CommandEntry entry in _allCommands)
-            {
+            foreach (CommandEntry entry in _allCommands) {
                 if (!_filteredCommands.Contains(entry))
                     _filteredCommands.Add(entry);
             }
-        }
-        else
-        {
+        } else {
             string lowerQuery = query.ToLowerInvariant();
             _filteredCommands.AddRange(_allCommands.Where(c =>
                 c.SearchName.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)
@@ -275,8 +257,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
 
     private bool IsRecent(string searchName)
     {
-        foreach (string recent in _recentCommands)
-        {
+        foreach (string recent in _recentCommands) {
             if (string.Equals(recent, searchName, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
@@ -295,8 +276,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
     {
         string input = PaletteInput.Text ?? "";
 
-        if (input.StartsWith(':'))
-        {
+        if (input.StartsWith(':')) {
             if (TryExecuteGoto(input[1..].Trim()))
                 ConfirmGotoAndHide();
 
@@ -313,16 +293,14 @@ public sealed partial class CommandPaletteOverlay : UserControl
         RecordRecentCommand(entry.SearchName);
         entry.Execute();
 
-        if (entry.CloseOnExecute && entry.RestoreFocusAfterExecute && _restoreFocus is not null)
-        {
+        if (entry.CloseOnExecute && entry.RestoreFocusAfterExecute && _restoreFocus is not null) {
             Dispatcher.UIThread.Post(_restoreFocus, DispatcherPriority.Input);
         }
     }
 
     private bool TryExecuteGoto(string target)
     {
-        switch (_state.ActiveView)
-        {
+        switch (_state.ActiveView) {
             case ViewMode.Hex:
                 if (!TryParseOffset(target, out long offset))
                     return false;
@@ -355,8 +333,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
         if (string.IsNullOrEmpty(target))
             return;
 
-        switch (_state.ActiveView)
-        {
+        switch (_state.ActiveView) {
             case ViewMode.Hex:
                 if (TryParseOffset(target, out long offset))
                     _gotoOffset(offset);
@@ -376,8 +353,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
 
     private void SaveGotoPreviewOrigin()
     {
-        switch (_state.ActiveView)
-        {
+        switch (_state.ActiveView) {
             case ViewMode.Hex:
                 _state.GotoPreviewOrigin = _state.HexCursorOffset;
                 _state.GotoPreviewTopOrigin = _state.HexBaseOffset;
@@ -403,10 +379,8 @@ public sealed partial class CommandPaletteOverlay : UserControl
 
     private void CancelGotoAndHide()
     {
-        if (_state.GotoPreviewOrigin >= 0)
-        {
-            switch (_state.ActiveView)
-            {
+        if (_state.GotoPreviewOrigin >= 0) {
+            switch (_state.ActiveView) {
                 case ViewMode.Hex:
                     _gotoOffset(_state.GotoPreviewOrigin);
                     break;
@@ -456,8 +430,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
         if (parts.Length == 1)
             return true;
 
-        if (string.IsNullOrWhiteSpace(parts[1]))
-        {
+        if (string.IsNullOrWhiteSpace(parts[1])) {
             awaitingColumn = true;
             return true;
         }
@@ -476,13 +449,11 @@ public sealed partial class CommandPaletteOverlay : UserControl
             return false;
 
         string trimmed = input.Trim();
-        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) {
             return long.TryParse(trimmed[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
         }
 
-        if (trimmed.Any(static c => (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-        {
+        if (trimmed.Any(static c => (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
             return long.TryParse(trimmed, System.Globalization.NumberStyles.HexNumber, null, out offset);
         }
 

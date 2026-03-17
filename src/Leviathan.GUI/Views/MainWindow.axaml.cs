@@ -1,16 +1,15 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
-using Avalonia.Styling;
 using Avalonia.Threading;
+
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 using Leviathan.GUI.Widgets;
+
 using System.Diagnostics;
 using System.Reflection;
 
@@ -75,8 +74,7 @@ public sealed partial class MainWindow : Window
 
         // Handle CLI argument
         string[] args = Environment.GetCommandLineArgs();
-        if (args.Length > 1 && File.Exists(args[1]))
-        {
+        if (args.Length > 1 && File.Exists(args[1])) {
             _state.OpenFile(args[1]);
             OnFileOpened();
         }
@@ -88,10 +86,8 @@ public sealed partial class MainWindow : Window
 
         // Keyboard shortcuts not bound to menu items
         KeyDown += OnGlobalKeyDown;
-        MainMenu.Closed += (_, _) =>
-        {
-            if (_suppressNextMenuFocusRestore)
-            {
+        MainMenu.Closed += (_, _) => {
+            if (_suppressNextMenuFocusRestore) {
                 _suppressNextMenuFocusRestore = false;
                 return;
             }
@@ -131,25 +127,21 @@ public sealed partial class MainWindow : Window
         MenuAbout.Click += (_, _) => ShowAboutDialog();
         MenuKeyboardShortcuts.Click += (_, _) => ShowKeyboardShortcuts();
 
-        MenuFind.Click += (_, _) =>
-        {
+        MenuFind.Click += (_, _) => {
             SuppressNextMenuFocusRestore();
             ShowFindBar();
         };
-        MenuCommandPalette.Click += (_, _) =>
-        {
+        MenuCommandPalette.Click += (_, _) => {
             SuppressNextMenuFocusRestore();
             ShowCommandPalette();
         };
         MenuFindNext.Click += (_, _) => FindNext();
         MenuFindPrev.Click += (_, _) => FindPrevious();
-        MenuGoto.Click += (_, _) =>
-        {
+        MenuGoto.Click += (_, _) => {
             SuppressNextMenuFocusRestore();
             ShowGotoPalette();
         };
-        MenuCsvSettings.Click += async (_, _) =>
-        {
+        MenuCsvSettings.Click += async (_, _) => {
             SuppressNextMenuFocusRestore();
             await ShowCsvSettingsDialog();
         };
@@ -169,15 +161,13 @@ public sealed partial class MainWindow : Window
     {
         SbEncodingButton.Click += (_, _) => OpenEncodingStatusMenu();
         SbViewModeButton.Click += (_, _) => OpenViewModeStatusMenu();
-        SbLinesButton.Click += (_, _) =>
-        {
+        SbLinesButton.Click += (_, _) => {
             if (_state.ActiveView == ViewMode.Text)
                 ToggleWordWrap();
             else if (_state.ActiveView == ViewMode.Hex)
                 OpenBytesPerRowStatusMenu();
         };
-        SbPositionButton.Click += (_, _) =>
-        {
+        SbPositionButton.Click += (_, _) => {
             if (_state.ActiveView == ViewMode.Hex)
                 ToggleDecimalOffsets();
         };
@@ -190,15 +180,13 @@ public sealed partial class MainWindow : Window
         if (!await GuardUnsavedChanges()) return;
 
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(
-            new FilePickerOpenOptions
-            {
+            new FilePickerOpenOptions {
                 Title = "Open File",
                 AllowMultiple = false,
                 FileTypeFilter = [FilePickerFileTypes.All]
             });
 
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
-        {
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) {
             _state.OpenFile(path);
             OnFileOpened();
         }
@@ -230,15 +218,12 @@ public sealed partial class MainWindow : Window
     {
         if (_state.Document is null) return;
 
-        if (_state.CurrentFilePath is { } path)
-        {
+        if (_state.CurrentFilePath is { } path) {
             if (!_state.TrySave(path, out string? error))
                 ShowErrorDialog("Save Error", error ?? "Unknown error");
             else
                 UpdateStatusBar();
-        }
-        else
-        {
+        } else {
             _ = ShowSaveAsDialog();
         }
     }
@@ -248,16 +233,14 @@ public sealed partial class MainWindow : Window
         if (_state.Document is null) return;
 
         IStorageFile? file = await StorageProvider.SaveFilePickerAsync(
-            new FilePickerSaveOptions
-            {
+            new FilePickerSaveOptions {
                 Title = "Save As",
                 SuggestedFileName = _state.CurrentFilePath is not null
                     ? Path.GetFileName(_state.CurrentFilePath)
                     : "untitled"
             });
 
-        if (file?.TryGetLocalPath() is { } path)
-        {
+        if (file?.TryGetLocalPath() is { } path) {
             if (!_state.TrySave(path, out string? error))
                 ShowErrorDialog("Save Error", error ?? "Unknown error");
             else
@@ -276,8 +259,7 @@ public sealed partial class MainWindow : Window
             ? System.IO.Path.GetFileName(_state.CurrentFilePath)
             : "Untitled";
 
-        Window dialog = new()
-        {
+        Window dialog = new() {
             Title = "Unsaved Changes",
             Width = 440,
             SizeToContent = SizeToContent.Height,
@@ -287,50 +269,43 @@ public sealed partial class MainWindow : Window
 
         int result = -1; // -1 = cancel, 0 = don't save, 1 = save
 
-        StackPanel panel = new()
-        {
+        StackPanel panel = new() {
             Margin = new Thickness(20, 16, 20, 16),
             Spacing = 16
         };
 
-        panel.Children.Add(new TextBlock
-        {
+        panel.Children.Add(new TextBlock {
             Text = $"Do you want to save the changes you made to \"{fileName}\"?",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 14
         });
 
-        panel.Children.Add(new TextBlock
-        {
+        panel.Children.Add(new TextBlock {
             Text = "Your changes will be lost if you don't save them.",
             Foreground = Brushes.Gray,
             FontSize = 12
         });
 
-        StackPanel buttons = new()
-        {
+        StackPanel buttons = new() {
             Orientation = Avalonia.Layout.Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
         };
 
-        Button saveBtn = new()
-        {
+        Button saveBtn = new() {
             Content = "  _Save  ",
             IsDefault = true,
             Classes = { "accent" }
         };
         saveBtn.Click += (_, _) => { result = 1; dialog.Close(); };
 
-        Button dontSaveBtn = new()
-        {
+        Button dontSaveBtn = new() {
             Content = "  _Don't Save  ",
             Foreground = Brushes.IndianRed
         };
         dontSaveBtn.Click += (_, _) => { result = 0; dialog.Close(); };
 
-        Button cancelBtn = new()
-        {
+        Button cancelBtn = new() {
             Content = "  Cancel  ",
             IsCancel = true
         };
@@ -342,16 +317,14 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(buttons);
         dialog.Content = panel;
 
-        dialog.Opened += (_, _) =>
-        {
+        dialog.Opened += (_, _) => {
             Avalonia.Threading.Dispatcher.UIThread.Post(() => saveBtn.Focus(),
                 Avalonia.Threading.DispatcherPriority.Input);
         };
 
         await dialog.ShowDialog(this);
 
-        if (result == 1)
-        {
+        if (result == 1) {
             SaveFile();
             return !_state.IsModified; // Only proceed if save succeeded
         }
@@ -361,11 +334,9 @@ public sealed partial class MainWindow : Window
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_state.IsModified)
-        {
+        if (_state.IsModified) {
             e.Cancel = true;
-            if (await GuardUnsavedChanges())
-            {
+            if (await GuardUnsavedChanges()) {
                 _state.CancelSearch();
                 _state.CsvRowIndexer?.Dispose();
                 _state.Indexer?.Dispose();
@@ -373,9 +344,7 @@ public sealed partial class MainWindow : Window
                 Closing -= OnWindowClosing;
                 Close();
             }
-        }
-        else
-        {
+        } else {
             _state.CancelSearch();
             _state.CsvRowIndexer?.Dispose();
             _state.Indexer?.Dispose();
@@ -386,16 +355,12 @@ public sealed partial class MainWindow : Window
     private void OnDrop(object? sender, DragEventArgs e)
     {
 #pragma warning disable CS0618 // DragDrop API migration in progress in Avalonia 11.x
-        if (e.Data is Avalonia.Input.IDataObject dataObj)
-        {
+        if (e.Data is Avalonia.Input.IDataObject dataObj) {
             IEnumerable<IStorageItem>? files = dataObj.GetFiles();
 #pragma warning restore CS0618
-            if (files is not null)
-            {
-                foreach (IStorageItem item in files)
-                {
-                    if (item is IStorageFile file && file.TryGetLocalPath() is { } path)
-                    {
+            if (files is not null) {
+                foreach (IStorageItem item in files) {
+                    if (item is IStorageFile file && file.TryGetLocalPath() is { } path) {
                         _state.OpenFile(path);
                         OnFileOpened();
                         return;
@@ -412,11 +377,9 @@ public sealed partial class MainWindow : Window
         EnsureViewControlsCreated();
 
         // Auto-detect CSV by file extension
-        if (_state.CurrentFilePath is { } fp)
-        {
+        if (_state.CurrentFilePath is { } fp) {
             string ext = Path.GetExtension(fp).ToLowerInvariant();
-            if (ext is ".csv" or ".tsv" or ".tab")
-            {
+            if (ext is ".csv" or ".tsv" or ".tab") {
                 _state.InitCsvView();
                 _state.ActiveView = ViewMode.Csv;
             }
@@ -446,20 +409,17 @@ public sealed partial class MainWindow : Window
         _state.SearchInvalidated = () => _findBar?.UpdateMatchStatus();
 
         // Create scrollbars and compose each view + scrollbar in a Grid
-        ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb =>
-        {
+        ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb => {
             _hexView.ScrollBar = sb;
             sb.ValueChanged += _hexView.OnScrollBarValueChanged;
         }));
-        ContentArea.Children.Add(CreateViewWithScrollBar(_textView, sb =>
-        {
+        ContentArea.Children.Add(CreateViewWithScrollBar(_textView, sb => {
             _textView.ScrollBar = sb;
             sb.ValueChanged += _textView.OnScrollBarValueChanged;
         }));
 
         // CSV view + detail panel composed in an outer Grid with splitter
-        Grid csvInner = CreateViewWithScrollBar(_csvView, sb =>
-        {
+        Grid csvInner = CreateViewWithScrollBar(_csvView, sb => {
             _csvView.ScrollBar = sb;
             sb.ValueChanged += _csvView.OnScrollBarValueChanged;
         });
@@ -468,16 +428,14 @@ public sealed partial class MainWindow : Window
         _csvDetailPanel.CloseRequested = () => SetCsvDetailPanelVisible(false);
         _csvDetailPanel.IsVisible = false;
 
-        GridSplitter splitter = new()
-        {
+        GridSplitter splitter = new() {
             Width = 4,
             Background = Brushes.Transparent,
             IsVisible = false
         };
         _csvSplitter = splitter;
 
-        Grid csvOuter = new()
-        {
+        Grid csvOuter = new() {
             ColumnDefinitions = new ColumnDefinitions("*")
         };
         _csvOuterGrid = csvOuter;
@@ -491,15 +449,13 @@ public sealed partial class MainWindow : Window
 
     private static Grid CreateViewWithScrollBar(Control view, Action<Avalonia.Controls.Primitives.ScrollBar> configure)
     {
-        Grid grid = new()
-        {
+        Grid grid = new() {
             ColumnDefinitions = new ColumnDefinitions("*,Auto")
         };
         Grid.SetColumn(view, 0);
         grid.Children.Add(view);
 
-        Avalonia.Controls.Primitives.ScrollBar sb = new()
-        {
+        Avalonia.Controls.Primitives.ScrollBar sb = new() {
             Orientation = Avalonia.Layout.Orientation.Vertical,
             Minimum = 0,
             Width = 14
@@ -571,25 +527,20 @@ public sealed partial class MainWindow : Window
     {
         MenuTheme.Items.Clear();
 
-        foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
-        {
+        foreach (ColorTheme theme in ColorTheme.BuiltInThemes) {
             string id = theme.Id;
-            MenuItem item = new()
-            {
+            MenuItem item = new() {
                 Header = (_state.ActiveTheme.Id == id ? "● " : "○ ") + theme.Name
             };
             item.Click += (_, _) => SwitchTheme(id);
             MenuTheme.Items.Add(item);
         }
 
-        if (_state.UserThemes.Count > 0)
-        {
+        if (_state.UserThemes.Count > 0) {
             MenuTheme.Items.Add(new Separator());
-            foreach (ColorTheme theme in _state.UserThemes)
-            {
+            foreach (ColorTheme theme in _state.UserThemes) {
                 string id = theme.Id;
-                MenuItem item = new()
-                {
+                MenuItem item = new() {
                     Header = (_state.ActiveTheme.Id == id ? "● " : "○ ") + theme.Name
                 };
                 item.Click += (_, _) => SwitchTheme(id);
@@ -605,8 +556,7 @@ public sealed partial class MainWindow : Window
         string currentFont = _state.Settings.FontFamily;
 
         // Create a simple selection window
-        Window fontWindow = new()
-        {
+        Window fontWindow = new() {
             Title = "Select Font",
             Width = 450,
             Height = 500,
@@ -616,8 +566,7 @@ public sealed partial class MainWindow : Window
         DockPanel panel = new();
 
         // Preview text
-        TextBlock preview = new()
-        {
+        TextBlock preview = new() {
             Text = "AaBbCcDdEe 0123456789 {}[]|\\",
             FontFamily = new FontFamily(currentFont),
             FontSize = _state.ContentFontSize,
@@ -629,10 +578,8 @@ public sealed partial class MainWindow : Window
 
         // Font list
         ListBox fontList = new();
-        foreach (string name in monoFonts)
-        {
-            ListBoxItem item = new()
-            {
+        foreach (string name in monoFonts) {
+            ListBoxItem item = new() {
                 Content = name,
                 Tag = name
             };
@@ -641,10 +588,8 @@ public sealed partial class MainWindow : Window
                 fontList.SelectedItem = item;
         }
 
-        fontList.SelectionChanged += (_, _) =>
-        {
-            if (fontList.SelectedItem is ListBoxItem { Tag: string fontName })
-            {
+        fontList.SelectionChanged += (_, _) => {
+            if (fontList.SelectedItem is ListBoxItem { Tag: string fontName }) {
                 preview.FontFamily = new FontFamily(fontName);
                 ApplyFont(fontName, _state.ContentFontSize);
             }
@@ -698,20 +643,16 @@ public sealed partial class MainWindow : Window
 
         SortedSet<string> result = new(StringComparer.OrdinalIgnoreCase);
 
-        try
-        {
-            foreach (FontFamily family in FontManager.Current.SystemFonts)
-            {
+        try {
+            foreach (FontFamily family in FontManager.Current.SystemFonts) {
                 string name = family.Name;
-                if (knownMono.Contains(name))
-                {
+                if (knownMono.Contains(name)) {
                     result.Add(name);
                     continue;
                 }
 
                 // Heuristic: measure 'W' and 'i' — if same width, it's monospace
-                try
-                {
+                try {
                     Typeface typeface = new(name);
                     FormattedText wide = new("W", System.Globalization.CultureInfo.InvariantCulture,
                         FlowDirection.LeftToRight, typeface, 14, Brushes.White);
@@ -719,15 +660,11 @@ public sealed partial class MainWindow : Window
                         FlowDirection.LeftToRight, typeface, 14, Brushes.White);
                     if (Math.Abs(wide.Width - narrow.Width) < 0.1)
                         result.Add(name);
-                }
-                catch
-                {
+                } catch {
                     // Skip fonts that can't be measured
                 }
             }
-        }
-        catch
-        {
+        } catch {
             // If font enumeration fails, return known fonts
         }
 
@@ -751,17 +688,14 @@ public sealed partial class MainWindow : Window
         if (!hasFile)
             PopulateWelcomeScreen();
 
-        if (_hexView is not null)
-        {
+        if (_hexView is not null) {
             // Toggle the Grid wrappers (parent of each view control)
             ((Control)_hexView.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Hex;
             ((Control)_textView!.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Text;
             ((Control)_csvView!.Parent!).IsVisible = hasFile && _state.ActiveView == ViewMode.Csv;
 
-            if (hasFile)
-            {
-                Control activeView = _state.ActiveView switch
-                {
+            if (hasFile) {
+                Control activeView = _state.ActiveView switch {
                     ViewMode.Hex => _hexView,
                     ViewMode.Text => _textView!,
                     ViewMode.Csv => _csvView!,
@@ -778,8 +712,7 @@ public sealed partial class MainWindow : Window
         if (_state.Document is null || _hexView is null || _textView is null || _csvView is null)
             return;
 
-        Control activeView = _state.ActiveView switch
-        {
+        Control activeView = _state.ActiveView switch {
             ViewMode.Hex => _hexView,
             ViewMode.Text => _textView,
             ViewMode.Csv => _csvView,
@@ -991,8 +924,7 @@ public sealed partial class MainWindow : Window
     {
         string readOnlyPrefix = _state.IsReadOnly ? "[RO] " : "";
         string title = $"{readOnlyPrefix}{_buildIdentity.BrandedTitle}";
-        if (_state.CurrentFilePath is { } path)
-        {
+        if (_state.CurrentFilePath is { } path) {
             string modifiedPrefix = _state.IsModified ? "• " : "";
             title = $"{readOnlyPrefix}{modifiedPrefix}{Path.GetFileName(path)} — {_buildIdentity.BrandedTitle}";
         }
@@ -1003,8 +935,7 @@ public sealed partial class MainWindow : Window
     {
         UpdateTitle();
 
-        if (_state.Document is null)
-        {
+        if (_state.Document is null) {
             SbFile.Text = $" {_buildIdentity.BrandedTitle}";
             SbBackground.Text = "";
             SbViewMode.Text = "";
@@ -1028,16 +959,14 @@ public sealed partial class MainWindow : Window
         SbFile.Text = $" {fileName}{modified}{readOnly}";
         ToolTip.SetTip(SbFile, fullPath);
 
-        string viewMode = _state.ActiveView switch
-        {
+        string viewMode = _state.ActiveView switch {
             ViewMode.Hex => "Hex",
             ViewMode.Text => "Text",
             ViewMode.Csv => "CSV",
             _ => ""
         };
 
-        string encoding = _state.Decoder.Encoding switch
-        {
+        string encoding = _state.Decoder.Encoding switch {
             TextEncoding.Utf8 => "UTF-8",
             TextEncoding.Utf16Le => "UTF-16 LE",
             TextEncoding.Windows1252 => "Win-1252",
@@ -1059,8 +988,7 @@ public sealed partial class MainWindow : Window
         SbLinesButton.IsEnabled = _state.ActiveView is ViewMode.Text or ViewMode.Hex;
         SbSizeButton.IsEnabled = false;
 
-        if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null)
-        {
+        if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null) {
             long totalCsvRows = _state.CsvRowIndex.TotalRowCount;
             string sepName = GetSeparatorName(_state.CsvDialect.Separator);
             SbEncoding.Text = $"Sep: {sepName}";
@@ -1073,8 +1001,7 @@ public sealed partial class MainWindow : Window
         }
 
         string offset = "-";
-        if (_state.CurrentCursorOffset >= 0)
-        {
+        if (_state.CurrentCursorOffset >= 0) {
             bool dec = _state.ActiveView == ViewMode.Hex && _state.HexOffsetDecimal;
             offset = dec ? _state.CurrentCursorOffset.ToString("N0") : $"0x{_state.CurrentCursorOffset:X}";
         }
@@ -1087,8 +1014,7 @@ public sealed partial class MainWindow : Window
             : (lineIndexing ? "~ lines" : "0 lines");
         if (_state.ActiveView == ViewMode.Hex)
             linesInfo = $"{linesInfo} · {_state.BytesPerRow} B/R";
-        if (_state.ActiveView == ViewMode.Text)
-        {
+        if (_state.ActiveView == ViewMode.Text) {
             string eol = GetLineEndingStatus();
             if (eol.Length > 0)
                 linesInfo = $"{linesInfo} · {eol}";
@@ -1140,8 +1066,7 @@ public sealed partial class MainWindow : Window
 
     private string GetSelectionStatus()
     {
-        return _state.ActiveView switch
-        {
+        return _state.ActiveView switch {
             ViewMode.Hex when _state.HexSelStart >= 0 && _state.HexSelEnd >= _state.HexSelStart
                 => $"Sel: {_state.HexSelEnd - _state.HexSelStart + 1:N0} B",
             ViewMode.Text when _state.TextSelStart >= 0 && _state.TextSelEnd >= _state.TextSelStart
@@ -1154,8 +1079,7 @@ public sealed partial class MainWindow : Window
 
     private static string GetSeparatorName(byte separator)
     {
-        return separator switch
-        {
+        return separator switch {
             (byte)',' => "Comma",
             (byte)'\t' => "Tab",
             (byte)'|' => "Pipe",
@@ -1193,8 +1117,7 @@ public sealed partial class MainWindow : Window
         bool sawCrLf = false;
         bool sawLf = false;
 
-        for (int i = 0; i <= readLen - minChar; i += minChar)
-        {
+        for (int i = 0; i <= readLen - minChar; i += minChar) {
             if (!IsLfCodeUnit(buf, i, minChar))
                 continue;
 
@@ -1223,8 +1146,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateIndexingStatus()
     {
-        if (_state.Indexer?.Index is { } lineIndex)
-        {
+        if (_state.Indexer?.Index is { } lineIndex) {
             long total = lineIndex.TotalLineCount;
             if (total > 0)
                 _state.EstimatedTotalLines = total;
@@ -1247,8 +1169,7 @@ public sealed partial class MainWindow : Window
         WelcomeScreen.FileSelected = path => _ = OpenRecentFileAsync(path);
         WelcomeScreen.OpenFileRequested = () => _ = ShowOpenDialog();
         WelcomeScreen.HelpRequested = OpenOnlineHelp;
-        WelcomeScreen.PinChanged = (path, pinned) =>
-        {
+        WelcomeScreen.PinChanged = (path, pinned) => {
             if (pinned)
                 _state.Settings.PinFile(path);
             else
@@ -1256,8 +1177,7 @@ public sealed partial class MainWindow : Window
             PopulateWelcomeScreen();
             BuildFileMenuMru();
         };
-        WelcomeScreen.FileRemoved = path =>
-        {
+        WelcomeScreen.FileRemoved = path => {
             _state.Settings.RemoveFile(path);
             PopulateWelcomeScreen();
             BuildFileMenuMru();
@@ -1278,8 +1198,7 @@ public sealed partial class MainWindow : Window
         // Remove any previous dynamic MRU items (between first Separator and MruSeparator)
         List<Control> toRemove = [];
         bool inMruZone = false;
-        foreach (Control child in FileMenu.Items.Cast<Control>())
-        {
+        foreach (Control child in FileMenu.Items.Cast<Control>()) {
             if (child == MruSeparator) break;
             if (inMruZone) toRemove.Add(child);
             if (child is Separator && child != MruSeparator && !inMruZone) inMruZone = true;
@@ -1290,16 +1209,12 @@ public sealed partial class MainWindow : Window
         // Combine pinned + recent for the file menu
         List<string> allFiles = [.. _state.Settings.PinnedFiles, .. _state.Settings.RecentFiles];
 
-        if (allFiles.Count == 0)
-        {
+        if (allFiles.Count == 0) {
             MruSeparator.IsVisible = false;
-        }
-        else
-        {
+        } else {
             MruSeparator.IsVisible = true;
             int insertIdx = FileMenu.Items.IndexOf(MruSeparator);
-            for (int i = 0; i < Math.Min(9, allFiles.Count); i++)
-            {
+            for (int i = 0; i < Math.Min(9, allFiles.Count); i++) {
                 string path = allFiles[i];
                 string fileName = Path.GetFileName(path);
                 int number = i + 1;
@@ -1333,18 +1248,15 @@ public sealed partial class MainWindow : Window
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         // Global shortcuts that work regardless of focus
-        if (e.KeyModifiers == KeyModifiers.Control)
-        {
-                bool textInputFocused = IsTextInputFocused();
-                switch (e.Key)
-                {
-                    case Key.P:
-                        if (_state.Document is not null)
-                        {
-                            ShowCommandPalette();
-                            e.Handled = true;
-                        }
-                        return;
+        if (e.KeyModifiers == KeyModifiers.Control) {
+            bool textInputFocused = IsTextInputFocused();
+            switch (e.Key) {
+                case Key.P:
+                    if (_state.Document is not null) {
+                        ShowCommandPalette();
+                        e.Handled = true;
+                    }
+                    return;
                 case Key.Q:
                     Close();
                     e.Handled = true;
@@ -1372,16 +1284,14 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.G)
-        {
+        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.G) {
             ToggleGutter();
             e.Handled = true;
             return;
         }
 
         // F2 for CSV record detail panel toggle
-        if (e.Key == Key.F2 && _state.ActiveView == ViewMode.Csv)
-        {
+        if (e.Key == Key.F2 && _state.ActiveView == ViewMode.Csv) {
             ToggleCsvDetailPanel();
             e.Handled = true;
             return;
@@ -1584,8 +1494,7 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("Online Help", "Open docs/help.md in browser", OpenOnlineHelp);
 
         // Theme commands
-        foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
-        {
+        foreach (ColorTheme theme in ColorTheme.BuiltInThemes) {
             string id = theme.Id;
             string name = theme.Name;
             _commandPalette.RegisterCommand(
@@ -1596,8 +1505,7 @@ public sealed partial class MainWindow : Window
                 restoreFocusAfterExecute: true);
         }
 
-        foreach (ColorTheme theme in _state.UserThemes)
-        {
+        foreach (ColorTheme theme in _state.UserThemes) {
             string id = theme.Id;
             string name = theme.Name;
             _commandPalette.RegisterCommand(
@@ -1625,8 +1533,7 @@ public sealed partial class MainWindow : Window
             searchName: "Record Detail Panel",
             restoreFocusAfterExecute: true);
 
-        foreach (string pinnedPath in _state.Settings.PinnedFiles)
-        {
+        foreach (string pinnedPath in _state.Settings.PinnedFiles) {
             string capturedPath = pinnedPath;
             string fileName = Path.GetFileName(capturedPath);
             _commandPalette.RegisterCommand(
@@ -1636,8 +1543,7 @@ public sealed partial class MainWindow : Window
                 searchName: $"Open Pinned {fileName}");
         }
 
-        foreach (string recentPath in _state.Settings.RecentFiles.Take(20))
-        {
+        foreach (string recentPath in _state.Settings.RecentFiles.Take(20)) {
             string capturedPath = recentPath;
             string fileName = Path.GetFileName(capturedPath);
             _commandPalette.RegisterCommand(
@@ -1672,34 +1578,25 @@ public sealed partial class MainWindow : Window
         string query = _state.FindInput;
 
         // Validate pattern before launching background task
-        if (isHex)
-        {
-            try { SearchEngine.ParseHexPattern(query); }
-            catch (FormatException)
-            {
+        if (isHex) {
+            try { SearchEngine.ParseHexPattern(query); } catch (FormatException) {
                 _state.IsSearching = false;
                 _state.SearchStatus = "Invalid hex pattern";
                 _findBar?.UpdateMatchStatus();
                 return;
             }
-        }
-        else if (isRegex && !SearchEngine.IsValidRegex(query))
-        {
+        } else if (isRegex && !SearchEngine.IsValidRegex(query)) {
             _state.IsSearching = false;
             _state.SearchStatus = "Invalid regex";
             _findBar?.UpdateMatchStatus();
             return;
         }
 
-        _state.SearchTask = Task.Run(() =>
-        {
+        _state.SearchTask = Task.Run(() => {
             IEnumerable<SearchResult> source;
-            if (isRegex)
-            {
+            if (isRegex) {
                 source = SearchEngine.FindAllRegex(doc, decoder, query, caseSensitive, cts.Token);
-            }
-            else
-            {
+            } else {
                 byte[] pattern = isHex
                     ? SearchEngine.ParseHexPattern(query)
                     : decoder.EncodeString(query);
@@ -1712,20 +1609,16 @@ public sealed partial class MainWindow : Window
             List<SearchResult> batch = new(BatchSize);
             int totalSoFar = 0;
 
-            foreach (SearchResult r in source)
-            {
+            foreach (SearchResult r in source) {
                 batch.Add(r);
-                if (batch.Count >= BatchSize)
-                {
+                if (batch.Count >= BatchSize) {
                     List<SearchResult> toPost = batch;
                     batch = new List<SearchResult>(BatchSize);
                     int batchTotal = totalSoFar + toPost.Count;
                     totalSoFar = batchTotal;
-                    Dispatcher.UIThread.Post(() =>
-                    {
+                    Dispatcher.UIThread.Post(() => {
                         _state.SearchResults.AddRange(toPost);
-                        if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0)
-                        {
+                        if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
                             _state.CurrentMatchIndex = 0;
                             NavigateToMatch(0);
                         }
@@ -1739,14 +1632,12 @@ public sealed partial class MainWindow : Window
 
             // Post final batch
             List<SearchResult> finalBatch = batch;
-            Dispatcher.UIThread.Post(() =>
-            {
+            Dispatcher.UIThread.Post(() => {
                 if (finalBatch.Count > 0)
                     _state.SearchResults.AddRange(finalBatch);
 
                 _state.IsSearching = false;
-                if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0)
-                {
+                if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
                     _state.CurrentMatchIndex = 0;
                     NavigateToMatch(0);
                 }
@@ -1783,16 +1674,11 @@ public sealed partial class MainWindow : Window
         if (matchIndex < 0 || matchIndex >= _state.SearchResults.Count) return;
         long offset = _state.SearchResults[matchIndex].Offset;
 
-        if (_state.ActiveView == ViewMode.Hex)
-        {
+        if (_state.ActiveView == ViewMode.Hex) {
             _hexView?.GotoOffset(offset);
-        }
-        else if (_state.ActiveView == ViewMode.Text)
-        {
+        } else if (_state.ActiveView == ViewMode.Text) {
             _textView?.GotoOffset(offset);
-        }
-        else if (_state.ActiveView == ViewMode.Csv)
-        {
+        } else if (_state.ActiveView == ViewMode.Csv) {
             _csvView?.GotoOffset(offset);
         }
     }
@@ -1829,29 +1715,23 @@ public sealed partial class MainWindow : Window
             return false;
 
         string? text = null;
-        if (_state.ActiveView == ViewMode.Hex)
-        {
+        if (_state.ActiveView == ViewMode.Hex) {
             long selStart = _state.HexSelStart;
             long selEnd = _state.HexSelEnd;
-            if (selStart >= 0 && selEnd >= selStart)
-            {
+            if (selStart >= 0 && selEnd >= selStart) {
                 int len = (int)Math.Min(selEnd - selStart + 1, 65536);
                 byte[] buf = new byte[len];
                 _state.Document.Read(selStart, buf);
                 text = string.Join(' ', buf.Select(b => b.ToString("X2")));
             }
-        }
-        else if (_state.ActiveView == ViewMode.Text)
-        {
+        } else if (_state.ActiveView == ViewMode.Text) {
             long selStart = _state.TextSelStart;
             long selEnd = _state.TextSelEnd;
-            if (selStart >= 0 && selEnd >= selStart)
-            {
+            if (selStart >= 0 && selEnd >= selStart) {
                 int len = (int)Math.Min(selEnd - selStart + 1, 131072);
                 byte[] buf = new byte[len];
                 _state.Document.Read(selStart, buf);
-                System.Text.Encoding enc = _state.Decoder.Encoding switch
-                {
+                System.Text.Encoding enc = _state.Decoder.Encoding switch {
                     TextEncoding.Utf16Le => System.Text.Encoding.Unicode,
                     TextEncoding.Windows1252 => System.Text.Encoding.Latin1,
                     _ => System.Text.Encoding.UTF8
@@ -1874,8 +1754,7 @@ public sealed partial class MainWindow : Window
         if (IsEditBlockedByReadOnly())
             return false;
 
-        if (_state.ActiveView == ViewMode.Hex)
-        {
+        if (_state.ActiveView == ViewMode.Hex) {
             long selStart = _state.HexSelStart;
             long selEnd = _state.HexSelEnd;
             if (selStart < 0 || selEnd < selStart)
@@ -1887,9 +1766,7 @@ public sealed partial class MainWindow : Window
             _state.HexCursorOffset = _state.Document.Length > 0
                 ? Math.Min(selStart, _state.Document.Length - 1)
                 : 0;
-        }
-        else if (_state.ActiveView == ViewMode.Text)
-        {
+        } else if (_state.ActiveView == ViewMode.Text) {
             long selStart = _state.TextSelStart;
             long selEnd = _state.TextSelEnd;
             if (selStart < 0 || selEnd < selStart)
@@ -1898,9 +1775,7 @@ public sealed partial class MainWindow : Window
             _state.Document.Delete(selStart, selEnd - selStart + 1);
             _state.TextSelectionAnchor = -1;
             _state.TextCursorOffset = selStart;
-        }
-        else
-        {
+        } else {
             return false;
         }
 
@@ -1926,8 +1801,7 @@ public sealed partial class MainWindow : Window
 
         DeleteActiveSelection();
 
-        if (_state.ActiveView == ViewMode.Hex)
-        {
+        if (_state.ActiveView == ViewMode.Hex) {
             byte[] bytes = TryParseHexClipboard(clipboardText, out byte[] parsed)
                 ? parsed
                 : System.Text.Encoding.UTF8.GetBytes(clipboardText);
@@ -1940,11 +1814,8 @@ public sealed partial class MainWindow : Window
             _state.HexCursorOffset = insertAt + bytes.Length - 1;
             _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
-        }
-        else
-        {
-            System.Text.Encoding enc = _state.Decoder.Encoding switch
-            {
+        } else {
+            System.Text.Encoding enc = _state.Decoder.Encoding switch {
                 TextEncoding.Utf16Le => System.Text.Encoding.Unicode,
                 TextEncoding.Windows1252 => System.Text.Encoding.Latin1,
                 _ => System.Text.Encoding.UTF8
@@ -1969,24 +1840,20 @@ public sealed partial class MainWindow : Window
     private static bool TryParseHexClipboard(string text, out byte[] bytes)
     {
         string compact = new(text.Where(static c => !char.IsWhiteSpace(c)).ToArray());
-        if (compact.Length == 0 || (compact.Length % 2) != 0)
-        {
+        if (compact.Length == 0 || (compact.Length % 2) != 0) {
             bytes = [];
             return false;
         }
 
-        for (int i = 0; i < compact.Length; i++)
-        {
-            if (!Uri.IsHexDigit(compact[i]))
-            {
+        for (int i = 0; i < compact.Length; i++) {
+            if (!Uri.IsHexDigit(compact[i])) {
                 bytes = [];
                 return false;
             }
         }
 
         bytes = new byte[compact.Length / 2];
-        for (int i = 0; i < bytes.Length; i++)
-        {
+        for (int i = 0; i < bytes.Length; i++) {
             bytes[i] = Convert.ToByte(compact.Substring(i * 2, 2), 16);
         }
         return true;
@@ -1996,13 +1863,10 @@ public sealed partial class MainWindow : Window
     {
         if (_state.Document is null) return;
 
-        if (_state.ActiveView == ViewMode.Hex)
-        {
+        if (_state.ActiveView == ViewMode.Hex) {
             _state.HexSelectionAnchor = 0;
             _state.HexCursorOffset = _state.FileLength - 1;
-        }
-        else if (_state.ActiveView == ViewMode.Text)
-        {
+        } else if (_state.ActiveView == ViewMode.Text) {
             _state.TextSelectionAnchor = _state.BomLength;
             _state.TextCursorOffset = _state.FileLength;
         }
@@ -2033,15 +1897,12 @@ public sealed partial class MainWindow : Window
         _csvSplitter.IsVisible = visible;
 
         // Toggle column definitions: "*" when hidden, "*,Auto,300" when visible
-        if (visible)
-        {
+        if (visible) {
             _csvOuterGrid.ColumnDefinitions = new ColumnDefinitions("*,Auto,300");
             Grid.SetColumn(_csvSplitter, 1);
             Grid.SetColumn(_csvDetailPanel, 2);
             _csvDetailPanel.UpdateRecord(_state, _csvView!);
-        }
-        else
-        {
+        } else {
             Grid.SetColumn(_csvSplitter, 0);
             Grid.SetColumn(_csvDetailPanel, 0);
             _csvOuterGrid.ColumnDefinitions = new ColumnDefinitions("*");
@@ -2064,8 +1925,7 @@ public sealed partial class MainWindow : Window
     {
         CsvSettingsDialog dialog = new(_state);
         await dialog.ShowDialog(this);
-        if (dialog.Applied)
-        {
+        if (dialog.Applied) {
             _csvView?.InvalidateVisual();
             UpdateStatusBar();
         }
@@ -2078,8 +1938,7 @@ public sealed partial class MainWindow : Window
     {
         string buildDate = _buildIdentity.BuildDateUtc ?? "";
 
-        Window aboutWindow = new()
-        {
+        Window aboutWindow = new() {
             Title = "About Leviathan",
             Width = 400,
             Height = 220,
@@ -2087,8 +1946,7 @@ public sealed partial class MainWindow : Window
             CanResize = false
         };
 
-        StackPanel content = new()
-        {
+        StackPanel content = new() {
             Margin = new Thickness(24),
             Spacing = 8,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
@@ -2121,7 +1979,7 @@ public sealed partial class MainWindow : Window
             if (commit.Length > 12)
                 commit = commit[..12];
 
-            string aboutVersion =  $"{version} (sha {commit})";
+            string aboutVersion = $"{version} (sha {commit})";
             string title = $"Leviathan v{version}";
             string? buildDate = ReadAssemblyMetadata(assembly, "BuildDateUtc");
             return new BuildIdentity(version, aboutVersion, title, buildDate);
@@ -2129,8 +1987,7 @@ public sealed partial class MainWindow : Window
 
         private static string? ReadAssemblyMetadata(Assembly assembly, string key)
         {
-            foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
-            {
+            foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>()) {
                 if (string.Equals(metadata.Key, key, StringComparison.Ordinal)
                     && !string.IsNullOrWhiteSpace(metadata.Value))
                     return metadata.Value;
@@ -2141,25 +1998,20 @@ public sealed partial class MainWindow : Window
 
     private void OpenOnlineHelp()
     {
-        try
-        {
-            ProcessStartInfo startInfo = new()
-            {
+        try {
+            ProcessStartInfo startInfo = new() {
                 FileName = OnlineHelpUrl,
                 UseShellExecute = true
             };
             Process.Start(startInfo);
-        }
-        catch (Exception ex)
-        {
+        } catch (Exception ex) {
             ShowErrorDialog("Open Help Failed", ex.Message);
         }
     }
 
     private void ShowKeyboardShortcuts()
     {
-        Window helpWindow = new()
-        {
+        Window helpWindow = new() {
             Title = "Keyboard Shortcuts",
             Width = 450,
             Height = 400,
@@ -2187,10 +2039,8 @@ public sealed partial class MainWindow : Window
             PgUp/PgDn       Page up/down
             """;
 
-        ScrollViewer scroll = new()
-        {
-            Content = new TextBlock
-            {
+        ScrollViewer scroll = new() {
+            Content = new TextBlock {
                 Text = shortcuts,
                 FontFamily = new FontFamily("Consolas, Courier New, monospace"),
                 FontSize = 13,
@@ -2198,8 +2048,7 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        Button openHelpButton = new()
-        {
+        Button openHelpButton = new() {
             Content = "Open Online Help ↗",
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
             Margin = new Thickness(16, 0, 16, 12)
@@ -2212,10 +2061,8 @@ public sealed partial class MainWindow : Window
         layout.Children.Add(scroll);
 
         helpWindow.Content = layout;
-        helpWindow.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Escape)
-            {
+        helpWindow.KeyDown += (_, e) => {
+            if (e.Key == Key.Escape) {
                 helpWindow.Close();
                 e.Handled = true;
             }
@@ -2225,8 +2072,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowErrorDialog(string title, string message)
     {
-        Window errorWindow = new()
-        {
+        Window errorWindow = new() {
             Title = title,
             Width = 400,
             Height = 150,

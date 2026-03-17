@@ -1,8 +1,9 @@
+using Avalonia.Media;
+using Avalonia.Styling;
+
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Avalonia.Media;
-using Avalonia.Styling;
 
 namespace Leviathan.GUI.Helpers;
 
@@ -120,75 +121,75 @@ internal sealed class ColorTheme
     /// <summary>Dark theme palette — light text on dark background (VS Code style).</summary>
     public static ColorTheme Dark { get; } = new(
         id: "dark", name: "Dark", baseVariant: ThemeVariant.Dark,
-        textPrimary:          Brush(220, 220, 220),         // #DCDCDC
-        textSecondary:        Brush(128, 128, 200),         // muted blue-purple
-        textMuted:            Brush(120, 120, 120),         // dim gray
-        background:           Brush(30, 30, 30),            // #1E1E1E
-        selectionHighlight:   BrushA(80, 51, 153, 255),     // translucent blue
-        cursorHighlight:      BrushA(120, 255, 200, 50),    // translucent gold
-        gridLine:             BrushA(60, 128, 128, 128),    // faint gray
-        headerBackground:     BrushA(40, 100, 100, 200),    // faint blue
-        headerText:           Brush(200, 200, 255),         // light lavender
-        gutterBackground:     BrushA(30, 128, 128, 128),    // near-transparent gray
-        cursorBar:            BrushA(200, 220, 220, 220),   // bright caret
-        matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
+        textPrimary: Brush(220, 220, 220),         // #DCDCDC
+        textSecondary: Brush(128, 128, 200),         // muted blue-purple
+        textMuted: Brush(120, 120, 120),         // dim gray
+        background: Brush(30, 30, 30),            // #1E1E1E
+        selectionHighlight: BrushA(80, 51, 153, 255),     // translucent blue
+        cursorHighlight: BrushA(120, 255, 200, 50),    // translucent gold
+        gridLine: BrushA(60, 128, 128, 128),    // faint gray
+        headerBackground: BrushA(40, 100, 100, 200),    // faint blue
+        headerText: Brush(200, 200, 255),         // light lavender
+        gutterBackground: BrushA(30, 128, 128, 128),    // near-transparent gray
+        cursorBar: BrushA(200, 220, 220, 220),   // bright caret
+        matchHighlight: BrushA(90, 255, 255, 0),      // translucent yellow
         activeMatchHighlight: BrushA(140, 255, 165, 0),     // translucent orange
-        rowStripe:            BrushA(12, 255, 255, 255),    // very subtle white tint
-        columnStripe:         BrushA(8, 100, 150, 255)      // very subtle blue tint
+        rowStripe: BrushA(12, 255, 255, 255),    // very subtle white tint
+        columnStripe: BrushA(8, 100, 150, 255)      // very subtle blue tint
     );
     public static ColorTheme Light { get; } = new(
         id: "light", name: "Light", baseVariant: ThemeVariant.Light,
-        textPrimary:          Brush(30, 30, 30),            // near-black
-        textSecondary:        Brush(80, 80, 140),           // muted blue
-        textMuted:            Brush(160, 160, 160),         // mid gray
-        background:           Brush(252, 252, 252),         // near-white
-        selectionHighlight:   BrushA(60, 51, 120, 255),     // translucent blue
-        cursorHighlight:      BrushA(80, 255, 180, 0),      // translucent amber
-        gridLine:             BrushA(50, 80, 80, 80),       // faint dark gray
-        headerBackground:     BrushA(30, 60, 60, 160),      // faint blue
-        headerText:           Brush(40, 40, 120),           // dark blue
-        gutterBackground:     BrushA(20, 80, 80, 80),       // near-transparent
-        cursorBar:            BrushA(220, 30, 30, 30),      // dark caret
-        matchHighlight:       BrushA(70, 255, 220, 0),      // translucent yellow
+        textPrimary: Brush(30, 30, 30),            // near-black
+        textSecondary: Brush(80, 80, 140),           // muted blue
+        textMuted: Brush(160, 160, 160),         // mid gray
+        background: Brush(252, 252, 252),         // near-white
+        selectionHighlight: BrushA(60, 51, 120, 255),     // translucent blue
+        cursorHighlight: BrushA(80, 255, 180, 0),      // translucent amber
+        gridLine: BrushA(50, 80, 80, 80),       // faint dark gray
+        headerBackground: BrushA(30, 60, 60, 160),      // faint blue
+        headerText: Brush(40, 40, 120),           // dark blue
+        gutterBackground: BrushA(20, 80, 80, 80),       // near-transparent
+        cursorBar: BrushA(220, 30, 30, 30),      // dark caret
+        matchHighlight: BrushA(70, 255, 220, 0),      // translucent yellow
         activeMatchHighlight: BrushA(100, 255, 140, 0),     // translucent orange
-        rowStripe:            BrushA(10, 0, 0, 0),          // very subtle dark tint
-        columnStripe:         BrushA(6, 60, 100, 200)       // very subtle blue tint
+        rowStripe: BrushA(10, 0, 0, 0),          // very subtle dark tint
+        columnStripe: BrushA(6, 60, 100, 200)       // very subtle blue tint
     );
     public static ColorTheme GreenPhosphor { get; } = new(
         id: "green-phosphor", name: "Green Phosphor", baseVariant: ThemeVariant.Dark,
-        textPrimary:          Brush(51, 255, 51),           // #33FF33
-        textSecondary:        Brush(34, 170, 34),           // #22AA22
-        textMuted:            Brush(17, 119, 17),           // #117711
-        background:           Brush(10, 10, 10),            // #0A0A0A
-        selectionHighlight:   BrushA(80, 51, 255, 51),      // translucent green
-        cursorHighlight:      BrushA(120, 255, 200, 50),    // translucent gold
-        gridLine:             BrushA(40, 51, 255, 51),      // faint green
-        headerBackground:     BrushA(30, 51, 255, 51),      // faint green
-        headerText:           Brush(102, 255, 102),         // #66FF66
-        gutterBackground:     BrushA(20, 51, 255, 51),      // near-transparent green
-        cursorBar:            BrushA(200, 51, 255, 51),     // bright green caret
-        matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
+        textPrimary: Brush(51, 255, 51),           // #33FF33
+        textSecondary: Brush(34, 170, 34),           // #22AA22
+        textMuted: Brush(17, 119, 17),           // #117711
+        background: Brush(10, 10, 10),            // #0A0A0A
+        selectionHighlight: BrushA(80, 51, 255, 51),      // translucent green
+        cursorHighlight: BrushA(120, 255, 200, 50),    // translucent gold
+        gridLine: BrushA(40, 51, 255, 51),      // faint green
+        headerBackground: BrushA(30, 51, 255, 51),      // faint green
+        headerText: Brush(102, 255, 102),         // #66FF66
+        gutterBackground: BrushA(20, 51, 255, 51),      // near-transparent green
+        cursorBar: BrushA(200, 51, 255, 51),     // bright green caret
+        matchHighlight: BrushA(90, 255, 255, 0),      // translucent yellow
         activeMatchHighlight: BrushA(140, 255, 165, 0),     // translucent orange
-        rowStripe:            BrushA(10, 51, 255, 51),      // very subtle green tint
-        columnStripe:         BrushA(6, 51, 200, 51)        // very subtle green tint
+        rowStripe: BrushA(10, 51, 255, 51),      // very subtle green tint
+        columnStripe: BrushA(6, 51, 200, 51)        // very subtle green tint
     );
     public static ColorTheme AmberPhosphor { get; } = new(
         id: "amber-phosphor", name: "Amber Phosphor", baseVariant: ThemeVariant.Dark,
-        textPrimary:          Brush(255, 176, 0),           // #FFB000
-        textSecondary:        Brush(204, 140, 0),           // #CC8C00
-        textMuted:            Brush(128, 88, 0),            // #805800
-        background:           Brush(26, 10, 0),             // #1A0A00
-        selectionHighlight:   BrushA(80, 255, 176, 0),      // translucent amber
-        cursorHighlight:      BrushA(120, 255, 220, 80),    // translucent gold
-        gridLine:             BrushA(40, 255, 176, 0),      // faint amber
-        headerBackground:     BrushA(30, 255, 176, 0),      // faint amber
-        headerText:           Brush(255, 210, 100),         // bright amber
-        gutterBackground:     BrushA(20, 255, 176, 0),      // near-transparent amber
-        cursorBar:            BrushA(200, 255, 176, 0),     // bright amber caret
-        matchHighlight:       BrushA(90, 255, 255, 0),      // translucent yellow
+        textPrimary: Brush(255, 176, 0),           // #FFB000
+        textSecondary: Brush(204, 140, 0),           // #CC8C00
+        textMuted: Brush(128, 88, 0),            // #805800
+        background: Brush(26, 10, 0),             // #1A0A00
+        selectionHighlight: BrushA(80, 255, 176, 0),      // translucent amber
+        cursorHighlight: BrushA(120, 255, 220, 80),    // translucent gold
+        gridLine: BrushA(40, 255, 176, 0),      // faint amber
+        headerBackground: BrushA(30, 255, 176, 0),      // faint amber
+        headerText: Brush(255, 210, 100),         // bright amber
+        gutterBackground: BrushA(20, 255, 176, 0),      // near-transparent amber
+        cursorBar: BrushA(200, 255, 176, 0),     // bright amber caret
+        matchHighlight: BrushA(90, 255, 255, 0),      // translucent yellow
         activeMatchHighlight: BrushA(140, 255, 200, 0),     // translucent bright amber
-        rowStripe:            BrushA(10, 255, 176, 0),      // very subtle amber tint
-        columnStripe:         BrushA(6, 200, 140, 0)        // very subtle amber tint
+        rowStripe: BrushA(10, 255, 176, 0),      // very subtle amber tint
+        columnStripe: BrushA(6, 200, 140, 0)        // very subtle amber tint
     );
 
     /// <summary>All built-in themes.</summary>
@@ -202,16 +203,13 @@ internal sealed class ColorTheme
     /// </summary>
     public static ColorTheme FindById(string id, IReadOnlyList<ColorTheme>? userThemes = null)
     {
-        foreach (ColorTheme theme in BuiltInThemes)
-        {
+        foreach (ColorTheme theme in BuiltInThemes) {
             if (string.Equals(theme.Id, id, StringComparison.OrdinalIgnoreCase))
                 return theme;
         }
 
-        if (userThemes is not null)
-        {
-            foreach (ColorTheme theme in userThemes)
-            {
+        if (userThemes is not null) {
+            foreach (ColorTheme theme in userThemes) {
                 if (string.Equals(theme.Id, id, StringComparison.OrdinalIgnoreCase))
                     return theme;
             }
@@ -232,17 +230,13 @@ internal sealed class ColorTheme
         if (!Directory.Exists(themesDirectory))
             return themes;
 
-        foreach (string file in Directory.EnumerateFiles(themesDirectory, "*.json"))
-        {
-            try
-            {
+        foreach (string file in Directory.EnumerateFiles(themesDirectory, "*.json")) {
+            try {
                 string json = File.ReadAllText(file);
                 ColorTheme? theme = LoadFromJson(json);
                 if (theme is not null)
                     themes.Add(theme);
-            }
-            catch
-            {
+            } catch {
                 // Skip invalid theme files
             }
         }
@@ -257,12 +251,9 @@ internal sealed class ColorTheme
     public static ColorTheme? LoadFromJson(string json)
     {
         ThemeDto? dto;
-        try
-        {
+        try {
             dto = JsonSerializer.Deserialize(json, ColorThemeJsonContext.Default.ThemeDto);
-        }
-        catch
-        {
+        } catch {
             return null;
         }
 
@@ -285,21 +276,21 @@ internal sealed class ColorTheme
             id: id,
             name: dto.Name!,
             baseVariant: baseVariant,
-            textPrimary:          ParseBrush(c, "textPrimary", fallback.TextPrimary),
-            textSecondary:        ParseBrush(c, "textSecondary", fallback.TextSecondary),
-            textMuted:            ParseBrush(c, "textMuted", fallback.TextMuted),
-            background:           ParseBrush(c, "background", fallback.Background),
-            selectionHighlight:   ParseBrush(c, "selectionHighlight", fallback.SelectionHighlight),
-            cursorHighlight:      ParseBrush(c, "cursorHighlight", fallback.CursorHighlight),
-            gridLine:             ParseBrush(c, "gridLine", fallback.GridLine),
-            headerBackground:     ParseBrush(c, "headerBackground", fallback.HeaderBackground),
-            headerText:           ParseBrush(c, "headerText", fallback.HeaderText),
-            gutterBackground:     ParseBrush(c, "gutterBackground", fallback.GutterBackground),
-            cursorBar:            ParseBrush(c, "cursorBar", fallback.CursorBar),
-            matchHighlight:       ParseBrush(c, "matchHighlight", fallback.MatchHighlight),
+            textPrimary: ParseBrush(c, "textPrimary", fallback.TextPrimary),
+            textSecondary: ParseBrush(c, "textSecondary", fallback.TextSecondary),
+            textMuted: ParseBrush(c, "textMuted", fallback.TextMuted),
+            background: ParseBrush(c, "background", fallback.Background),
+            selectionHighlight: ParseBrush(c, "selectionHighlight", fallback.SelectionHighlight),
+            cursorHighlight: ParseBrush(c, "cursorHighlight", fallback.CursorHighlight),
+            gridLine: ParseBrush(c, "gridLine", fallback.GridLine),
+            headerBackground: ParseBrush(c, "headerBackground", fallback.HeaderBackground),
+            headerText: ParseBrush(c, "headerText", fallback.HeaderText),
+            gutterBackground: ParseBrush(c, "gutterBackground", fallback.GutterBackground),
+            cursorBar: ParseBrush(c, "cursorBar", fallback.CursorBar),
+            matchHighlight: ParseBrush(c, "matchHighlight", fallback.MatchHighlight),
             activeMatchHighlight: ParseBrush(c, "activeMatchHighlight", fallback.ActiveMatchHighlight),
-            rowStripe:            ParseBrush(c, "rowStripe", fallback.RowStripe),
-            columnStripe:         ParseBrush(c, "columnStripe", fallback.ColumnStripe)
+            rowStripe: ParseBrush(c, "rowStripe", fallback.RowStripe),
+            columnStripe: ParseBrush(c, "columnStripe", fallback.ColumnStripe)
         );
     }
 
@@ -323,11 +314,9 @@ internal sealed class ColorTheme
         ReadOnlySpan<char> s = value.AsSpan().Trim();
 
         // #RRGGBB or #AARRGGBB
-        if (s.Length > 0 && s[0] == '#')
-        {
+        if (s.Length > 0 && s[0] == '#') {
             s = s[1..];
-            if (s.Length == 6 && uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint rgb6))
-            {
+            if (s.Length == 6 && uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint rgb6)) {
                 color = Color.FromRgb(
                     (byte)((rgb6 >> 16) & 0xFF),
                     (byte)((rgb6 >> 8) & 0xFF),
@@ -335,8 +324,7 @@ internal sealed class ColorTheme
                 return true;
             }
 
-            if (s.Length == 8 && uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint argb8))
-            {
+            if (s.Length == 8 && uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint argb8)) {
                 color = Color.FromArgb(
                     (byte)((argb8 >> 24) & 0xFF),
                     (byte)((argb8 >> 16) & 0xFF),
@@ -349,8 +337,7 @@ internal sealed class ColorTheme
         }
 
         // rgba(r,g,b,a) where a is 0–255
-        if (s.StartsWith("rgba(", StringComparison.OrdinalIgnoreCase) && s.EndsWith(")"))
-        {
+        if (s.StartsWith("rgba(", StringComparison.OrdinalIgnoreCase) && s.EndsWith(")")) {
             ReadOnlySpan<char> inner = s[5..^1];
             Span<Range> parts = stackalloc Range[5];
             int count = inner.Split(parts, ',', StringSplitOptions.TrimEntries);
@@ -358,8 +345,7 @@ internal sealed class ColorTheme
                 && byte.TryParse(inner[parts[0]], out byte r)
                 && byte.TryParse(inner[parts[1]], out byte g)
                 && byte.TryParse(inner[parts[2]], out byte b)
-                && byte.TryParse(inner[parts[3]], out byte a))
-            {
+                && byte.TryParse(inner[parts[3]], out byte a)) {
                 color = Color.FromArgb(a, r, g, b);
                 return true;
             }

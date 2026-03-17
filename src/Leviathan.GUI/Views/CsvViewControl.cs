@@ -1,13 +1,15 @@
-using System.Runtime.CompilerServices;
-using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
+
 using Leviathan.Core.Csv;
 using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
+
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Leviathan.GUI.Views;
 
@@ -38,8 +40,7 @@ internal sealed class CsvViewControl : Control
         _theme = state.ActiveTheme;
         Focusable = true;
         ClipToBounds = true;
-        ActualThemeVariantChanged += (_, _) =>
-        {
+        ActualThemeVariantChanged += (_, _) => {
             _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
@@ -51,11 +52,9 @@ internal sealed class CsvViewControl : Control
         ContextMenu menu = new();
 
         MenuItem hideCol = new() { Header = "Hide Column" };
-        hideCol.Click += (_, _) =>
-        {
+        hideCol.Click += (_, _) => {
             int col = _state.CsvCursorCol;
-            if (col >= 0 && col < _state.CsvColumnCount)
-            {
+            if (col >= 0 && col < _state.CsvColumnCount) {
                 _state.CsvHiddenColumns.Add(col);
                 InvalidateVisual();
                 StateChanged?.Invoke();
@@ -63,21 +62,18 @@ internal sealed class CsvViewControl : Control
         };
 
         MenuItem showAll = new() { Header = "Show All Columns" };
-        showAll.Click += (_, _) =>
-        {
+        showAll.Click += (_, _) => {
             _state.CsvHiddenColumns.Clear();
             InvalidateVisual();
             StateChanged?.Invoke();
         };
 
         MenuItem colVis = new() { Header = "Column Visibility..." };
-        colVis.Click += async (_, _) =>
-        {
+        colVis.Click += async (_, _) => {
             if (Avalonia.VisualTree.VisualExtensions.GetVisualRoot(this) is not Window owner) return;
             Widgets.ColumnVisibilityDialog dlg = new(_state);
             await dlg.ShowDialog(owner);
-            if (dlg.Changed)
-            {
+            if (dlg.Changed) {
                 InvalidateVisual();
                 StateChanged?.Invoke();
             }
@@ -90,8 +86,7 @@ internal sealed class CsvViewControl : Control
         ContextMenu = menu;
 
         // Update "Hide Column" header with column name on menu opening
-        menu.Opening += (_, _) =>
-        {
+        menu.Opening += (_, _) => {
             int col = _state.CsvCursorCol;
             string[] headers = _state.CsvHeaderNames;
             string colName = col >= 0 && col < headers.Length ? headers[col] : $"Column {col + 1}";
@@ -123,16 +118,13 @@ internal sealed class CsvViewControl : Control
     {
         if (_state.CsvRowIndex is null || ScrollBar is null) return;
         _updatingScroll = true;
-        try
-        {
+        try {
             long totalRows = _state.CsvRowIndex.TotalRowCount;
             long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
             ScrollBar.Maximum = 10000;
             ScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
             ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
-        }
-        finally
-        {
+        } finally {
             _updatingScroll = false;
         }
     }
@@ -141,8 +133,7 @@ internal sealed class CsvViewControl : Control
     {
         if (_scrollUpdateQueued) return;
         _scrollUpdateQueued = true;
-        Dispatcher.UIThread.Post(() =>
-        {
+        Dispatcher.UIThread.Post(() => {
             _scrollUpdateQueued = false;
             UpdateScrollBar();
         }, DispatcherPriority.Background);
@@ -172,8 +163,7 @@ internal sealed class CsvViewControl : Control
         double gutterWidth = gutterVisible ? (gutterDigits + 3) * charWidth : 0;
 
         // Draw gutter background
-        if (gutterVisible)
-        {
+        if (gutterVisible) {
             context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterWidth - charWidth, bounds.Height));
             context.DrawLine(theme.GutterPen, new Point(gutterWidth - charWidth, 0),
                 new Point(gutterWidth - charWidth, bounds.Height));
@@ -205,13 +195,11 @@ internal sealed class CsvViewControl : Control
         int hScroll = _state.CsvHorizontalScroll;
 
         // Draw header row
-        if (dialect.HasHeader && _state.CsvHeaderNames.Length > 0)
-        {
+        if (dialect.HasHeader && _state.CsvHeaderNames.Length > 0) {
             context.FillRectangle(headerBg, new Rect(0, 0, bounds.Width, lineHeight));
 
             double hx = gutterWidth;
-            for (int c = hScroll; c < colCount && hx < bounds.Width; c++)
-            {
+            for (int c = hScroll; c < colCount && hx < bounds.Width; c++) {
                 if (hiddenCols.Contains(c)) continue;
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
 
@@ -248,8 +236,7 @@ internal sealed class CsvViewControl : Control
         Span<CsvField> fields = stackalloc CsvField[256];
         Span<byte> unescaped = stackalloc byte[1024];
 
-        for (int rowIdx = 0; rowIdx < visibleRows; rowIdx++)
-        {
+        for (int rowIdx = 0; rowIdx < visibleRows; rowIdx++) {
             long dataRow = topRow + rowIdx;
             if (dataRow >= totalRows) break;
 
@@ -260,8 +247,7 @@ internal sealed class CsvViewControl : Control
                 context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
 
             // Row number in gutter
-            if (gutterVisible)
-            {
+            if (gutterVisible) {
                 string rowNumStr = (dataRow + 1).ToString();
                 double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
                 FormattedText rowNumFt = CreateFormattedText(rowNumStr, theme.TextSecondary);
@@ -269,12 +255,9 @@ internal sealed class CsvViewControl : Control
             }
 
             // Cursor/selection highlight
-            if (dataRow == _state.CsvCursorRow)
-            {
+            if (dataRow == _state.CsvCursorRow) {
                 context.FillRectangle(cursorBrush, new Rect(0, y, bounds.Width, lineHeight));
-            }
-            else if (selStart >= 0 && dataRow >= selStart && dataRow <= selEnd)
-            {
+            } else if (selStart >= 0 && dataRow >= selStart && dataRow <= selEnd) {
                 context.FillRectangle(selectionBrush, new Rect(0, y, bounds.Width, lineHeight));
             }
 
@@ -298,8 +281,7 @@ internal sealed class CsvViewControl : Control
 
             // Render cells
             double cellX = gutterWidth;
-            for (int c = hScroll; c < colCount && cellX < bounds.Width; c++)
-            {
+            for (int c = hScroll; c < colCount && cellX < bounds.Width; c++) {
                 if (hiddenCols.Contains(c)) continue;
                 double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
 
@@ -307,8 +289,7 @@ internal sealed class CsvViewControl : Control
                 if (c % 2 == 0)
                     context.FillRectangle(colStripeBrush, new Rect(cellX, y, cellWidth, lineHeight));
 
-                if (c < fieldCount)
-                {
+                if (c < fieldCount) {
                     // Search match highlight for this cell
                     long cellStart = rowOffset + fields[c].Offset;
                     long cellEnd = cellStart + fields[c].Length - 1;
@@ -316,13 +297,11 @@ internal sealed class CsvViewControl : Control
                     bool isActiveMatch = false;
 
                     int mc = rowMatchCursor;
-                    while (mc < matches.Count)
-                    {
+                    while (mc < matches.Count) {
                         long mStart = matches[mc].Offset;
                         long mEnd = mStart + matches[mc].Length - 1;
                         if (mStart > cellEnd) break;
-                        if (mEnd >= cellStart)
-                        {
+                        if (mEnd >= cellStart) {
                             isMatch = true;
                             isActiveMatch = mc == activeMatchIdx;
                             break;
@@ -330,8 +309,7 @@ internal sealed class CsvViewControl : Control
                         mc++;
                     }
 
-                    if (isMatch)
-                    {
+                    if (isMatch) {
                         context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
                             new Rect(cellX, y, cellWidth, lineHeight));
                     }
@@ -339,8 +317,7 @@ internal sealed class CsvViewControl : Control
                     int written = CsvFieldParser.UnescapeField(rowData, fields[c], dialect, unescaped);
                     string cellText = FormatCellPreview(Encoding.UTF8.GetString(unescaped[..written]), colWidths[c]);
 
-                    if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol)
-                    {
+                    if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol) {
                         context.FillRectangle(theme.CursorHighlight,
                             new Rect(cellX, y, cellWidth, lineHeight));
                     }
@@ -379,8 +356,7 @@ internal sealed class CsvViewControl : Control
         int colCount = _state.CsvColumnCount;
         long oldRow = _state.CsvCursorRow;
 
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Down:
                 _state.CsvCursorRow = Math.Min(oldRow + 1, totalRows - 1);
                 break;
@@ -427,13 +403,10 @@ internal sealed class CsvViewControl : Control
         }
 
         // Selection
-        if (shift)
-        {
+        if (shift) {
             if (_state.CsvSelectionAnchorRow < 0)
                 _state.CsvSelectionAnchorRow = oldRow;
-        }
-        else
-        {
+        } else {
             _state.CsvSelectionAnchorRow = -1;
         }
 
@@ -472,8 +445,7 @@ internal sealed class CsvViewControl : Control
         int hScroll = _state.CsvHorizontalScroll;
         HashSet<int> hiddenCols = _state.CsvHiddenColumns;
         int clickedCol = -1;
-        for (int c = hScroll; c < _state.CsvColumnCount; c++)
-        {
+        for (int c = hScroll; c < _state.CsvColumnCount; c++) {
             if (hiddenCols.Contains(c)) continue;
             double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
             if (pos.X >= cellX && pos.X < cellX + cellWidth) { clickedCol = c; break; }
@@ -512,21 +484,17 @@ internal sealed class CsvViewControl : Control
 
         // Step 2: Determine which column the offset falls into
         long rowOffset = GetRowByteOffset(targetRow);
-        if (rowOffset >= 0 && rowOffset < _state.FileLength)
-        {
+        if (rowOffset >= 0 && rowOffset < _state.FileLength) {
             int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
-            if (readLen > 0)
-            {
+            if (readLen > 0) {
                 _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
                 int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), _state.CsvDialect);
                 Span<CsvField> fields = stackalloc CsvField[256];
                 int fieldCount = CsvFieldParser.ParseRecord(_readBuffer.AsSpan(0, rowLen), _state.CsvDialect, fields);
                 long localOffset = byteOffset - rowOffset;
 
-                for (int c = 0; c < fieldCount; c++)
-                {
-                    if (localOffset >= fields[c].Offset && localOffset < fields[c].Offset + fields[c].Length)
-                    {
+                for (int c = 0; c < fieldCount; c++) {
+                    if (localOffset >= fields[c].Offset && localOffset < fields[c].Offset + fields[c].Length) {
                         _state.CsvCursorCol = c;
                         break;
                     }
@@ -554,8 +522,7 @@ internal sealed class CsvViewControl : Control
 
         // Binary search sparse entries to find the closest entry <= byteOffset
         int lo = 0, hi = index.SparseEntryCount - 1;
-        while (lo <= hi)
-        {
+        while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
             if (index.GetSparseOffset(mid) <= byteOffset)
                 lo = mid + 1;
@@ -566,20 +533,16 @@ internal sealed class CsvViewControl : Control
         // hi is now the largest sparse index whose offset <= byteOffset (or -1 if none)
         long baseRow;
         long scanOffset;
-        if (hi >= 0)
-        {
+        if (hi >= 0) {
             baseRow = (long)(hi + 1) * index.SparseFactor;
             scanOffset = index.GetSparseOffset(hi);
-        }
-        else
-        {
+        } else {
             baseRow = 0;
             scanOffset = 0;
         }
 
         // Account for header row offset
-        if (dialect.HasHeader && baseRow == 0)
-        {
+        if (dialect.HasHeader && baseRow == 0) {
             scanOffset = index.FirstDataRowOffset > 0 ? index.FirstDataRowOffset : 0;
         }
 
@@ -588,34 +551,27 @@ internal sealed class CsvViewControl : Control
         bool inQuoted = false;
         byte quote = dialect.Quote;
 
-        while (scanOffset < byteOffset && currentRow < totalRows)
-        {
+        while (scanOffset < byteOffset && currentRow < totalRows) {
             int toRead = (int)Math.Min(_readBuffer.Length, _state.FileLength - scanOffset);
             if (toRead <= 0) break;
             _state.Document.Read(scanOffset, _readBuffer.AsSpan(0, toRead));
 
-            for (int i = 0; i < toRead; i++)
-            {
+            for (int i = 0; i < toRead; i++) {
                 long absPos = scanOffset + i;
                 if (absPos >= byteOffset) return Math.Max(0, currentRow - (dialect.HasHeader ? 1 : 0));
 
                 byte b = _readBuffer[i];
-                if (inQuoted)
-                {
-                    if (b == quote)
-                    {
+                if (inQuoted) {
+                    if (b == quote) {
                         if (i + 1 < toRead && _readBuffer[i + 1] == quote) { i++; continue; }
                         inQuoted = false;
                     }
                     continue;
                 }
                 if (b == quote && quote != 0) { inQuoted = true; continue; }
-                if (b == (byte)'\n')
-                {
+                if (b == (byte)'\n') {
                     currentRow++;
-                }
-                else if (b == (byte)'\r')
-                {
+                } else if (b == (byte)'\r') {
                     if (i + 1 < toRead && _readBuffer[i + 1] == (byte)'\n') i++;
                     currentRow++;
                 }
@@ -668,11 +624,9 @@ internal sealed class CsvViewControl : Control
             return string.Empty;
 
         StringBuilder preview = new(Math.Min(value.Length, maxWidth + 1));
-        for (int i = 0; i < value.Length && preview.Length < maxWidth + 1; i++)
-        {
+        for (int i = 0; i < value.Length && preview.Length < maxWidth + 1; i++) {
             char current = value[i];
-            if (current == '\r')
-            {
+            if (current == '\r') {
                 if (i + 1 < value.Length && value[i + 1] == '\n')
                     i++;
 
@@ -680,14 +634,12 @@ internal sealed class CsvViewControl : Control
                 continue;
             }
 
-            if (current == '\n')
-            {
+            if (current == '\n') {
                 preview.Append('\u23CE');
                 continue;
             }
 
-            if (char.IsControl(current))
-            {
+            if (char.IsControl(current)) {
                 preview.Append('\u00B7');
                 continue;
             }
@@ -708,13 +660,10 @@ internal sealed class CsvViewControl : Control
         bool inQuoted = false;
         byte quote = dialect.Quote;
 
-        for (int i = 0; i < data.Length; i++)
-        {
+        for (int i = 0; i < data.Length; i++) {
             byte b = data[i];
-            if (inQuoted)
-            {
-                if (b == quote)
-                {
+            if (inQuoted) {
+                if (b == quote) {
                     if (i + 1 < data.Length && data[i + 1] == quote) { i++; continue; }
                     inQuoted = false;
                 }
@@ -751,17 +700,12 @@ internal sealed class CsvViewControl : Control
         long offset;
         long rowsScanned;
 
-        if (effectiveSparseIdx > 0)
-        {
+        if (effectiveSparseIdx > 0) {
             offset = index.GetSparseOffset(effectiveSparseIdx - 1);
             rowsScanned = (long)effectiveSparseIdx * index.SparseFactor;
-        }
-        else if (actualRow == 1 && index.FirstDataRowOffset > 0)
-        {
+        } else if (actualRow == 1 && index.FirstDataRowOffset > 0) {
             return index.FirstDataRowOffset;
-        }
-        else
-        {
+        } else {
             offset = 0;
             rowsScanned = 0;
         }
@@ -774,20 +718,16 @@ internal sealed class CsvViewControl : Control
         bool inQuoted = false;
         byte quote = dialect.Quote;
 
-        while (remaining > 0 && offset < fileLen)
-        {
+        while (remaining > 0 && offset < fileLen) {
             int toRead = (int)Math.Min(_readBuffer.Length, fileLen - offset);
             if (toRead <= 0) break;
             _state.Document.Read(offset, _readBuffer.AsSpan(0, toRead));
 
-            for (int i = 0; i < toRead && remaining > 0; i++)
-            {
+            for (int i = 0; i < toRead && remaining > 0; i++) {
                 byte b = _readBuffer[i];
 
-                if (inQuoted)
-                {
-                    if (b == quote)
-                    {
+                if (inQuoted) {
+                    if (b == quote) {
                         if (i + 1 < toRead && _readBuffer[i + 1] == quote) { i++; continue; }
                         inQuoted = false;
                     }
@@ -796,13 +736,10 @@ internal sealed class CsvViewControl : Control
 
                 if (b == quote && quote != 0) { inQuoted = true; continue; }
 
-                if (b == (byte)'\n')
-                {
+                if (b == (byte)'\n') {
                     remaining--;
                     if (remaining == 0) return offset + i + 1;
-                }
-                else if (b == (byte)'\r')
-                {
+                } else if (b == (byte)'\r') {
                     if (i + 1 < toRead && _readBuffer[i + 1] == (byte)'\n') i++;
                     remaining--;
                     if (remaining == 0) return offset + i + 1;

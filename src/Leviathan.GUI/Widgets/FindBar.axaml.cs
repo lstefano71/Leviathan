@@ -1,7 +1,5 @@
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Leviathan.Core.Search;
 
 namespace Leviathan.GUI.Widgets;
 
@@ -33,24 +31,20 @@ public sealed partial class FindBar : UserControl
         PrevButton.Click += (_, _) => _onFindPrev();
         CloseButton.Click += (_, _) => Hide();
 
-        CaseSensitiveToggle.IsCheckedChanged += (_, _) =>
-        {
+        CaseSensitiveToggle.IsCheckedChanged += (_, _) => {
             _state.FindCaseSensitive = CaseSensitiveToggle.IsChecked == true;
             ReSearchOnToggle();
         };
 
-        WholeWordToggle.IsCheckedChanged += (_, _) =>
-        {
+        WholeWordToggle.IsCheckedChanged += (_, _) => {
             _state.FindWholeWord = WholeWordToggle.IsChecked == true;
             ReSearchOnToggle();
         };
 
-        RegexToggle.IsCheckedChanged += (_, _) =>
-        {
+        RegexToggle.IsCheckedChanged += (_, _) => {
             _state.FindRegexMode = RegexToggle.IsChecked == true;
             // Regex and Hex are mutually exclusive
-            if (_state.FindRegexMode && _state.FindHexMode)
-            {
+            if (_state.FindRegexMode && _state.FindHexMode) {
                 _suppressToggleReSearch = true;
                 HexModeToggle.IsChecked = false;
                 _state.FindHexMode = false;
@@ -59,12 +53,10 @@ public sealed partial class FindBar : UserControl
             ReSearchOnToggle();
         };
 
-        HexModeToggle.IsCheckedChanged += (_, _) =>
-        {
+        HexModeToggle.IsCheckedChanged += (_, _) => {
             _state.FindHexMode = HexModeToggle.IsChecked == true;
             // Hex and Regex are mutually exclusive
-            if (_state.FindHexMode && _state.FindRegexMode)
-            {
+            if (_state.FindHexMode && _state.FindRegexMode) {
                 _suppressToggleReSearch = true;
                 RegexToggle.IsChecked = false;
                 _state.FindRegexMode = false;
@@ -86,8 +78,7 @@ public sealed partial class FindBar : UserControl
         RegexToggle.IsChecked = _state.FindRegexMode;
         HexModeToggle.IsChecked = _state.FindHexMode;
         // Delay focus to after layout pass so control is visible
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => {
             SearchInput.Focus();
             SearchInput.SelectAll();
         }, Avalonia.Threading.DispatcherPriority.Input);
@@ -97,8 +88,7 @@ public sealed partial class FindBar : UserControl
     public void Hide(bool restoreFocus = true)
     {
         IsVisible = false;
-        if (restoreFocus && _onHide is not null)
-        {
+        if (restoreFocus && _onHide is not null) {
             Avalonia.Threading.Dispatcher.UIThread.Post(_onHide, Avalonia.Threading.DispatcherPriority.Input);
         }
     }
@@ -106,21 +96,14 @@ public sealed partial class FindBar : UserControl
     /// <summary>Updates the match status display.</summary>
     public void UpdateMatchStatus()
     {
-        if (_state.IsSearching)
-        {
+        if (_state.IsSearching) {
             int count = _state.SearchResults.Count;
             MatchStatus.Text = count > 0 ? $"Searching... ({count})" : "Searching...";
-        }
-        else if (_state.SearchResults.Count > 0)
-        {
+        } else if (_state.SearchResults.Count > 0) {
             MatchStatus.Text = $"{_state.CurrentMatchIndex + 1}/{_state.SearchResults.Count}";
-        }
-        else if (!string.IsNullOrEmpty(_state.FindInput))
-        {
+        } else if (!string.IsNullOrEmpty(_state.FindInput)) {
             MatchStatus.Text = _state.SearchStatus.Length > 0 ? _state.SearchStatus : "No matches";
-        }
-        else
-        {
+        } else {
             MatchStatus.Text = "";
         }
     }
@@ -129,8 +112,7 @@ public sealed partial class FindBar : UserControl
     private void ReSearchOnToggle()
     {
         if (_suppressToggleReSearch) return;
-        if (!string.IsNullOrEmpty(_state.FindInput) && _state.SearchResults.Count > 0)
-        {
+        if (!string.IsNullOrEmpty(_state.FindInput) && _state.SearchResults.Count > 0) {
             _state.FindInput = (SearchInput.Text ?? "").Trim();
             _onSearchStarted();
         }
@@ -138,17 +120,13 @@ public sealed partial class FindBar : UserControl
 
     private void OnSearchKeyDown(object? sender, KeyEventArgs e)
     {
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Enter:
                 string query = (SearchInput.Text ?? "").Trim();
-                if (!string.IsNullOrEmpty(query) && query == _state.FindInput && _state.SearchResults.Count > 0)
-                {
+                if (!string.IsNullOrEmpty(query) && query == _state.FindInput && _state.SearchResults.Count > 0) {
                     // Same query with existing results → navigate to next match
                     _onFindNext();
-                }
-                else
-                {
+                } else {
                     // New or changed query → start fresh search
                     _state.FindInput = query;
                     _onSearchStarted();

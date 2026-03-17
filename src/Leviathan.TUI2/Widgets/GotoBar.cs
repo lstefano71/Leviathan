@@ -10,122 +10,122 @@ namespace Leviathan.TUI2.Widgets;
 /// </summary>
 internal sealed class GotoBar : PopoverImpl
 {
-  private readonly AppState _state;
-  private readonly Label _promptLabel;
-  private readonly TextField _inputField;
-  private readonly Action<long> _gotoOffset;
-  private readonly Action<long> _gotoLine;
+    private readonly AppState _state;
+    private readonly Label _promptLabel;
+    private readonly TextField _inputField;
+    private readonly Action<long> _gotoOffset;
+    private readonly Action<long> _gotoLine;
 
-  internal GotoBar(AppState state, Action<long> gotoOffset, Action<long> gotoLine)
-  {
-    _state = state;
-    _gotoOffset = gotoOffset;
-    _gotoLine = gotoLine;
-    Visible = false;
+    internal GotoBar(AppState state, Action<long> gotoOffset, Action<long> gotoLine)
+    {
+        _state = state;
+        _gotoOffset = gotoOffset;
+        _gotoLine = gotoLine;
+        Visible = false;
 
-    FrameView bar = new() {
-      SchemeName = "Dialog",
-      Title = "Go To",
-      X = 0,
-      Y = 0,
-      Width = Dim.Fill(),
-      Height = 3,
-    };
+        FrameView bar = new() {
+            SchemeName = "Dialog",
+            Title = "Go To",
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = 3,
+        };
 
-    _promptLabel = new Label() {
-      X = 0,
-      Y = 0,
-      Text = "Line: ",
-    };
+        _promptLabel = new Label() {
+            X = 0,
+            Y = 0,
+            Text = "Line: ",
+        };
 
-    _inputField = new TextField() {
-      X = Pos.Right(_promptLabel),
-      Y = 0,
-      Width = 30,
-      Text = "",
-    };
+        _inputField = new TextField() {
+            X = Pos.Right(_promptLabel),
+            Y = 0,
+            Width = 30,
+            Text = "",
+        };
 
-    Label hints = new() {
-      X = Pos.Right(_inputField) + 2,
-      Y = 0,
-      Text = "Enter:Go  Esc:Cancel",
-    };
+        Label hints = new() {
+            X = Pos.Right(_inputField) + 2,
+            Y = 0,
+            Text = "Enter:Go  Esc:Cancel",
+        };
 
-    bar.Add(_promptLabel, _inputField, hints);
-    Add(bar);
-  }
-
-  /// <summary>Shows the goto bar and focuses the input field.</summary>
-  internal void ShowBar()
-  {
-    _promptLabel.Text = _state.ActiveView == ViewMode.Hex
-        ? "Offset (hex e.g. 0x1A3F): "
-        : "Line: ";
-    _inputField.Text = "";
-    App?.Popovers?.Show(this);
-    _inputField.SetFocus();
-  }
-
-  /// <inheritdoc/>
-  protected override bool OnKeyDown(Key key)
-  {
-    if (!Visible)
-      return base.OnKeyDown(key);
-
-    // Ctrl+G when visible → hide
-    if (key == Key.G.WithCtrl) {
-      HidePopover();
-      key.Handled = true;
-      return true;
+        bar.Add(_promptLabel, _inputField, hints);
+        Add(bar);
     }
 
-    // Enter → parse and navigate, then hide
-    if (key == Key.Enter) {
-      ExecuteGoto();
-      key.Handled = true;
-      return true;
+    /// <summary>Shows the goto bar and focuses the input field.</summary>
+    internal void ShowBar()
+    {
+        _promptLabel.Text = _state.ActiveView == ViewMode.Hex
+            ? "Offset (hex e.g. 0x1A3F): "
+            : "Line: ";
+        _inputField.Text = "";
+        App?.Popovers?.Show(this);
+        _inputField.SetFocus();
     }
 
-    return base.OnKeyDown(key);
-  }
+    /// <inheritdoc/>
+    protected override bool OnKeyDown(Key key)
+    {
+        if (!Visible)
+            return base.OnKeyDown(key);
 
-  private void ExecuteGoto()
-  {
-    string input = _inputField.Text?.Trim() ?? "";
-    if (!string.IsNullOrEmpty(input)) {
-      if (_state.ActiveView == ViewMode.Hex) {
-        if (TryParseOffset(input, out long offset))
-          _gotoOffset(offset);
-      } else {
-        if (long.TryParse(input, out long lineNum))
-          _gotoLine(lineNum);
-      }
-    }
-    HidePopover();
-  }
+        // Ctrl+G when visible → hide
+        if (key == Key.G.WithCtrl) {
+            HidePopover();
+            key.Handled = true;
+            return true;
+        }
 
-  private void HidePopover()
-  {
-    if (App?.Popovers is { } popovers)
-      popovers.Hide(this);
-    else
-      Visible = false;
-  }
+        // Enter → parse and navigate, then hide
+        if (key == Key.Enter) {
+            ExecuteGoto();
+            key.Handled = true;
+            return true;
+        }
 
-  private static bool TryParseOffset(string input, out long offset)
-  {
-    offset = 0;
-    if (string.IsNullOrWhiteSpace(input)) return false;
-
-    input = input.Trim();
-    if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
-        input.StartsWith("0X", StringComparison.OrdinalIgnoreCase)) {
-      return long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
+        return base.OnKeyDown(key);
     }
 
-    if (input.Any(c => c is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
-      return long.TryParse(input, System.Globalization.NumberStyles.HexNumber, null, out offset);
+    private void ExecuteGoto()
+    {
+        string input = _inputField.Text?.Trim() ?? "";
+        if (!string.IsNullOrEmpty(input)) {
+            if (_state.ActiveView == ViewMode.Hex) {
+                if (TryParseOffset(input, out long offset))
+                    _gotoOffset(offset);
+            } else {
+                if (long.TryParse(input, out long lineNum))
+                    _gotoLine(lineNum);
+            }
+        }
+        HidePopover();
+    }
 
-    return long.TryParse(input, out offset);
-  }
+    private void HidePopover()
+    {
+        if (App?.Popovers is { } popovers)
+            popovers.Hide(this);
+        else
+            Visible = false;
+    }
+
+    private static bool TryParseOffset(string input, out long offset)
+    {
+        offset = 0;
+        if (string.IsNullOrWhiteSpace(input)) return false;
+
+        input = input.Trim();
+        if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ||
+            input.StartsWith("0X", StringComparison.OrdinalIgnoreCase)) {
+            return long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out offset);
+        }
+
+        if (input.Any(c => c is >= 'a' and <= 'f' or >= 'A' and <= 'F'))
+            return long.TryParse(input, System.Globalization.NumberStyles.HexNumber, null, out offset);
+
+        return long.TryParse(input, out offset);
+    }
 }

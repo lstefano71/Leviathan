@@ -87,8 +87,7 @@ public sealed partial class WelcomeScreen : UserControl
     /// <summary>Cancels any in-flight metadata loading tasks.</summary>
     public void CancelMetadataLoading()
     {
-        if (_metadataCts is not null)
-        {
+        if (_metadataCts is not null) {
             _metadataCts.Cancel();
             _metadataCts.Dispose();
             _metadataCts = null;
@@ -102,8 +101,7 @@ public sealed partial class WelcomeScreen : UserControl
         CancellationTokenSource cts = new();
         _metadataCts = cts;
 
-        foreach (FileEntry entry in _allEntries)
-        {
+        foreach (FileEntry entry in _allEntries) {
             FileEntry captured = entry;
             _ = Task.Run(() => LoadFileMetadata(captured, cts.Token), cts.Token);
         }
@@ -111,8 +109,7 @@ public sealed partial class WelcomeScreen : UserControl
 
     private void LoadFileMetadata(FileEntry entry, CancellationToken ct)
     {
-        try
-        {
+        try {
             using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(MetadataTimeoutMs);
             CancellationToken token = timeoutCts.Token;
@@ -121,8 +118,7 @@ public sealed partial class WelcomeScreen : UserControl
             token.ThrowIfCancellationRequested();
 
             FileInfo info = new(entry.FullPath);
-            if (!info.Exists)
-            {
+            if (!info.Exists) {
                 token.ThrowIfCancellationRequested();
                 Dispatcher.UIThread.Post(() => UpdateEntryMetadata(entry, null, null, isUnavailable: true));
                 return;
@@ -138,13 +134,9 @@ public sealed partial class WelcomeScreen : UserControl
 
             token.ThrowIfCancellationRequested();
             Dispatcher.UIThread.Post(() => UpdateEntryMetadata(entry, sizeText, dateText, isUnavailable: false));
-        }
-        catch (OperationCanceledException)
-        {
+        } catch (OperationCanceledException) {
             // Cancelled — do nothing
-        }
-        catch
-        {
+        } catch {
             if (!ct.IsCancellationRequested)
                 Dispatcher.UIThread.Post(() => UpdateEntryMetadata(entry, null, null, isUnavailable: true));
         }
@@ -166,11 +158,9 @@ public sealed partial class WelcomeScreen : UserControl
         string? query = SearchInput.Text;
         _filteredEntries.Clear();
 
-        foreach (FileEntry entry in _allEntries)
-        {
+        foreach (FileEntry entry in _allEntries) {
             if (string.IsNullOrEmpty(query) ||
-                entry.FullPath.Contains(query, StringComparison.OrdinalIgnoreCase))
-            {
+                entry.FullPath.Contains(query, StringComparison.OrdinalIgnoreCase)) {
                 _filteredEntries.Add(entry);
             }
         }
@@ -190,23 +180,18 @@ public sealed partial class WelcomeScreen : UserControl
         bool recentHeaderAdded = false;
 
         // Check if we have pinned items (to show separator before recent section)
-        foreach (FileEntry entry in _filteredEntries)
-        {
+        foreach (FileEntry entry in _filteredEntries) {
             if (entry.IsPinned) hasPinned = true;
         }
 
         int digitIndex = 0;
 
-        foreach (FileEntry entry in _filteredEntries)
-        {
+        foreach (FileEntry entry in _filteredEntries) {
             // Add section headers
-            if (entry.IsPinned && !pinnedHeaderAdded)
-            {
+            if (entry.IsPinned && !pinnedHeaderAdded) {
                 pinnedHeaderAdded = true;
                 FileListPanel.Children.Add(CreateSectionHeader("📌  Pinned"));
-            }
-            else if (!entry.IsPinned && !recentHeaderAdded)
-            {
+            } else if (!entry.IsPinned && !recentHeaderAdded) {
                 recentHeaderAdded = true;
                 if (hasPinned)
                     FileListPanel.Children.Add(CreateSeparator());
@@ -223,10 +208,8 @@ public sealed partial class WelcomeScreen : UserControl
             FileListPanel.Children.Add(row);
         }
 
-        if (_filteredEntries.Count == 0 && !string.IsNullOrEmpty(SearchInput.Text))
-        {
-            FileListPanel.Children.Add(new TextBlock
-            {
+        if (_filteredEntries.Count == 0 && !string.IsNullOrEmpty(SearchInput.Text)) {
+            FileListPanel.Children.Add(new TextBlock {
                 Text = "No matching files",
                 FontSize = 13,
                 Opacity = 0.4,
@@ -238,8 +221,7 @@ public sealed partial class WelcomeScreen : UserControl
 
     private static TextBlock CreateSectionHeader(string text)
     {
-        return new TextBlock
-        {
+        return new TextBlock {
             Text = text,
             FontSize = 12,
             FontWeight = FontWeight.SemiBold,
@@ -250,8 +232,7 @@ public sealed partial class WelcomeScreen : UserControl
 
     private static Border CreateSeparator()
     {
-        return new Border
-        {
+        return new Border {
             Height = 1,
             Background = new SolidColorBrush(Colors.Gray, 0.2),
             Margin = new Thickness(12, 8)
@@ -265,16 +246,13 @@ public sealed partial class WelcomeScreen : UserControl
         // File name line with optional digit badge and pin icon
         StackPanel nameLine = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
 
-        if (digitBadge is not null)
-        {
-            nameLine.Children.Add(new Border
-            {
+        if (digitBadge is not null) {
+            nameLine.Children.Add(new Border {
                 Background = new SolidColorBrush(Colors.Gray, 0.15),
                 CornerRadius = new CornerRadius(3),
                 Padding = new Thickness(5, 1),
                 VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
+                Child = new TextBlock {
                     Text = $"Alt+{digitBadge}",
                     FontSize = 11,
                     Opacity = 0.5,
@@ -283,31 +261,26 @@ public sealed partial class WelcomeScreen : UserControl
             });
         }
 
-        if (entry.IsPinned)
-        {
-            nameLine.Children.Add(new TextBlock
-            {
+        if (entry.IsPinned) {
+            nameLine.Children.Add(new TextBlock {
                 Text = "📌",
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             });
         }
 
-        nameLine.Children.Add(new TextBlock
-        {
+        nameLine.Children.Add(new TextBlock {
             Text = fileName,
             FontSize = 14,
             FontWeight = FontWeight.SemiBold
         });
 
-        Grid topLine = new()
-        {
+        Grid topLine = new() {
             ColumnDefinitions = new ColumnDefinitions("*,90,120")
         };
         topLine.Children.Add(nameLine);
 
-        TextBlock sizeBlock = new()
-        {
+        TextBlock sizeBlock = new() {
             FontSize = 13,
             FontWeight = FontWeight.SemiBold,
             Opacity = 0.75,
@@ -318,8 +291,7 @@ public sealed partial class WelcomeScreen : UserControl
         Grid.SetColumn(sizeBlock, 1);
         topLine.Children.Add(sizeBlock);
 
-        TextBlock dateBlock = new()
-        {
+        TextBlock dateBlock = new() {
             FontSize = 13,
             FontWeight = FontWeight.SemiBold,
             Opacity = 0.75,
@@ -330,8 +302,7 @@ public sealed partial class WelcomeScreen : UserControl
         Grid.SetColumn(dateBlock, 2);
         topLine.Children.Add(dateBlock);
 
-        TextBlock pathBlock = new()
-        {
+        TextBlock pathBlock = new() {
             Text = entry.FullPath,
             FontSize = 11,
             Opacity = 0.45,
@@ -345,8 +316,7 @@ public sealed partial class WelcomeScreen : UserControl
         content.Children.Add(topLine);
         content.Children.Add(pathBlock);
 
-        Border row = new()
-        {
+        Border row = new() {
             Padding = new Thickness(12, 8),
             CornerRadius = new CornerRadius(4),
             Cursor = new Cursor(StandardCursorType.Hand),
@@ -355,11 +325,9 @@ public sealed partial class WelcomeScreen : UserControl
         };
 
         row.PointerPressed += OnRowPointerPressed;
-        row.PointerMoved += (_, e) =>
-        {
+        row.PointerMoved += (_, e) => {
             // Real mouse movement clears keyboard navigation mode
-            if (_isKeyboardNavigating)
-            {
+            if (_isKeyboardNavigating) {
                 _isKeyboardNavigating = false;
                 return;
             }
@@ -372,15 +340,13 @@ public sealed partial class WelcomeScreen : UserControl
 
     private static void UpdateEntryMetadataText(FileEntry entry)
     {
-        if (entry.IsUnavailable)
-        {
+        if (entry.IsUnavailable) {
             if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "—";
             if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "unavailable";
             return;
         }
 
-        if (entry.SizeText is null && entry.DateText is null && !entry.IsUnavailable)
-        {
+        if (entry.SizeText is null && entry.DateText is null && !entry.IsUnavailable) {
             if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "…";
             if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "loading…";
             return;
@@ -400,8 +366,7 @@ public sealed partial class WelcomeScreen : UserControl
     private void SetSelectedIndex(int index)
     {
         // Deselect old
-        if (_selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count)
-        {
+        if (_selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count) {
             FileEntry old = _filteredEntries[_selectedIndex];
             if (old.VisualRow is not null)
                 old.VisualRow.Background = Brushes.Transparent;
@@ -410,11 +375,9 @@ public sealed partial class WelcomeScreen : UserControl
         _selectedIndex = index;
 
         // Select new
-        if (_selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count)
-        {
+        if (_selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count) {
             FileEntry current = _filteredEntries[_selectedIndex];
-            if (current.VisualRow is not null)
-            {
+            if (current.VisualRow is not null) {
                 current.VisualRow.Background = SelectedBrush;
                 current.VisualRow.BringIntoView();
             }
@@ -438,8 +401,7 @@ public sealed partial class WelcomeScreen : UserControl
     /// </summary>
     private void OnTunnelKeyDown(object? sender, KeyEventArgs e)
     {
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.PageDown:
                 _isKeyboardNavigating = true;
                 if (_filteredEntries.Count > 0)
@@ -458,8 +420,7 @@ public sealed partial class WelcomeScreen : UserControl
 
     private void OnSearchKeyDown(object? sender, KeyEventArgs e)
     {
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Down:
                 _isKeyboardNavigating = true;
                 if (_filteredEntries.Count > 0)
@@ -480,8 +441,7 @@ public sealed partial class WelcomeScreen : UserControl
                 break;
 
             case Key.Escape:
-                if (!string.IsNullOrEmpty(SearchInput.Text))
-                {
+                if (!string.IsNullOrEmpty(SearchInput.Text)) {
                     SearchInput.Text = "";
                     e.Handled = true;
                 }
@@ -489,18 +449,21 @@ public sealed partial class WelcomeScreen : UserControl
         }
 
         // Alt+digit shortcuts for quick file access
-        if (e.KeyModifiers == KeyModifiers.Alt)
-        {
-            int digit = e.Key switch
-            {
-                Key.D1 => 1, Key.D2 => 2, Key.D3 => 3,
-                Key.D4 => 4, Key.D5 => 5, Key.D6 => 6,
-                Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
+        if (e.KeyModifiers == KeyModifiers.Alt) {
+            int digit = e.Key switch {
+                Key.D1 => 1,
+                Key.D2 => 2,
+                Key.D3 => 3,
+                Key.D4 => 4,
+                Key.D5 => 5,
+                Key.D6 => 6,
+                Key.D7 => 7,
+                Key.D8 => 8,
+                Key.D9 => 9,
                 _ => 0
             };
 
-            if (digit > 0 && digit <= _allEntries.Count)
-            {
+            if (digit > 0 && digit <= _allEntries.Count) {
                 CancelMetadataLoading();
                 FileSelected?.Invoke(_allEntries[digit - 1].FullPath);
                 e.Handled = true;
@@ -517,23 +480,17 @@ public sealed partial class WelcomeScreen : UserControl
 
         Avalonia.Input.PointerPointProperties props = e.GetCurrentPoint(row).Properties;
 
-        if (props.IsLeftButtonPressed)
-        {
+        if (props.IsLeftButtonPressed) {
             // Double-click opens, single click selects
-            if (e.ClickCount >= 2)
-            {
+            if (e.ClickCount >= 2) {
                 CancelMetadataLoading();
                 FileSelected?.Invoke(entry.FullPath);
                 e.Handled = true;
-            }
-            else
-            {
+            } else {
                 int idx = _filteredEntries.IndexOf(entry);
                 if (idx >= 0) SetSelectedIndex(idx);
             }
-        }
-        else if (props.IsRightButtonPressed)
-        {
+        } else if (props.IsRightButtonPressed) {
             ShowContextMenu(row, entry);
             e.Handled = true;
         }
@@ -543,14 +500,11 @@ public sealed partial class WelcomeScreen : UserControl
     {
         ContextMenu menu = new();
 
-        if (entry.IsPinned)
-        {
+        if (entry.IsPinned) {
             MenuItem unpin = new() { Header = "Unpin" };
             unpin.Click += (_, _) => PinChanged?.Invoke(entry.FullPath, false);
             menu.Items.Add(unpin);
-        }
-        else
-        {
+        } else {
             MenuItem pin = new() { Header = "Pin" };
             pin.Click += (_, _) => PinChanged?.Invoke(entry.FullPath, true);
             menu.Items.Add(pin);
@@ -573,8 +527,7 @@ public sealed partial class WelcomeScreen : UserControl
         const long GB = MB * 1024;
         const long TB = GB * 1024;
 
-        return bytes switch
-        {
+        return bytes switch {
             >= TB => $"{bytes / (double)TB:F1} TB",
             >= GB => $"{bytes / (double)GB:F1} GB",
             >= MB => $"{bytes / (double)MB:F1} MB",

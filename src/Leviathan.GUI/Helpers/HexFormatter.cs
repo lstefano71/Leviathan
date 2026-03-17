@@ -44,8 +44,7 @@ public static class HexFormatter
     /// </summary>
     public static int ParseHexDigit(char c)
     {
-        return c switch
-        {
+        return c switch {
             >= '0' and <= '9' => c - '0',
             >= 'A' and <= 'F' => c - 'A' + 10,
             >= 'a' and <= 'f' => c - 'a' + 10,

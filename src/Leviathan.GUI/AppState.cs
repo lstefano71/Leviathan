@@ -1,4 +1,5 @@
 using Avalonia.Media;
+
 using Leviathan.Core;
 using Leviathan.Core.Csv;
 using Leviathan.Core.Indexing;
@@ -214,8 +215,7 @@ public sealed class AppState
         EstimatedTotalLines = Math.Max(1, Document.Length / 80);
 
         // Start background line indexing
-        if (Document.FileSource is { } source)
-        {
+        if (Document.FileSource is { } source) {
             Indexer = new LineIndexer(source, Decoder.MinCharBytes);
             Indexer.StartScan();
         }
@@ -237,8 +237,7 @@ public sealed class AppState
         Settings.AddRecent(path);
 
         ActiveView = DetermineDefaultView(path, sample, encoding);
-        if (ActiveView == ViewMode.Csv)
-        {
+        if (ActiveView == ViewMode.Csv) {
             InitCsvView();
         }
     }
@@ -264,8 +263,7 @@ public sealed class AppState
             return true;
 
         int controlCount = 0;
-        for (int i = 0; i < sample.Length; i++)
-        {
+        for (int i = 0; i < sample.Length; i++) {
             byte b = sample[i];
             if (b == 0)
                 return false;
@@ -326,24 +324,19 @@ public sealed class AppState
         Indexer?.Dispose();
         Indexer = null;
 
-        try
-        {
+        try {
             Document.SaveTo(path);
             CurrentFilePath = path;
             Settings.AddRecent(path);
 
-            if (Document.FileSource is { } source)
-            {
+            if (Document.FileSource is { } source) {
                 Indexer = new LineIndexer(source, Decoder.MinCharBytes);
                 Indexer.StartScan();
             }
 
             return true;
-        }
-        catch (Exception ex)
-        {
-            if (Indexer is null && Document.FileSource is { } src)
-            {
+        } catch (Exception ex) {
+            if (Indexer is null && Document.FileSource is { } src) {
                 Indexer = new LineIndexer(src, Decoder.MinCharBytes);
                 Indexer.StartScan();
             }
@@ -361,8 +354,7 @@ public sealed class AppState
 
         Indexer?.Dispose();
         Indexer = null;
-        if (Document?.FileSource is { } source)
-        {
+        if (Document?.FileSource is { } source) {
             Indexer = new LineIndexer(source, Decoder.MinCharBytes);
             Indexer.StartScan();
         }
@@ -413,12 +405,9 @@ public sealed class AppState
             ? Settings.GetCsvFileSettings(CurrentFilePath)
             : null;
 
-        if (saved is not null)
-        {
+        if (saved is not null) {
             CsvDialect = new CsvDialect(saved.Separator, saved.Quote, saved.Escape, saved.HasHeader);
-        }
-        else
-        {
+        } else {
             int sampleSize = (int)Math.Min(32768, Document.Length);
             byte[] sampleBuf = new byte[sampleSize];
             Document.Read(0, sampleBuf);
@@ -434,8 +423,7 @@ public sealed class AppState
         CsvSelectionAnchorRow = -1;
         CsvHorizontalScroll = 0;
 
-        if (Document.FileSource is { } source)
-        {
+        if (Document.FileSource is { } source) {
             CsvRowIndexer = new CsvRowIndexer(source, CsvDialect);
             CsvRowIndexer.StartScan();
             CsvColumnCount = CsvRowIndexer.Index.ColumnCount;
@@ -444,10 +432,8 @@ public sealed class AppState
         ParseCsvHeaders();
         ComputeCsvColumnWidths();
 
-        if (CurrentFilePath is not null && saved is null)
-        {
-            Settings.SetCsvFileSettings(CurrentFilePath, new CsvFileSettings
-            {
+        if (CurrentFilePath is not null && saved is null) {
+            Settings.SetCsvFileSettings(CurrentFilePath, new CsvFileSettings {
                 Separator = CsvDialect.Separator,
                 Quote = CsvDialect.Quote,
                 Escape = CsvDialect.Escape,
@@ -461,8 +447,7 @@ public sealed class AppState
     /// </summary>
     private void ParseCsvHeaders()
     {
-        if (Document is null || !CsvDialect.HasHeader)
-        {
+        if (Document is null || !CsvDialect.HasHeader) {
             CsvHeaderNames = [];
             return;
         }
@@ -475,15 +460,11 @@ public sealed class AppState
         bool inQuoted = false;
         byte quote = CsvDialect.Quote;
 
-        while (pos < readSize)
-        {
+        while (pos < readSize) {
             byte b = buf[pos];
-            if (inQuoted)
-            {
-                if (b == quote)
-                {
-                    if (pos + 1 < readSize && buf[pos + 1] == quote)
-                    {
+            if (inQuoted) {
+                if (b == quote) {
+                    if (pos + 1 < readSize && buf[pos + 1] == quote) {
                         pos += 2;
                         continue;
                     }
@@ -503,8 +484,7 @@ public sealed class AppState
 
         CsvHeaderNames = new string[fieldCount];
         Span<byte> unescaped = stackalloc byte[1024];
-        for (int i = 0; i < fieldCount; i++)
-        {
+        for (int i = 0; i < fieldCount; i++) {
             int written = CsvFieldParser.UnescapeField(headerRow, fields[i], CsvDialect, unescaped);
             CsvHeaderNames[i] = System.Text.Encoding.UTF8.GetString(unescaped[..written]);
         }
@@ -515,8 +495,7 @@ public sealed class AppState
     /// </summary>
     private void ComputeCsvColumnWidths()
     {
-        if (Document is null || CsvColumnCount == 0)
-        {
+        if (Document is null || CsvColumnCount == 0) {
             CsvColumnWidths = [];
             return;
         }
@@ -535,15 +514,11 @@ public sealed class AppState
         bool inQuoted = false;
         byte quote = CsvDialect.Quote;
 
-        if (CsvDialect.HasHeader)
-        {
-            while (pos < sampleSize)
-            {
+        if (CsvDialect.HasHeader) {
+            while (pos < sampleSize) {
                 byte b = buf[pos];
-                if (inQuoted)
-                {
-                    if (b == quote)
-                    {
+                if (inQuoted) {
+                    if (b == quote) {
                         if (pos + 1 < sampleSize && buf[pos + 1] == quote) { pos += 2; continue; }
                         inQuoted = false;
                     }
@@ -559,17 +534,13 @@ public sealed class AppState
         }
 
         Span<CsvField> fields = stackalloc CsvField[256];
-        for (int row = 0; row < 100 && pos < sampleSize; row++)
-        {
+        for (int row = 0; row < 100 && pos < sampleSize; row++) {
             int rowStart = pos;
 
-            while (pos < sampleSize)
-            {
+            while (pos < sampleSize) {
                 byte b = buf[pos];
-                if (inQuoted)
-                {
-                    if (b == quote)
-                    {
+                if (inQuoted) {
+                    if (b == quote) {
                         if (pos + 1 < sampleSize && buf[pos + 1] == quote) { pos += 2; continue; }
                         inQuoted = false;
                     }
@@ -590,8 +561,7 @@ public sealed class AppState
             ReadOnlySpan<byte> rowBytes = buf.AsSpan(rowStart, rowLen);
             int fieldCount = CsvFieldParser.ParseRecord(rowBytes, CsvDialect, fields);
 
-            for (int c = 0; c < fieldCount && c < colCount; c++)
-            {
+            for (int c = 0; c < fieldCount && c < colCount; c++) {
                 int displayWidth = ComputePreviewDisplayWidth(rowBytes, fields[c], CsvDialect, 40);
                 widths[c] = Math.Max(widths[c], displayWidth);
             }
@@ -616,19 +586,16 @@ public sealed class AppState
         ReadOnlySpan<byte> data = unescaped[..written];
         int width = 0;
         int offset = 0;
-        while (offset < data.Length && width < maxWidth)
-        {
+        while (offset < data.Length && width < maxWidth) {
             System.Buffers.OperationStatus status =
                 System.Text.Rune.DecodeFromUtf8(data[offset..], out System.Text.Rune rune, out int consumed);
-            if (status != System.Buffers.OperationStatus.Done || consumed <= 0)
-            {
+            if (status != System.Buffers.OperationStatus.Done || consumed <= 0) {
                 offset++;
                 width++;
                 continue;
             }
 
-            if (rune.Value == '\r')
-            {
+            if (rune.Value == '\r') {
                 offset += consumed;
                 if (offset < data.Length && data[offset] == (byte)'\n')
                     offset++;
@@ -637,8 +604,7 @@ public sealed class AppState
             }
 
             offset += consumed;
-            if (rune.Value == '\n')
-            {
+            if (rune.Value == '\n') {
                 width++;
                 continue;
             }
@@ -649,8 +615,7 @@ public sealed class AppState
         return width;
     }
 
-    private static ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch
-    {
+    private static ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch {
         TextEncoding.Utf8 => new Utf8TextDecoder(),
         TextEncoding.Utf16Le => new Utf16LeTextDecoder(),
         TextEncoding.Windows1252 => new Windows1252TextDecoder(),

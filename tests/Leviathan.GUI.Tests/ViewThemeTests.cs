@@ -1,4 +1,5 @@
 using Avalonia.Styling;
+
 using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Tests;

@@ -8,64 +8,64 @@ namespace Leviathan.Core.Indexing;
 /// </summary>
 public sealed class LineIndexer : IDisposable
 {
-  private readonly MappedFileSource _source;
-  private readonly LineIndex _index;
-  private readonly CancellationTokenSource _cts;
-  private Task? _scanTask;
+    private readonly MappedFileSource _source;
+    private readonly LineIndex _index;
+    private readonly CancellationTokenSource _cts;
+    private Task? _scanTask;
 
-  private const int ChunkSize = 4 * 1024 * 1024; // 4 MB chunks
+    private const int ChunkSize = 4 * 1024 * 1024; // 4 MB chunks
 
-  public LineIndex Index => _index;
+    public LineIndex Index => _index;
 
-  /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
-  public LineIndexer(MappedFileSource source, int charWidth = 1, int sparseFactor = 1000)
-  {
-    _source = source;
-    _index = new LineIndex(charWidth, sparseFactor);
-    _cts = new CancellationTokenSource();
-  }
-
-  /// <summary>
-  /// Starts scanning the file for newlines on a background thread.
-  /// Returns immediately; check <see cref="LineIndex.IsComplete"/>.
-  /// </summary>
-  public void StartScan()
-  {
-    _scanTask = Task.Run(() => {
-      try {
-        ScanAll(_cts.Token);
-      } catch (OperationCanceledException) when (_cts.IsCancellationRequested) {
-        // expected during disposal / file switches / save restart
-      }
-    }, _cts.Token);
-  }
-
-  private unsafe void ScanAll(CancellationToken ct)
-  {
-    long remaining = _source.Length;
-    long offset = 0;
-
-    while (remaining > 0 && !ct.IsCancellationRequested) {
-      int chunkLen = (int)Math.Min(remaining, ChunkSize);
-      var span = _source.GetSpan(offset, chunkLen);
-
-      fixed (byte* ptr = span) {
-        _index.ScanChunk(ptr, chunkLen, offset, ct);
-      }
-
-      offset += chunkLen;
-      remaining -= chunkLen;
+    /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
+    public LineIndexer(MappedFileSource source, int charWidth = 1, int sparseFactor = 1000)
+    {
+        _source = source;
+        _index = new LineIndex(charWidth, sparseFactor);
+        _cts = new CancellationTokenSource();
     }
 
-    if (!ct.IsCancellationRequested) {
-      _index.MarkComplete();
+    /// <summary>
+    /// Starts scanning the file for newlines on a background thread.
+    /// Returns immediately; check <see cref="LineIndex.IsComplete"/>.
+    /// </summary>
+    public void StartScan()
+    {
+        _scanTask = Task.Run(() => {
+            try {
+                ScanAll(_cts.Token);
+            } catch (OperationCanceledException) when (_cts.IsCancellationRequested) {
+                // expected during disposal / file switches / save restart
+            }
+        }, _cts.Token);
     }
-  }
 
-  public void Dispose()
-  {
-    _cts.Cancel();
-    try { _scanTask?.Wait(); } catch (AggregateException) { /* expected */ }
-    _cts.Dispose();
-  }
+    private unsafe void ScanAll(CancellationToken ct)
+    {
+        long remaining = _source.Length;
+        long offset = 0;
+
+        while (remaining > 0 && !ct.IsCancellationRequested) {
+            int chunkLen = (int)Math.Min(remaining, ChunkSize);
+            var span = _source.GetSpan(offset, chunkLen);
+
+            fixed (byte* ptr = span) {
+                _index.ScanChunk(ptr, chunkLen, offset, ct);
+            }
+
+            offset += chunkLen;
+            remaining -= chunkLen;
+        }
+
+        if (!ct.IsCancellationRequested) {
+            _index.MarkComplete();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        try { _scanTask?.Wait(); } catch (AggregateException) { /* expected */ }
+        _cts.Dispose();
+    }
 }

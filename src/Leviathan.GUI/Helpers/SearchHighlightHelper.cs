@@ -17,17 +17,13 @@ internal static class SearchHighlightHelper
     {
         int lo = 0, hi = matches.Count - 1;
         int result = matches.Count;
-        while (lo <= hi)
-        {
+        while (lo <= hi) {
             int mid = lo + (hi - lo) / 2;
             long mEnd = matches[mid].Offset + matches[mid].Length - 1;
-            if (mEnd >= startOffset)
-            {
+            if (mEnd >= startOffset) {
                 result = mid;
                 hi = mid - 1;
-            }
-            else
-            {
+            } else {
                 lo = mid + 1;
             }
         }

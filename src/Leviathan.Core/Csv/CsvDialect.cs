@@ -17,19 +17,19 @@ public readonly record struct CsvDialect(
     byte Escape,
     bool HasHeader)
 {
-  /// <summary>Standard RFC 4180 comma-separated dialect.</summary>
-  public static CsvDialect Csv(bool hasHeader = true) =>
-      new((byte)',', (byte)'"', (byte)'"', hasHeader);
+    /// <summary>Standard RFC 4180 comma-separated dialect.</summary>
+    public static CsvDialect Csv(bool hasHeader = true) =>
+        new((byte)',', (byte)'"', (byte)'"', hasHeader);
 
-  /// <summary>Tab-separated dialect.</summary>
-  public static CsvDialect Tsv(bool hasHeader = true) =>
-      new((byte)'\t', (byte)'"', (byte)'"', hasHeader);
+    /// <summary>Tab-separated dialect.</summary>
+    public static CsvDialect Tsv(bool hasHeader = true) =>
+        new((byte)'\t', (byte)'"', (byte)'"', hasHeader);
 
-  /// <summary>Semicolon-separated dialect (common in European locales).</summary>
-  public static CsvDialect Semicolon(bool hasHeader = true) =>
-      new((byte)';', (byte)'"', (byte)'"', hasHeader);
+    /// <summary>Semicolon-separated dialect (common in European locales).</summary>
+    public static CsvDialect Semicolon(bool hasHeader = true) =>
+        new((byte)';', (byte)'"', (byte)'"', hasHeader);
 
-  /// <summary>Pipe-separated dialect.</summary>
-  public static CsvDialect Pipe(bool hasHeader = true) =>
-      new((byte)'|', (byte)'"', (byte)'"', hasHeader);
+    /// <summary>Pipe-separated dialect.</summary>
+    public static CsvDialect Pipe(bool hasHeader = true) =>
+        new((byte)'|', (byte)'"', (byte)'"', hasHeader);
 }

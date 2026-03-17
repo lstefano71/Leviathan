@@ -25,13 +25,11 @@ public static class HitTestHelper
         double addressWidth = (addressDigits + 2) * charWidth;
 
         double hexX = pointX - addressWidth;
-        if (hexX >= 0)
-        {
+        if (hexX >= 0) {
             int groupCount = (bytesPerRow + 7) / 8;
             double totalHexWidth = (bytesPerRow * 3 + groupCount) * charWidth;
 
-            if (hexX < totalHexWidth)
-            {
+            if (hexX < totalHexWidth) {
                 int approxCol = (int)(hexX / (3 * charWidth));
                 approxCol = Math.Clamp(approxCol, 0, bytesPerRow - 1);
                 long offset = baseOffset + (long)row * bytesPerRow + approxCol;

@@ -112,11 +112,9 @@ public sealed class GuiSettings
     {
         CsvFileSettings[filePath] = settings;
 
-        if (CsvFileSettings.Count > MaxCsvFileSettings)
-        {
+        if (CsvFileSettings.Count > MaxCsvFileSettings) {
             string? oldest = null;
-            foreach (string key in CsvFileSettings.Keys)
-            {
+            foreach (string key in CsvFileSettings.Keys) {
                 oldest = key;
                 break;
             }
@@ -140,17 +138,14 @@ public sealed class GuiSettings
 
     public static GuiSettings Load()
     {
-        try
-        {
+        try {
             string path = SettingsPath;
             if (!File.Exists(path))
                 return new GuiSettings();
             string json = File.ReadAllText(path);
             return JsonSerializer.Deserialize(json, GuiSettingsContext.Default.GuiSettings)
                    ?? new GuiSettings();
-        }
-        catch
-        {
+        } catch {
             return new GuiSettings();
         }
     }
@@ -161,31 +156,24 @@ public sealed class GuiSettings
     /// </summary>
     public void Save()
     {
-        try
-        {
+        try {
             string path = SettingsPath;
 
             using FileStream fs = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
             GuiSettings? diskSettings = null;
-            if (fs.Length > 0)
-            {
-                try
-                {
+            if (fs.Length > 0) {
+                try {
                     byte[] existing = new byte[fs.Length];
                     fs.ReadExactly(existing);
                     diskSettings = JsonSerializer.Deserialize(existing, GuiSettingsContext.Default.GuiSettings);
-                }
-                catch
-                {
+                } catch {
                     // Corrupt file — overwrite entirely
                 }
             }
 
-            if (diskSettings is not null)
-            {
-                foreach (KeyValuePair<string, CsvFileSettings> kvp in diskSettings.CsvFileSettings)
-                {
+            if (diskSettings is not null) {
+                foreach (KeyValuePair<string, CsvFileSettings> kvp in diskSettings.CsvFileSettings) {
                     CsvFileSettings.TryAdd(kvp.Key, kvp.Value);
                 }
             }
@@ -194,9 +182,7 @@ public sealed class GuiSettings
             fs.Seek(0, SeekOrigin.Begin);
             JsonSerializer.Serialize(fs, this, GuiSettingsContext.Default.GuiSettings);
             fs.Flush();
-        }
-        catch
-        {
+        } catch {
             // Best effort — settings are not critical
         }
     }

@@ -87,8 +87,7 @@ public sealed class ScrollMappingTests
         long totalRows = 100_000;
         double maxScroll = 10_000.0;
 
-        for (int i = 0; i <= 100; i++)
-        {
+        for (int i = 0; i <= 100; i++) {
             double scroll = i * 100.0;
             long row = ScrollMapping.ScrollToRow(scroll, maxScroll, totalRows);
             double backScroll = ScrollMapping.RowToScroll(row, maxScroll, totalRows);

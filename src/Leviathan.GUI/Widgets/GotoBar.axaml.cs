@@ -43,8 +43,7 @@ public sealed partial class GotoBar : UserControl
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Enter:
                 ExecuteGoto();
                 e.Handled = true;
@@ -62,16 +61,12 @@ public sealed partial class GotoBar : UserControl
         if (string.IsNullOrEmpty(input)) return;
 
         // Hex offset: starts with 0x or contains hex chars
-        if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            if (long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out long offset))
-            {
+        if (input.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) {
+            if (long.TryParse(input[2..], System.Globalization.NumberStyles.HexNumber, null, out long offset)) {
                 _gotoOffset(offset);
                 Hide();
             }
-        }
-        else if (long.TryParse(input, out long lineNumber) && lineNumber > 0)
-        {
+        } else if (long.TryParse(input, out long lineNumber) && lineNumber > 0) {
             // Line number in text mode, offset in hex mode
             if (_state.ActiveView == ViewMode.Text)
                 _gotoLine(lineNumber);

@@ -5,8 +5,8 @@ namespace Leviathan.Core.DataModel;
 /// </summary>
 public enum PieceSource : byte
 {
-  Original = 0,
-  Append = 1
+    Original = 0,
+    Append = 1
 }
 
 /// <summary>

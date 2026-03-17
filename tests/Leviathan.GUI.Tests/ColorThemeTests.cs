@@ -1,5 +1,6 @@
 using Avalonia.Media;
 using Avalonia.Styling;
+
 using Leviathan.GUI.Helpers;
 
 namespace Leviathan.GUI.Tests;
@@ -46,8 +47,7 @@ public sealed class ColorThemeTests
     public void BuiltInThemes_HaveUniqueIds()
     {
         HashSet<string> ids = [];
-        foreach (ColorTheme theme in ColorTheme.BuiltInThemes)
-        {
+        foreach (ColorTheme theme in ColorTheme.BuiltInThemes) {
             Assert.True(ids.Add(theme.Id), $"Duplicate ID: {theme.Id}");
         }
     }
@@ -324,8 +324,7 @@ public sealed class ColorThemeTests
     public void LoadUserThemes_ValidThemeFile_LoadsTheme()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "leviathan_test_themes_" + Guid.NewGuid().ToString("N"));
-        try
-        {
+        try {
             Directory.CreateDirectory(tempDir);
             File.WriteAllText(Path.Combine(tempDir, "test.json"), """
             {
@@ -338,9 +337,7 @@ public sealed class ColorThemeTests
             List<ColorTheme> themes = ColorTheme.LoadUserThemes(tempDir);
             Assert.Single(themes);
             Assert.Equal("Test User Theme", themes[0].Name);
-        }
-        finally
-        {
+        } finally {
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
@@ -349,8 +346,7 @@ public sealed class ColorThemeTests
     public void LoadUserThemes_InvalidFile_SkipsGracefully()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "leviathan_test_themes_" + Guid.NewGuid().ToString("N"));
-        try
-        {
+        try {
             Directory.CreateDirectory(tempDir);
             File.WriteAllText(Path.Combine(tempDir, "bad.json"), "not valid json");
             File.WriteAllText(Path.Combine(tempDir, "good.json"), """
@@ -364,9 +360,7 @@ public sealed class ColorThemeTests
             List<ColorTheme> themes = ColorTheme.LoadUserThemes(tempDir);
             Assert.Single(themes);
             Assert.Equal("Good Theme", themes[0].Name);
-        }
-        finally
-        {
+        } finally {
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }

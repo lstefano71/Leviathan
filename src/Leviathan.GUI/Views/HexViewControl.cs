@@ -1,11 +1,13 @@
-using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
+
 using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
+
+using System.Runtime.CompilerServices;
 
 namespace Leviathan.GUI.Views;
 
@@ -37,8 +39,7 @@ internal sealed class HexViewControl : Control
         _theme = state.ActiveTheme;
         Focusable = true;
         ClipToBounds = true;
-        ActualThemeVariantChanged += (_, _) =>
-        {
+        ActualThemeVariantChanged += (_, _) => {
             _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
@@ -69,17 +70,14 @@ internal sealed class HexViewControl : Control
     {
         if (_state.Document is null || ScrollBar is null) return;
         _updatingScroll = true;
-        try
-        {
+        try {
             long totalRows = (_state.FileLength + _state.BytesPerRow - 1) / _state.BytesPerRow;
             long currentRow = _state.HexBaseOffset / Math.Max(1, _state.BytesPerRow);
             long maxRow = Math.Max(0, totalRows - _state.VisibleRows);
             ScrollBar.Maximum = 10000;
             ScrollBar.Value = maxRow > 0 ? (double)currentRow / maxRow * 10000 : 0;
             ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
-        }
-        finally
-        {
+        } finally {
             _updatingScroll = false;
         }
     }
@@ -88,8 +86,7 @@ internal sealed class HexViewControl : Control
     {
         if (_scrollUpdateQueued) return;
         _scrollUpdateQueued = true;
-        Dispatcher.UIThread.Post(() =>
-        {
+        Dispatcher.UIThread.Post(() => {
             _scrollUpdateQueued = false;
             UpdateScrollBar();
         }, DispatcherPriority.Background);
@@ -110,8 +107,7 @@ internal sealed class HexViewControl : Control
         double charWidth = MeasureCharWidth();
 
         // Auto-fit bytes per row when setting is 0 (Auto)
-        if (_state.BytesPerRowSetting == 0)
-        {
+        if (_state.BytesPerRowSetting == 0) {
             int autoFit = _state.ComputeBytesPerRow(bounds.Width, charWidth);
             if (autoFit != _state.BytesPerRow)
                 _state.BytesPerRow = autoFit;
@@ -135,8 +131,7 @@ internal sealed class HexViewControl : Control
         double addressWidth = gutterVisible ? (addressDigits + 3) * charWidth : 0;
 
         // Draw gutter background + separator (matching Text/CSV views)
-        if (gutterVisible)
-        {
+        if (gutterVisible) {
             double gutterSepX = addressWidth - charWidth;
             context.FillRectangle(theme.GutterBackground, new Rect(0, 0, gutterSepX, bounds.Height));
             context.DrawLine(theme.GutterPen, new Point(gutterSepX, 0), new Point(gutterSepX, bounds.Height));
@@ -159,8 +154,7 @@ internal sealed class HexViewControl : Control
         context.FillRectangle(headerBgBrush, new Rect(0, 0, bounds.Width, headerHeight));
 
         // "Offset" label in address column
-        if (gutterVisible)
-        {
+        if (gutterVisible) {
             string offsetLabelText = decimalOffset ? "Offset (dec)" : "Offset";
             FormattedText offsetLabel = new(offsetLabelText, System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
@@ -168,8 +162,7 @@ internal sealed class HexViewControl : Control
         }
 
         // Hex column offsets: 00 01 02 … 0F (matching byte positions)
-        for (int col = 0; col < bytesPerRow; col++)
-        {
+        for (int col = 0; col < bytesPerRow; col++) {
             int groupSep = col / 8;
             double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
 
@@ -183,8 +176,7 @@ internal sealed class HexViewControl : Control
         }
 
         // ASCII column offsets: 0123456789ABCDEF (single char per column)
-        for (int col = 0; col < bytesPerRow; col++)
-        {
+        for (int col = 0; col < bytesPerRow; col++) {
             double ax = asciiX + col * charWidth;
             char label = (char)HexChars[col & 0xF];
 
@@ -205,8 +197,7 @@ internal sealed class HexViewControl : Control
         long startOffset = _state.HexBaseOffset;
         int totalBytes = visibleRows * bytesPerRow;
         int maxRead = (int)Math.Min(totalBytes, _state.FileLength - startOffset);
-        if (maxRead <= 0)
-        {
+        if (maxRead <= 0) {
             QueueScrollBarUpdate();
             return;
         }
@@ -231,8 +222,7 @@ internal sealed class HexViewControl : Control
         // Binary-search for the first match visible in or after the viewport
         int matchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, startOffset);
 
-        for (int row = 0; row < visibleRows; row++)
-        {
+        for (int row = 0; row < visibleRows; row++) {
             long rowOffset = startOffset + (long)row * bytesPerRow;
             if (rowOffset >= _state.FileLength) break;
 
@@ -242,8 +232,7 @@ internal sealed class HexViewControl : Control
             if (rowBytes <= 0) break;
 
             // Address column
-            if (gutterVisible)
-            {
+            if (gutterVisible) {
                 string address = decimalOffset
                     ? rowOffset.ToString().PadLeft(addressDigits)
                     : (addressDigits == 16 ? rowOffset.ToString("X16") : rowOffset.ToString("X8"));
@@ -253,8 +242,7 @@ internal sealed class HexViewControl : Control
             }
 
             // Hex bytes
-            for (int col = 0; col < rowBytes; col++)
-            {
+            for (int col = 0; col < rowBytes; col++) {
                 byte b = _readBuffer[rowStart + col];
                 long byteOffset = rowOffset + col;
                 int groupSep = col / 8;
@@ -263,36 +251,29 @@ internal sealed class HexViewControl : Control
                 // Match highlight (sliding cursor — O(1) amortized per byte)
                 bool isActiveMatch = false;
                 bool isMatch = false;
-                while (matchCursor < matches.Count)
-                {
+                while (matchCursor < matches.Count) {
                     long mStart = matches[matchCursor].Offset;
                     long mEnd = mStart + matches[matchCursor].Length - 1;
-                    if (byteOffset > mEnd)
-                    {
+                    if (byteOffset > mEnd) {
                         matchCursor++;
                         continue;
                     }
-                    if (byteOffset >= mStart)
-                    {
+                    if (byteOffset >= mStart) {
                         isMatch = true;
                         isActiveMatch = matchCursor == activeMatchIdx;
                     }
                     break;
                 }
-                if (isMatch)
-                {
+                if (isMatch) {
                     context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
                         new Rect(hexX, y, charWidth * 2, lineHeight));
                 }
 
                 // Selection/cursor highlight
-                if (byteOffset == _state.HexCursorOffset)
-                {
+                if (byteOffset == _state.HexCursorOffset) {
                     context.FillRectangle(cursorBrush,
                         new Rect(hexX, y, charWidth * 2, lineHeight));
-                }
-                else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd)
-                {
+                } else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd) {
                     context.FillRectangle(selectionBrush,
                         new Rect(hexX, y, charWidth * 2, lineHeight));
                 }
@@ -307,20 +288,16 @@ internal sealed class HexViewControl : Control
             }
 
             // ASCII column
-            for (int col = 0; col < rowBytes; col++)
-            {
+            for (int col = 0; col < rowBytes; col++) {
                 byte b = _readBuffer[rowStart + col];
                 long byteOffset = rowOffset + col;
                 double ax = asciiX + col * charWidth;
 
                 // Selection/cursor highlight in ASCII
-                if (byteOffset == _state.HexCursorOffset)
-                {
+                if (byteOffset == _state.HexCursorOffset) {
                     context.FillRectangle(cursorBrush,
                         new Rect(ax, y, charWidth, lineHeight));
-                }
-                else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd)
-                {
+                } else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd) {
                     context.FillRectangle(selectionBrush,
                         new Rect(ax, y, charWidth, lineHeight));
                 }
@@ -355,8 +332,7 @@ internal sealed class HexViewControl : Control
         long oldCursor = _state.HexCursorOffset;
         long newCursor = oldCursor;
 
-        switch (e.Key)
-        {
+        switch (e.Key) {
             case Key.Right:
                 newCursor = Math.Min(oldCursor + 1, fileLen - 1);
                 _state.NibbleLow = false;
@@ -386,10 +362,8 @@ internal sealed class HexViewControl : Control
             default:
                 // Hex digit editing
                 int hexDigit = GetHexDigit(e.Key);
-                if (hexDigit >= 0 && _state.HexCursorOffset >= 0)
-                {
-                    if (_state.IsReadOnly)
-                    {
+                if (hexDigit >= 0 && _state.HexCursorOffset >= 0) {
+                    if (_state.IsReadOnly) {
                         e.Handled = true;
                         return;
                     }
@@ -403,13 +377,10 @@ internal sealed class HexViewControl : Control
         }
 
         // Selection handling
-        if (shift)
-        {
+        if (shift) {
             if (_state.HexSelectionAnchor < 0)
                 _state.HexSelectionAnchor = oldCursor;
-        }
-        else
-        {
+        } else {
             _state.HexSelectionAnchor = -1;
         }
 
@@ -429,8 +400,7 @@ internal sealed class HexViewControl : Control
 
         Point pos = e.GetPosition(this);
         long offset = HitTest(pos);
-        if (offset >= 0)
-        {
+        if (offset >= 0) {
             _state.HexCursorOffset = offset;
             _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
@@ -472,12 +442,9 @@ internal sealed class HexViewControl : Control
         long baseOffset = _state.HexBaseOffset;
         int visibleRows = _state.VisibleRows;
 
-        if (cursor < baseOffset)
-        {
+        if (cursor < baseOffset) {
             _state.HexBaseOffset = (cursor / bytesPerRow) * bytesPerRow;
-        }
-        else if (cursor >= baseOffset + (long)visibleRows * bytesPerRow)
-        {
+        } else if (cursor >= baseOffset + (long)visibleRows * bytesPerRow) {
             _state.HexBaseOffset = ((cursor / bytesPerRow) - visibleRows + 1) * bytesPerRow;
         }
     }
@@ -503,13 +470,11 @@ internal sealed class HexViewControl : Control
         double addressWidth = _state.GutterVisible ? (addressDigits + 3) * charWidth : 0;
 
         double hexX = point.X - addressWidth;
-        if (hexX >= 0)
-        {
+        if (hexX >= 0) {
             int groupCount = (bytesPerRow + 7) / 8;
             double totalHexWidth = (bytesPerRow * 3 + groupCount) * charWidth;
 
-            if (hexX < totalHexWidth)
-            {
+            if (hexX < totalHexWidth) {
                 // Hit in hex area — approximate column
                 int approxCol = (int)(hexX / (3 * charWidth));
                 approxCol = Math.Clamp(approxCol, 0, bytesPerRow - 1);
@@ -533,37 +498,29 @@ internal sealed class HexViewControl : Control
             current[0] = 0;
 
         byte value;
-        if (!_state.NibbleLow)
-        {
+        if (!_state.NibbleLow) {
             value = (byte)((digit << 4) | (current[0] & 0x0F));
             _state.NibbleLow = true;
-        }
-        else
-        {
+        } else {
             value = (byte)((current[0] & 0xF0) | digit);
             _state.NibbleLow = false;
         }
 
-        if (offset < _state.FileLength)
-        {
+        if (offset < _state.FileLength) {
             _state.Document.Delete(offset, 1);
             _state.Document.Insert(offset, [value]);
-        }
-        else
-        {
+        } else {
             _state.Document.Insert(offset, [value]);
         }
 
         _state.InvalidateSearchResults();
 
-        if (!_state.NibbleLow)
-        {
+        if (!_state.NibbleLow) {
             _state.HexCursorOffset = Math.Min(offset + 1, _state.Document.Length - 1);
         }
     }
 
-    private static int GetHexDigit(Key key) => key switch
-    {
+    private static int GetHexDigit(Key key) => key switch {
         Key.D0 or Key.NumPad0 => 0,
         Key.D1 or Key.NumPad1 => 1,
         Key.D2 or Key.NumPad2 => 2,

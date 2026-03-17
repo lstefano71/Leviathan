@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
+
 using Leviathan.Core.Csv;
 
 namespace Leviathan.GUI.Widgets;
@@ -27,8 +28,7 @@ public sealed partial class CsvSettingsDialog : Window
 
         ApplyButton.Click += OnApply;
         CancelButton.Click += (_, _) => Close();
-        Opened += (_, _) =>
-        {
+        Opened += (_, _) => {
             Dispatcher.UIThread.Post(() => SeparatorCombo.Focus(), DispatcherPriority.Input);
         };
     }
@@ -37,8 +37,7 @@ public sealed partial class CsvSettingsDialog : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
-        {
+        if (e.Key == Key.Escape) {
             Close();
             e.Handled = true;
             return;
@@ -56,10 +55,8 @@ public sealed partial class CsvSettingsDialog : Window
         _state.CsvDialect = new CsvDialect(separator, quote, quote, hasHeader);
 
         // Save per-file settings
-        if (_state.CurrentFilePath is not null)
-        {
-            _state.Settings.SetCsvFileSettings(_state.CurrentFilePath, new CsvFileSettings
-            {
+        if (_state.CurrentFilePath is not null) {
+            _state.Settings.SetCsvFileSettings(_state.CurrentFilePath, new CsvFileSettings {
                 Separator = separator,
                 Quote = quote,
                 Escape = quote,
@@ -76,8 +73,7 @@ public sealed partial class CsvSettingsDialog : Window
 
     private void SetSeparatorSelection(byte separator)
     {
-        int index = separator switch
-        {
+        int index = separator switch {
             (byte)',' => 0,
             (byte)'\t' => 1,
             (byte)';' => 2,
@@ -89,8 +85,7 @@ public sealed partial class CsvSettingsDialog : Window
 
     private void SetQuoteSelection(byte quote)
     {
-        int index = quote switch
-        {
+        int index = quote switch {
             (byte)'"' => 0,
             (byte)'\'' => 1,
             0 => 2,

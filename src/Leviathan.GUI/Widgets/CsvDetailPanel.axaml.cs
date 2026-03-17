@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+
 using Leviathan.Core.Csv;
 using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
@@ -38,8 +39,7 @@ public sealed partial class CsvDetailPanel : UserControl
     /// </summary>
     internal void UpdateRecord(AppState state, Views.CsvViewControl csvView)
     {
-        if (state.Document is null || state.CsvRowIndex is null)
-        {
+        if (state.Document is null || state.CsvRowIndex is null) {
             ClearPanel();
             return;
         }
@@ -50,8 +50,7 @@ public sealed partial class CsvDetailPanel : UserControl
         if (cursorRow == _lastRow && cursorCol == _lastCol)
             return;
 
-        if (cursorRow != _lastRow)
-        {
+        if (cursorRow != _lastRow) {
             RebuildFields(state, csvView, cursorRow);
             _lastRow = cursorRow;
         }
@@ -80,8 +79,7 @@ public sealed partial class CsvDetailPanel : UserControl
 
         long rowOffset = csvView.GetRowByteOffset(cursorRow);
         _lastRowOffset = rowOffset;
-        if (rowOffset < 0 || rowOffset >= state.FileLength)
-        {
+        if (rowOffset < 0 || rowOffset >= state.FileLength) {
             TitleText.Text = "Record Detail";
             return;
         }
@@ -111,8 +109,7 @@ public sealed partial class CsvDetailPanel : UserControl
         int matchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, rowOffset);
 
         Span<byte> unescaped = stackalloc byte[4096];
-        for (int i = 0; i < fieldCount; i++)
-        {
+        for (int i = 0; i < fieldCount; i++) {
             string label = i < headers.Length ? headers[i] : $"Column {i + 1}";
             int written = CsvFieldParser.UnescapeField(rowData, fields[i], dialect, unescaped);
             string value = System.Text.Encoding.UTF8.GetString(unescaped[..written]);
@@ -125,13 +122,11 @@ public sealed partial class CsvDetailPanel : UserControl
             bool hasActiveMatch = false;
 
             int mc = matchCursor;
-            while (mc < matches.Count)
-            {
+            while (mc < matches.Count) {
                 long mStart = matches[mc].Offset;
                 long mEnd = mStart + matches[mc].Length - 1;
                 if (mStart > fieldEnd) break;
-                if (mEnd >= fieldStart)
-                {
+                if (mEnd >= fieldStart) {
                     hasMatch = true;
                     hasActiveMatch = mc == state.CurrentMatchIndex;
                     break;
@@ -147,15 +142,13 @@ public sealed partial class CsvDetailPanel : UserControl
     private static Border CreateFieldRow(string label, string value, int index, bool isHidden,
         bool hasMatch, bool hasActiveMatch)
     {
-        StackPanel row = new()
-        {
+        StackPanel row = new() {
             Orientation = Avalonia.Layout.Orientation.Vertical,
             Spacing = 1,
             Margin = new Thickness(0, 1)
         };
 
-        TextBlock labelBlock = new()
-        {
+        TextBlock labelBlock = new() {
             Text = isHidden ? $"{label} (hidden)" : label,
             FontWeight = FontWeight.SemiBold,
             FontSize = 12,
@@ -167,14 +160,12 @@ public sealed partial class CsvDetailPanel : UserControl
         row.Children.Add(labelBlock);
 
         bool isEmpty = string.IsNullOrEmpty(value);
-        TextBlock valueBlock = new()
-        {
+        TextBlock valueBlock = new() {
             Text = isEmpty ? "(empty)" : value,
             TextWrapping = TextWrapping.Wrap,
             FontSize = 13
         };
-        if (isEmpty)
-        {
+        if (isEmpty) {
             valueBlock.Foreground = Brushes.DarkGray;
             valueBlock.FontStyle = FontStyle.Italic;
         }
@@ -192,8 +183,7 @@ public sealed partial class CsvDetailPanel : UserControl
         else if (index % 2 == 0)
             bg = StripeBrush;
 
-        return new Border
-        {
+        return new Border {
             Child = row,
             Padding = new Thickness(4, 2),
             CornerRadius = new CornerRadius(3),
@@ -206,17 +196,13 @@ public sealed partial class CsvDetailPanel : UserControl
     {
         List<SearchResult> matches = state.SearchResults;
 
-        for (int i = 0; i < FieldsPanel.Children.Count; i++)
-        {
+        for (int i = 0; i < FieldsPanel.Children.Count; i++) {
             if (FieldsPanel.Children[i] is not Border border) continue;
 
             // Determine background priority: active col > match > stripe > none
-            if (i == activeCol)
-            {
+            if (i == activeCol) {
                 border.Background = ActiveColBrush;
-            }
-            else
-            {
+            } else {
                 // Preserve match or stripe background
                 IBrush? bg = i % 2 == 0 ? StripeBrush : null;
                 border.Background = bg;
@@ -227,15 +213,11 @@ public sealed partial class CsvDetailPanel : UserControl
     private static int FindRowEnd(byte[] buf, int length, CsvDialect dialect)
     {
         bool inQuoted = false;
-        for (int i = 0; i < length; i++)
-        {
+        for (int i = 0; i < length; i++) {
             byte b = buf[i];
-            if (inQuoted)
-            {
-                if (b == dialect.Quote)
-                {
-                    if (i + 1 < length && buf[i + 1] == dialect.Quote)
-                    {
+            if (inQuoted) {
+                if (b == dialect.Quote) {
+                    if (i + 1 < length && buf[i + 1] == dialect.Quote) {
                         i++;
                         continue;
                     }

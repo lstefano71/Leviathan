@@ -6,28 +6,28 @@ namespace Leviathan.Core.DataModel;
 /// </summary>
 internal sealed class PieceNode
 {
-  public Piece Piece;
-  public long SubtreeLength; // sum of lengths in this subtree
-  public PieceNode? Left;
-  public PieceNode? Right;
-  public PieceNode? Parent;
-  public bool IsRed;
+    public Piece Piece;
+    public long SubtreeLength; // sum of lengths in this subtree
+    public PieceNode? Left;
+    public PieceNode? Right;
+    public PieceNode? Parent;
+    public bool IsRed;
 
-  public PieceNode(Piece piece)
-  {
-    Piece = piece;
-    SubtreeLength = piece.Length;
-    IsRed = true; // new nodes are red
-  }
+    public PieceNode(Piece piece)
+    {
+        Piece = piece;
+        SubtreeLength = piece.Length;
+        IsRed = true; // new nodes are red
+    }
 
-  /// <summary>
-  /// Recalculates the subtree length from children.
-  /// Must be called after structural changes.
-  /// </summary>
-  public void UpdateSubtreeLength()
-  {
-    SubtreeLength = Piece.Length
-        + (Left?.SubtreeLength ?? 0)
-        + (Right?.SubtreeLength ?? 0);
-  }
+    /// <summary>
+    /// Recalculates the subtree length from children.
+    /// Must be called after structural changes.
+    /// </summary>
+    public void UpdateSubtreeLength()
+    {
+        SubtreeLength = Piece.Length
+            + (Left?.SubtreeLength ?? 0)
+            + (Right?.SubtreeLength ?? 0);
+    }
 }

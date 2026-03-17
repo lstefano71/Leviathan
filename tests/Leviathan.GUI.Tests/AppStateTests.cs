@@ -1,5 +1,4 @@
 using System.Text;
-using Leviathan.GUI;
 
 namespace Leviathan.GUI.Tests;
 
@@ -13,13 +12,10 @@ public sealed class AppStateTests
     {
         string path = CreateTempFile(".csv", "a,b\r\n1,2\r\n"u8.ToArray());
         AppState state = new();
-        try
-        {
+        try {
             state.OpenFile(path);
             Assert.Equal(ViewMode.Csv, state.ActiveView);
-        }
-        finally
-        {
+        } finally {
             state.CloseFile();
             File.Delete(path);
         }
@@ -30,13 +26,10 @@ public sealed class AppStateTests
     {
         string path = CreateTempFile(".txt", Encoding.UTF8.GetBytes("hello\nworld"));
         AppState state = new();
-        try
-        {
+        try {
             state.OpenFile(path);
             Assert.Equal(ViewMode.Text, state.ActiveView);
-        }
-        finally
-        {
+        } finally {
             state.CloseFile();
             File.Delete(path);
         }
@@ -47,13 +40,10 @@ public sealed class AppStateTests
     {
         string path = CreateTempFile(".bin", [0x00, 0xFF, 0x10, 0xA1, 0x00, 0x7F]);
         AppState state = new();
-        try
-        {
+        try {
             state.OpenFile(path);
             Assert.Equal(ViewMode.Hex, state.ActiveView);
-        }
-        finally
-        {
+        } finally {
             state.CloseFile();
             File.Delete(path);
         }
@@ -64,13 +54,10 @@ public sealed class AppStateTests
     {
         string path = CreateTempFile(".txt", Encoding.UTF8.GetBytes("hello\nworld"));
         AppState state = new() { IsReadOnly = true };
-        try
-        {
+        try {
             state.OpenFile(path);
             Assert.True(state.IsReadOnly);
-        }
-        finally
-        {
+        } finally {
             state.CloseFile();
             File.Delete(path);
         }
