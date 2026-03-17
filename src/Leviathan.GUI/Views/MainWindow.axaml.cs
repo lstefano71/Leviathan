@@ -1258,6 +1258,8 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("Open File", "Open a file (Ctrl+O)", () => _ = ShowOpenDialog());
         _commandPalette.RegisterCommand("Close File", "Close current file (Ctrl+W)", () => _ = CloseFileAsync());
         _commandPalette.RegisterCommand("Save", "Save the file (Ctrl+S)", SaveFile, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Save As...", "Save under a new name", () => _ = ShowSaveAsDialog());
+        _commandPalette.RegisterCommand("Exit", "Close Leviathan (Alt+F4 / Ctrl+Q)", Close);
         _commandPalette.RegisterCommand(
             () => _state.ActiveView == ViewMode.Hex ? "● Hex View" : "○ Hex View",
             "Switch to hex view (F5)",
@@ -1287,6 +1289,18 @@ public sealed partial class MainWindow : Window
             searchName: "Line Wrap",
             restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand(
+            () => _state.GutterVisible ? "☑ Show Gutter" : "☐ Show Gutter",
+            "Toggle the row number / offset gutter (Ctrl+Shift+G)",
+            ToggleGutter,
+            searchName: "Show Gutter",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.HexOffsetDecimal ? "☑ Decimal Offsets" : "☐ Decimal Offsets",
+            "Toggle decimal/hex offsets in Hex view",
+            ToggleDecimalOffsets,
+            searchName: "Decimal Offsets",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
             () => _state.Decoder.Encoding == TextEncoding.Utf8 ? "● Encoding: UTF-8" : "○ Encoding: UTF-8",
             "Switch to UTF-8 encoding",
             () => SwitchEncoding(TextEncoding.Utf8),
@@ -1304,9 +1318,53 @@ public sealed partial class MainWindow : Window
             () => SwitchEncoding(TextEncoding.Windows1252),
             searchName: "Encoding Windows-1252",
             restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 0 ? "● Bytes/Row: Auto" : "○ Bytes/Row: Auto",
+            "Auto-fit bytes per row in hex view",
+            () => SetBytesPerRow(0),
+            searchName: "Bytes Per Row Auto",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 8 ? "● Bytes/Row: 8" : "○ Bytes/Row: 8",
+            "Set bytes per row to 8 in hex view",
+            () => SetBytesPerRow(8),
+            searchName: "Bytes Per Row 8",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 16 ? "● Bytes/Row: 16" : "○ Bytes/Row: 16",
+            "Set bytes per row to 16 in hex view",
+            () => SetBytesPerRow(16),
+            searchName: "Bytes Per Row 16",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 24 ? "● Bytes/Row: 24" : "○ Bytes/Row: 24",
+            "Set bytes per row to 24 in hex view",
+            () => SetBytesPerRow(24),
+            searchName: "Bytes Per Row 24",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 32 ? "● Bytes/Row: 32" : "○ Bytes/Row: 32",
+            "Set bytes per row to 32 in hex view",
+            () => SetBytesPerRow(32),
+            searchName: "Bytes Per Row 32",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 48 ? "● Bytes/Row: 48" : "○ Bytes/Row: 48",
+            "Set bytes per row to 48 in hex view",
+            () => SetBytesPerRow(48),
+            searchName: "Bytes Per Row 48",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand(
+            () => _state.BytesPerRowSetting == 64 ? "● Bytes/Row: 64" : "○ Bytes/Row: 64",
+            "Set bytes per row to 64 in hex view",
+            () => SetBytesPerRow(64),
+            searchName: "Bytes Per Row 64",
+            restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("CSV Settings...", "Configure CSV separator/quote/header (F8)", () => _ = ShowCsvSettingsDialog());
         _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Delete Row(s)", "Delete selected CSV rows", DoDeleteCsvRows, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
 
