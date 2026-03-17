@@ -72,7 +72,11 @@ For a step-by-step guide and JSON examples, see **[Theme Guide](themes.md)**.
 - `Ctrl+G` Go to offset/line
 - `Ctrl+P` Command palette (file-open mode)
 - `Ctrl+X / Ctrl+C / Ctrl+V` Cut / Copy / Paste
+- `Ctrl+Insert / Shift+Insert / Shift+Delete` Copy / Paste / Cut (legacy Windows bindings)
 - `Ctrl+A` Select all
+- `Ctrl+Left / Ctrl+Right` Previous / next word (Text view)
+- `Ctrl+Shift+Left / Ctrl+Shift+Right` Extend selection by word (Text view)
+- `Ctrl+Backspace / Ctrl+Delete` Delete previous / next word chunk (Text view)
 - `Ctrl+W` Close file
 - `Ctrl+Q` Quit
 - `F1` Keyboard shortcuts + link to this page

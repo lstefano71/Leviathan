@@ -11,6 +11,7 @@ using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Leviathan.GUI.Views;
 
@@ -563,14 +564,22 @@ internal sealed class TextViewControl : Control
             case Key.Right:
                 _desiredColumn = -1;
                 _state.Document?.BreakCoalescing();
-                newCursor = Math.Min(oldCursor + _state.Decoder.MinCharBytes, _state.FileLength);
-                newCursor = SkipCrLf(newCursor, 1);
+                if (ctrl) {
+                    newCursor = MoveToNextWordBoundary(oldCursor);
+                } else {
+                    newCursor = Math.Min(oldCursor + _state.Decoder.MinCharBytes, _state.FileLength);
+                    newCursor = SkipCrLf(newCursor, 1);
+                }
                 break;
             case Key.Left:
                 _desiredColumn = -1;
                 _state.Document?.BreakCoalescing();
-                newCursor = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
-                newCursor = SkipCrLf(newCursor, -1);
+                if (ctrl) {
+                    newCursor = MoveToPreviousWordBoundary(oldCursor);
+                } else {
+                    newCursor = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
+                    newCursor = SkipCrLf(newCursor, -1);
+                }
                 break;
             case Key.Down:
                 _state.Document?.BreakCoalescing();
@@ -612,6 +621,14 @@ internal sealed class TextViewControl : Control
                     shift = false;
                     break;
                 }
+                if (ctrl) {
+                    if (TryResolveWordDeleteRange(oldCursor, deleteBackward: true, out long deleteStart, out long deleteLength)) {
+                        _state.Document.Delete(deleteStart, deleteLength, oldCursor);
+                        newCursor = deleteStart;
+                        _state.InvalidateSearchResults();
+                    }
+                    break;
+                }
                 if (oldCursor > _state.BomLength) {
                     long deleteAt = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
                     long deleteLen = oldCursor - deleteAt;
@@ -627,6 +644,14 @@ internal sealed class TextViewControl : Control
                 if (TryDeleteSelection()) {
                     newCursor = _state.TextCursorOffset;
                     shift = false;
+                    break;
+                }
+                if (ctrl) {
+                    if (TryResolveWordDeleteRange(oldCursor, deleteBackward: false, out long deleteStart, out long deleteLength)) {
+                        _state.Document.Delete(deleteStart, deleteLength, oldCursor);
+                        newCursor = deleteStart;
+                        _state.InvalidateSearchResults();
+                    }
                     break;
                 }
                 if (oldCursor < _state.FileLength) {
@@ -1769,6 +1794,285 @@ internal sealed class TextViewControl : Control
         }
 
         return offset;
+    }
+
+    /// <summary>Classifies runes that belong to a "word" for navigation/editing shortcuts.</summary>
+    internal static bool IsWordRune(Rune rune)
+        => Rune.IsLetterOrDigit(rune) || rune.Value == '_';
+
+    /// <summary>Finds the previous word boundary using an abstract rune reader.</summary>
+    internal static long FindPreviousWordBoundary(
+        long offset,
+        long bomLength,
+        Func<long, (bool Success, long RuneStart, Rune Rune, int ByteLength)> readRuneBefore)
+    {
+        long cursor = Math.Max(offset, bomLength);
+
+        while (cursor > bomLength) {
+            var read = readRuneBefore(cursor);
+            if (!read.Success || read.ByteLength <= 0)
+                break;
+
+            if (IsWordRune(read.Rune))
+                break;
+
+            cursor = read.RuneStart;
+        }
+
+        while (cursor > bomLength) {
+            var read = readRuneBefore(cursor);
+            if (!read.Success || read.ByteLength <= 0)
+                break;
+
+            if (!IsWordRune(read.Rune))
+                break;
+
+            cursor = read.RuneStart;
+        }
+
+        return Math.Max(cursor, bomLength);
+    }
+
+    /// <summary>Finds the next word boundary (word start) using an abstract rune reader.</summary>
+    internal static long FindNextWordBoundary(
+        long offset,
+        long bomLength,
+        long fileLength,
+        Func<long, (bool Success, Rune Rune, int ByteLength)> readRuneAt)
+    {
+        long cursor = Math.Clamp(offset, bomLength, fileLength);
+        if (cursor >= fileLength)
+            return fileLength;
+
+        var first = readRuneAt(cursor);
+        if (first.Success && first.ByteLength > 0 && IsWordRune(first.Rune)) {
+            while (cursor < fileLength) {
+                var read = readRuneAt(cursor);
+                if (!read.Success || read.ByteLength <= 0 || !IsWordRune(read.Rune))
+                    break;
+
+                cursor = Math.Min(fileLength, cursor + read.ByteLength);
+            }
+        }
+
+        while (cursor < fileLength) {
+            var read = readRuneAt(cursor);
+            if (!read.Success || read.ByteLength <= 0)
+                break;
+
+            if (IsWordRune(read.Rune))
+                break;
+
+            cursor = Math.Min(fileLength, cursor + read.ByteLength);
+        }
+
+        return Math.Clamp(cursor, bomLength, fileLength);
+    }
+
+    /// <summary>Finds the next boundary used by Ctrl+Delete (delete next word chunk).</summary>
+    internal static long FindNextWordDeletionBoundary(
+        long offset,
+        long bomLength,
+        long fileLength,
+        Func<long, (bool Success, Rune Rune, int ByteLength)> readRuneAt)
+    {
+        long cursor = Math.Clamp(offset, bomLength, fileLength);
+        if (cursor >= fileLength)
+            return fileLength;
+
+        var first = readRuneAt(cursor);
+        if (!first.Success || first.ByteLength <= 0)
+            return cursor;
+
+        bool startedOnWord = IsWordRune(first.Rune);
+        if (startedOnWord) {
+            while (cursor < fileLength) {
+                var read = readRuneAt(cursor);
+                if (!read.Success || read.ByteLength <= 0 || !IsWordRune(read.Rune))
+                    break;
+
+                cursor = Math.Min(fileLength, cursor + read.ByteLength);
+            }
+
+            while (cursor < fileLength) {
+                var read = readRuneAt(cursor);
+                if (!read.Success || read.ByteLength <= 0 || IsWordRune(read.Rune))
+                    break;
+
+                cursor = Math.Min(fileLength, cursor + read.ByteLength);
+            }
+        } else {
+            while (cursor < fileLength) {
+                var read = readRuneAt(cursor);
+                if (!read.Success || read.ByteLength <= 0 || IsWordRune(read.Rune))
+                    break;
+
+                cursor = Math.Min(fileLength, cursor + read.ByteLength);
+            }
+
+            while (cursor < fileLength) {
+                var read = readRuneAt(cursor);
+                if (!read.Success || read.ByteLength <= 0 || !IsWordRune(read.Rune))
+                    break;
+
+                cursor = Math.Min(fileLength, cursor + read.ByteLength);
+            }
+        }
+
+        return Math.Clamp(cursor, bomLength, fileLength);
+    }
+
+    /// <summary>Resolves the delete range for Ctrl+Backspace / Ctrl+Delete.</summary>
+    internal static bool TryGetWordDeleteRange(
+        long cursorOffset,
+        long bomLength,
+        long fileLength,
+        bool deleteBackward,
+        Func<long, (bool Success, Rune Rune, int ByteLength)> readRuneAt,
+        Func<long, (bool Success, long RuneStart, Rune Rune, int ByteLength)> readRuneBefore,
+        out long deleteStart,
+        out long deleteLength)
+    {
+        long cursor = Math.Clamp(cursorOffset, bomLength, fileLength);
+
+        if (deleteBackward) {
+            deleteStart = FindPreviousWordBoundary(cursor, bomLength, readRuneBefore);
+            deleteLength = cursor - deleteStart;
+        } else {
+            long deleteEnd = FindNextWordDeletionBoundary(cursor, bomLength, fileLength, readRuneAt);
+            deleteStart = cursor;
+            deleteLength = deleteEnd - cursor;
+        }
+
+        return deleteLength > 0;
+    }
+
+    private long MoveToPreviousWordBoundary(long offset)
+    {
+        if (_state.Document is null)
+            return offset;
+
+        long aligned = AlignOffsetToCharacterBoundary(offset);
+        return FindPreviousWordBoundary(aligned, _state.BomLength, ReadRuneBeforeForWordNavigation);
+    }
+
+    private long MoveToNextWordBoundary(long offset)
+    {
+        if (_state.Document is null)
+            return offset;
+
+        long aligned = AlignOffsetToCharacterBoundary(offset);
+        return FindNextWordBoundary(aligned, _state.BomLength, _state.FileLength, ReadRuneAtForWordNavigation);
+    }
+
+    private bool TryResolveWordDeleteRange(long cursorOffset, bool deleteBackward, out long deleteStart, out long deleteLength)
+    {
+        if (_state.Document is null) {
+            deleteStart = 0;
+            deleteLength = 0;
+            return false;
+        }
+
+        long aligned = AlignOffsetToCharacterBoundary(cursorOffset);
+        return TryGetWordDeleteRange(
+            aligned,
+            _state.BomLength,
+            _state.FileLength,
+            deleteBackward,
+            ReadRuneAtForWordNavigation,
+            ReadRuneBeforeForWordNavigation,
+            out deleteStart,
+            out deleteLength);
+    }
+
+    private long AlignOffsetToCharacterBoundary(long offset)
+    {
+        if (_state.Document is null)
+            return offset;
+
+        long clamped = Math.Clamp(offset, _state.BomLength, _state.FileLength);
+        if (clamped <= _state.BomLength || clamped >= _state.FileLength)
+            return clamped;
+
+        const int WindowSize = 16;
+        int bytesToRead = (int)Math.Min(WindowSize, clamped - _state.BomLength);
+        long windowStart = clamped - bytesToRead;
+        Span<byte> window = stackalloc byte[WindowSize];
+        int read = _state.Document.Read(windowStart, window[..bytesToRead]);
+        if (read <= 0)
+            return clamped;
+
+        int localOffset = (int)(clamped - windowStart);
+        localOffset = Math.Clamp(localOffset, 0, read);
+        int aligned = _state.Decoder.AlignToCharBoundary(window[..read], localOffset);
+        aligned = Math.Clamp(aligned, 0, localOffset);
+        return windowStart + aligned;
+    }
+
+    private (bool Success, Rune Rune, int ByteLength) ReadRuneAtForWordNavigation(long offset)
+    {
+        if (_state.Document is null || offset < _state.BomLength || offset >= _state.FileLength)
+            return (false, Rune.ReplacementChar, 0);
+
+        const int MaxRuneBytes = 8;
+        Span<byte> buffer = stackalloc byte[MaxRuneBytes];
+        int bytesToRead = (int)Math.Min(MaxRuneBytes, _state.FileLength - offset);
+        int read = _state.Document.Read(offset, buffer[..bytesToRead]);
+        if (read <= 0)
+            return (false, Rune.ReplacementChar, 0);
+
+        (Rune rune, int byteLength) = _state.Decoder.DecodeRune(buffer[..read], 0);
+        if (byteLength <= 0 || byteLength > read) {
+            byteLength = Math.Clamp(_state.Decoder.MinCharBytes, 1, read);
+            rune = Rune.ReplacementChar;
+        }
+
+        return (true, rune, byteLength);
+    }
+
+    private (bool Success, long RuneStart, Rune Rune, int ByteLength) ReadRuneBeforeForWordNavigation(long offset)
+    {
+        if (_state.Document is null || offset <= _state.BomLength)
+            return (false, 0, Rune.ReplacementChar, 0);
+
+        long clamped = Math.Clamp(offset, _state.BomLength, _state.FileLength);
+        if (clamped <= _state.BomLength)
+            return (false, 0, Rune.ReplacementChar, 0);
+
+        const int MaxLookbackBytes = 16;
+        int bytesToRead = (int)Math.Min(MaxLookbackBytes, clamped - _state.BomLength);
+        long windowStart = clamped - bytesToRead;
+        Span<byte> window = stackalloc byte[MaxLookbackBytes];
+        int read = _state.Document.Read(windowStart, window[..bytesToRead]);
+        if (read <= 0)
+            return (false, 0, Rune.ReplacementChar, 0);
+
+        ReadOnlySpan<byte> windowData = window[..read];
+        int probe = read - 1;
+        while (probe >= 0) {
+            int runeStart = _state.Decoder.AlignToCharBoundary(windowData, probe);
+            if (runeStart < 0 || runeStart >= read) {
+                probe--;
+                continue;
+            }
+
+            (Rune rune, int byteLength) = _state.Decoder.DecodeRune(windowData, runeStart);
+            if (byteLength <= 0 || runeStart + byteLength > read) {
+                probe = runeStart - 1;
+                continue;
+            }
+
+            long absoluteStart = windowStart + runeStart;
+            long absoluteEnd = absoluteStart + byteLength;
+            if (absoluteEnd > clamped) {
+                probe = runeStart - 1;
+                continue;
+            }
+
+            return (true, absoluteStart, rune, byteLength);
+        }
+
+        return (false, 0, Rune.ReplacementChar, 0);
     }
 
     private long ComputeLineNumber(long offset)

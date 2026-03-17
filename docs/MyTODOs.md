@@ -1,4 +1,7 @@
 Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
+Avalonia docs here: https://docs.avaloniaui.net/docs/welcome
+Avalonia standard controls: https://docs.avaloniaui.net/controls
+Avalonia standard API: https://docs.avaloniaui.net/api/avalonia
 
 
 [x] avalonia front-end: it would be cool if the hex view had a fixed header on the two parts of the display with the relative offsets from the address in the gutter.

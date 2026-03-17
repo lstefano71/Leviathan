@@ -47,6 +47,14 @@ public sealed partial class MainWindow : Window
     private long _lastIndexedRowCount = -1;
     private bool _lastRowIndexComplete = true;
 
+    internal enum LegacyEditShortcutAction
+    {
+        None,
+        Copy,
+        Paste,
+        Cut
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -1493,11 +1501,46 @@ public sealed partial class MainWindow : Window
 
     // ─── Keyboard shortcuts ───
 
+    /// <summary>
+    /// Determines whether a Ctrl+key shortcut should be processed by the global handler.
+    /// </summary>
+    internal static bool ShouldHandleGlobalCtrlShortcut(Key key, bool textInputFocused)
+    {
+        if (!textInputFocused)
+            return true;
+
+        return key is not (
+            Key.P or Key.Q or Key.W or
+            Key.X or Key.Z or Key.Y or Key.C or Key.V or Key.A or
+            Key.B or Key.Insert);
+    }
+
+    /// <summary>Maps legacy Windows clipboard shortcuts to edit actions.</summary>
+    internal static LegacyEditShortcutAction ResolveLegacyEditShortcut(Key key, KeyModifiers keyModifiers, bool textInputFocused)
+    {
+        if (textInputFocused)
+            return LegacyEditShortcutAction.None;
+
+        if (keyModifiers == KeyModifiers.Control && key == Key.Insert)
+            return LegacyEditShortcutAction.Copy;
+
+        if (keyModifiers == KeyModifiers.Shift && key == Key.Insert)
+            return LegacyEditShortcutAction.Paste;
+
+        if (keyModifiers == KeyModifiers.Shift && key == Key.Delete)
+            return LegacyEditShortcutAction.Cut;
+
+        return LegacyEditShortcutAction.None;
+    }
+
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         // Global shortcuts that work regardless of focus
         if (e.KeyModifiers == KeyModifiers.Control) {
             bool textInputFocused = IsTextInputFocused();
+            if (!ShouldHandleGlobalCtrlShortcut(e.Key, textInputFocused))
+                return;
+
             switch (e.Key) {
                 case Key.P:
                     if (_state.Document is not null) {
@@ -1513,35 +1556,57 @@ public sealed partial class MainWindow : Window
                     _ = CloseFileAsync();
                     e.Handled = true;
                     return;
-                case Key.X when !textInputFocused:
+                case Key.X:
                     DoCut();
                     e.Handled = true;
                     return;
-                case Key.Z when !textInputFocused:
+                case Key.Z:
                     DoUndo();
                     e.Handled = true;
                     return;
-                case Key.Y when !textInputFocused:
+                case Key.Y:
                     DoRedo();
                     e.Handled = true;
                     return;
-                case Key.C when !textInputFocused:
+                case Key.C:
                     DoCopy();
                     e.Handled = true;
                     return;
-                case Key.V when !textInputFocused:
+                case Key.V:
                     DoPaste();
                     e.Handled = true;
                     return;
-                case Key.A when !textInputFocused:
+                case Key.A:
                     DoSelectAll();
                     e.Handled = true;
                     return;
-                case Key.B when !textInputFocused:
+                case Key.B:
                     DoToggleBookmark();
                     e.Handled = true;
                     return;
+                case Key.Insert:
+                    DoCopy();
+                    e.Handled = true;
+                    return;
             }
+        }
+
+        LegacyEditShortcutAction legacyShortcutAction = ResolveLegacyEditShortcut(e.Key, e.KeyModifiers, IsTextInputFocused());
+        if (legacyShortcutAction != LegacyEditShortcutAction.None) {
+            switch (legacyShortcutAction) {
+                case LegacyEditShortcutAction.Copy:
+                    DoCopy();
+                    break;
+                case LegacyEditShortcutAction.Paste:
+                    DoPaste();
+                    break;
+                case LegacyEditShortcutAction.Cut:
+                    DoCut();
+                    break;
+            }
+
+            e.Handled = true;
+            return;
         }
 
         if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.G) {
@@ -2481,9 +2546,15 @@ public sealed partial class MainWindow : Window
             Ctrl+X          Cut selection
             Ctrl+C          Copy selection
             Ctrl+V          Paste
+            Ctrl+Insert     Copy selection
+            Shift+Insert    Paste
+            Shift+Delete    Cut selection
             Ctrl+Z          Undo
             Ctrl+Y          Redo
             Ctrl+A          Select all
+            Ctrl+Left/Right Previous/next word
+            Ctrl+Shift+Left/Right Select previous/next word
+            Ctrl+Backspace/Delete Delete previous/next word chunk
             Home/End        Start/end of line
             Ctrl+Home/End   Start/end of file
             PgUp/PgDn       Page up/down
