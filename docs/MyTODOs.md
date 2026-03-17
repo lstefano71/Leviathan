@@ -25,7 +25,7 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: themes. maybe there should be an "import/export theme" command?  Maybe there should also be a theme editor within leviathan itself? or is that an overkill?
 
-[ ] can you make sure the avalonia front-end has its version via GitVersioning like the TUI2, and gets compiled, tested and released by the github action pipelines along with the TUI2? what's the best practice for projects which release multiple different separate artifacts? Also: could you check if the release notes are up to the task? I noticed a sad "click here for full changelog" but maybe a list of main items inlined would help a returning user? Also: I think that a push to a branch different than main should trigger a pre-release instead of a full release. But I might want to test the exes of a pre-release manually. 
+[x] can you make sure the avalonia front-end has its version via GitVersioning like the TUI2, and gets compiled, tested and released by the github action pipelines along with the TUI2? what's the best practice for projects which release multiple different separate artifacts? Also: could you check if the release notes are up to the task? I noticed a sad "click here for full changelog" but maybe a list of main items inlined would help a returning user? Also: I think that a push to a branch different than main should trigger a pre-release instead of a full release. But I might want to test the exes of a pre-release manually. 
 
 [x] avalonia front-end: a bit of attention to the spacing of the gutter. It looks a bit cramped at the moment. Maybe add some padding between the gutter and the views? Also: maybe add a vertical line to separate the gutter from View? also: the gutter should be able to be hidden and shown. And maybe the file offset in the hex view should also be displayable in decimal?
 
@@ -48,5 +48,13 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 [ ] avalonia front-end: search and replace?
 
 [ ] avalonia front-end: revision of the command palette. Maybe some options should open sub menus (like: encoding or bytes per row?) instead of being inline in the command palette. 
+
+[ ] avalonia front-end: it would be nice if the command palette had a "recently used" section at the top, so that I can quickly access the commands I use most often.
+
+[ ] avalonia front-end: the edit > copy/paste/cut should have standard keyboard shortcuts.
+
+[ ] avalonia front-end: in the welcome view, pin works but unpin does not.
+
+[ ] avalonia front-end, csv view: what's the point of having in the status bar R x/n and then another fields with "rows: n"? One of them shows when it's approximate, the other doesn't. But apart from that... 
 
 [ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? 

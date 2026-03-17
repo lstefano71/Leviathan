@@ -65,8 +65,8 @@
                 <!-- About section -->
                 <StackPanel Spacing="6">
                     <TextBlock Text="About" FontSize="13" FontWeight="SemiBold" Opacity="0.6" />
-                    <TextBlock x:Name="InfoVersion" Text="Version 0.0.0" FontSize="12" Opacity="0.5" />
-                    <TextBlock x:Name="InfoBuildDate" Text="" FontSize="12" Opacity="0.5" />
+                    <TextBlock x:Name="InfoVersion" Text="Version 0.0.0" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                    <TextBlock x:Name="InfoBuildDate" Text="" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
                 </StackPanel>
 
                 <!-- Keyboard shortcuts section -->

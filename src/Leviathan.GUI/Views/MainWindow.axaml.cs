@@ -11,6 +11,7 @@ using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 using Leviathan.GUI.Widgets;
+using System.Reflection;
 
 namespace Leviathan.GUI.Views;
 
@@ -34,10 +35,12 @@ public sealed partial class MainWindow : Window
     private string? _lineEndingCachePath;
     private long _lineEndingCacheLength = -1;
     private string _lineEndingCache = "";
+    private readonly BuildIdentity _buildIdentity;
 
     public MainWindow()
     {
         InitializeComponent();
+        _buildIdentity = BuildIdentity.Create(typeof(MainWindow).Assembly);
 
         // Apply persisted settings
         _state.BytesPerRowSetting = _state.Settings.BytesPerRow;
@@ -76,6 +79,7 @@ public sealed partial class MainWindow : Window
         // Drag-and-drop
         AddHandler(DragDrop.DropEvent, OnDrop);
         DragDrop.SetAllowDrop(this, true);
+        SizeChanged += (_, _) => UpdateStatusBar();
 
         // Keyboard shortcuts not bound to menu items
         KeyDown += OnGlobalKeyDown;
@@ -127,6 +131,11 @@ public sealed partial class MainWindow : Window
             SuppressNextMenuFocusRestore();
             ShowFindBar();
         };
+        MenuCommandPalette.Click += (_, _) =>
+        {
+            SuppressNextMenuFocusRestore();
+            ShowCommandPalette();
+        };
         MenuFindNext.Click += (_, _) => FindNext();
         MenuFindPrev.Click += (_, _) => FindPrevious();
         MenuGoto.Click += (_, _) =>
@@ -139,6 +148,7 @@ public sealed partial class MainWindow : Window
             SuppressNextMenuFocusRestore();
             await ShowCsvSettingsDialog();
         };
+        MenuCut.Click += (_, _) => DoCut();
         MenuCopy.Click += (_, _) => DoCopy();
         MenuPaste.Click += (_, _) => DoPaste();
         MenuSelectAll.Click += (_, _) => DoSelectAll();
@@ -870,10 +880,11 @@ public sealed partial class MainWindow : Window
 
     private void UpdateTitle()
     {
-        string title = "Leviathan";
+        string title = _buildIdentity.BrandedTitle;
         if (_state.CurrentFilePath is { } path)
         {
-            title = $"{Path.GetFileName(path)}{(_state.IsModified ? " •" : "")} — Leviathan";
+            string modifiedPrefix = _state.IsModified ? "• " : "";
+            title = $"{modifiedPrefix}{Path.GetFileName(path)} — {_buildIdentity.BrandedTitle}";
         }
         Title = title;
     }
@@ -884,20 +895,22 @@ public sealed partial class MainWindow : Window
 
         if (_state.Document is null)
         {
-            SbFile.Text = " Leviathan";
+            SbFile.Text = $" {_buildIdentity.BrandedTitle}";
+            SbBackground.Text = "";
             SbViewMode.Text = "";
             SbEncoding.Text = "";
             SbPosition.Text = "";
             SbLines.Text = "";
             SbSize.Text = "";
+            ToolTip.SetTip(SbFile, null);
             return;
         }
 
-        string fileName = _state.CurrentFilePath is not null
-            ? Path.GetFileName(_state.CurrentFilePath)
-            : "(untitled)";
+        string fullPath = _state.CurrentFilePath ?? "(untitled)";
+        string fileName = MiddleEllipsize(fullPath, ComputeStatusFileChars());
         string modified = _state.IsModified ? " [modified]" : "";
         SbFile.Text = $" {fileName}{modified}";
+        ToolTip.SetTip(SbFile, fullPath);
 
         string viewMode = _state.ActiveView switch
         {
@@ -920,14 +933,21 @@ public sealed partial class MainWindow : Window
 
         SbViewMode.Text = viewMode;
         SbSize.Text = size;
+        bool lineIndexing = !(_state.Indexer?.Index?.IsComplete ?? true);
+        bool csvIndexing = !(_state.CsvRowIndex?.IsComplete ?? true);
+        bool searching = _state.IsSearching;
+        SbBackground.Text = BuildBackgroundStatus(lineIndexing, csvIndexing, searching);
 
         if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null)
         {
             long totalCsvRows = _state.CsvRowIndex.TotalRowCount;
             string sepName = GetSeparatorName(_state.CsvDialect.Separator);
             SbEncoding.Text = $"Sep: {sepName}";
-            SbPosition.Text = $"R {_state.CsvCursorRow + 1:N0}/{totalCsvRows:N0}  C {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
-            SbLines.Text = selection.Length > 0 ? selection : $"Rows: {totalCsvRows:N0}";
+            string totalRowsLabel = csvIndexing ? $"~{totalCsvRows:N0}" : $"{totalCsvRows:N0}";
+            SbPosition.Text = $"R {_state.CsvCursorRow + 1:N0}/{totalRowsLabel}  C {_state.CsvCursorCol + 1}/{_state.CsvColumnCount}";
+            SbLines.Text = selection.Length > 0
+                ? selection
+                : (csvIndexing ? "Indexing rows..." : "");
             return;
         }
 
@@ -940,7 +960,10 @@ public sealed partial class MainWindow : Window
 
         SbEncoding.Text = encoding;
         SbPosition.Text = $"Offset: {offset}";
-        string linesInfo = _state.EstimatedTotalLines > 0 ? $"{_state.EstimatedTotalLines:N0} lines" : "Indexing...";
+        string linePrefix = lineIndexing ? "~" : "";
+        string linesInfo = _state.EstimatedTotalLines > 0
+            ? $"{linePrefix}{_state.EstimatedTotalLines:N0} lines"
+            : (lineIndexing ? "~ lines" : "0 lines");
         if (_state.ActiveView == ViewMode.Text)
         {
             string eol = GetLineEndingStatus();
@@ -950,6 +973,44 @@ public sealed partial class MainWindow : Window
         SbLines.Text = selection.Length > 0
             ? selection
             : linesInfo;
+    }
+
+    private string BuildBackgroundStatus(bool lineIndexing, bool csvIndexing, bool searching)
+    {
+        List<string> ops = [];
+        if (lineIndexing || csvIndexing)
+            ops.Add("Indexing");
+        if (searching)
+            ops.Add("Search");
+        return ops.Count == 0 ? "" : $"BG: {string.Join("+", ops)}";
+    }
+
+    private int ComputeStatusFileChars()
+    {
+        double availableWidth = SbFile.Bounds.Width;
+        if (availableWidth <= 1)
+            availableWidth = Bounds.Width * 0.40;
+
+        double avgCharWidth = Math.Max(5.5, SbFile.FontSize * 0.56);
+        int maxChars = (int)Math.Floor(availableWidth / avgCharWidth);
+        return Math.Max(12, maxChars);
+    }
+
+    private static string MiddleEllipsize(string text, int maxChars)
+    {
+        const string Ellipsis = "...";
+        if (text.Length <= maxChars)
+            return text;
+
+        if (maxChars <= Ellipsis.Length)
+            return Ellipsis[..maxChars];
+
+        int keepChars = maxChars - Ellipsis.Length;
+        int left = (keepChars + 1) / 2;
+        int right = keepChars - left;
+        return right == 0
+            ? $"{text[..left]}{Ellipsis}"
+            : $"{text[..left]}{Ellipsis}{text[^right..]}";
     }
 
     private string GetSelectionStatus()
@@ -1076,22 +1137,7 @@ public sealed partial class MainWindow : Window
             BuildFileMenuMru();
         };
 
-        // Populate version info in the right-hand panel
-        string version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-        string? buildDate = null;
-        foreach (System.Reflection.CustomAttributeData attr in typeof(MainWindow).Assembly.CustomAttributes)
-        {
-            if (attr.AttributeType == typeof(System.Reflection.AssemblyMetadataAttribute)
-                && attr.ConstructorArguments.Count == 2
-                && attr.ConstructorArguments[0].Value is string key
-                && key == "BuildDateUtc"
-                && attr.ConstructorArguments[1].Value is string val)
-            {
-                buildDate = val;
-                break;
-            }
-        }
-        WelcomeScreen.SetVersionInfo(version, buildDate);
+        WelcomeScreen.SetVersionInfo(_buildIdentity.AboutVersion, _buildIdentity.BuildDateUtc);
     }
 
     private void PopulateWelcomeScreen()
@@ -1163,6 +1209,7 @@ public sealed partial class MainWindow : Window
         // Global shortcuts that work regardless of focus
         if (e.KeyModifiers == KeyModifiers.Control)
         {
+            bool textInputFocused = IsTextInputFocused();
             switch (e.Key)
             {
                 case Key.P:
@@ -1175,6 +1222,22 @@ public sealed partial class MainWindow : Window
                     return;
                 case Key.W:
                     _ = CloseFileAsync();
+                    e.Handled = true;
+                    return;
+                case Key.X when !textInputFocused:
+                    DoCut();
+                    e.Handled = true;
+                    return;
+                case Key.C when !textInputFocused:
+                    DoCopy();
+                    e.Handled = true;
+                    return;
+                case Key.V when !textInputFocused:
+                    DoPaste();
+                    e.Handled = true;
+                    return;
+                case Key.A when !textInputFocused:
+                    DoSelectAll();
                     e.Handled = true;
                     return;
             }
@@ -1194,6 +1257,12 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+    }
+
+    private bool IsTextInputFocused()
+    {
+        IInputElement? focused = FocusManager?.GetFocusedElement();
+        return focused is TextBox;
     }
 
     // ─── Find / Search ───
@@ -1361,6 +1430,7 @@ public sealed partial class MainWindow : Window
             searchName: "Bytes Per Row 64",
             restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("CSV Settings...", "Configure CSV separator/quote/header (F8)", () => _ = ShowCsvSettingsDialog());
+        _commandPalette.RegisterCommand("Cut", "Cut selection (Ctrl+X)", DoCut, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
@@ -1586,7 +1656,20 @@ public sealed partial class MainWindow : Window
 
     private async void DoCopy()
     {
-        if (_state.Document is null) return;
+        await CopySelectionToClipboardAsync();
+    }
+
+    private async void DoCut()
+    {
+        bool copied = await CopySelectionToClipboardAsync();
+        if (copied)
+            DeleteActiveSelection();
+    }
+
+    private async Task<bool> CopySelectionToClipboardAsync()
+    {
+        if (_state.Document is null || Clipboard is not { } clipboard)
+            return false;
 
         string? text = null;
         if (_state.ActiveView == ViewMode.Hex)
@@ -1620,15 +1703,132 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        if (text is not null && Clipboard is { } clipboard)
-        {
-            await clipboard.SetTextAsync(text);
-        }
+        if (text is null)
+            return false;
+
+        await clipboard.SetTextAsync(text);
+        return true;
     }
 
-    private void DoPaste()
+    private bool DeleteActiveSelection()
     {
-        // TODO: implement clipboard paste
+        if (_state.Document is null)
+            return false;
+
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            long selStart = _state.HexSelStart;
+            long selEnd = _state.HexSelEnd;
+            if (selStart < 0 || selEnd < selStart)
+                return false;
+
+            _state.Document.Delete(selStart, selEnd - selStart + 1);
+            _state.HexSelectionAnchor = -1;
+            _state.NibbleLow = false;
+            _state.HexCursorOffset = _state.Document.Length > 0
+                ? Math.Min(selStart, _state.Document.Length - 1)
+                : 0;
+        }
+        else if (_state.ActiveView == ViewMode.Text)
+        {
+            long selStart = _state.TextSelStart;
+            long selEnd = _state.TextSelEnd;
+            if (selStart < 0 || selEnd < selStart)
+                return false;
+
+            _state.Document.Delete(selStart, selEnd - selStart + 1);
+            _state.TextSelectionAnchor = -1;
+            _state.TextCursorOffset = selStart;
+        }
+        else
+        {
+            return false;
+        }
+
+        _state.InvalidateSearchResults();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
+        return true;
+    }
+
+    private async void DoPaste()
+    {
+        if (_state.Document is null || Clipboard is not IAsyncDataTransfer clipboard)
+            return;
+        if (_state.ActiveView == ViewMode.Csv)
+            return;
+
+        string? clipboardText = await clipboard.TryGetTextAsync();
+        if (string.IsNullOrEmpty(clipboardText))
+            return;
+
+        DeleteActiveSelection();
+
+        if (_state.ActiveView == ViewMode.Hex)
+        {
+            byte[] bytes = TryParseHexClipboard(clipboardText, out byte[] parsed)
+                ? parsed
+                : System.Text.Encoding.UTF8.GetBytes(clipboardText);
+            if (bytes.Length == 0)
+                return;
+
+            long insertAt = Math.Max(0, _state.HexCursorOffset);
+            insertAt = Math.Min(insertAt, _state.Document.Length);
+            _state.Document.Insert(insertAt, bytes);
+            _state.HexCursorOffset = insertAt + bytes.Length - 1;
+            _state.HexSelectionAnchor = -1;
+            _state.NibbleLow = false;
+        }
+        else
+        {
+            System.Text.Encoding enc = _state.Decoder.Encoding switch
+            {
+                TextEncoding.Utf16Le => System.Text.Encoding.Unicode,
+                TextEncoding.Windows1252 => System.Text.Encoding.Latin1,
+                _ => System.Text.Encoding.UTF8
+            };
+            byte[] encoded = enc.GetBytes(clipboardText);
+            if (encoded.Length == 0)
+                return;
+
+            long insertAt = Math.Max(_state.BomLength, _state.TextCursorOffset);
+            insertAt = Math.Min(insertAt, _state.Document.Length);
+            _state.Document.Insert(insertAt, encoded);
+            _state.TextCursorOffset = insertAt + encoded.Length;
+            _state.TextSelectionAnchor = -1;
+        }
+
+        _state.InvalidateSearchResults();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
+    private static bool TryParseHexClipboard(string text, out byte[] bytes)
+    {
+        string compact = new(text.Where(static c => !char.IsWhiteSpace(c)).ToArray());
+        if (compact.Length == 0 || (compact.Length % 2) != 0)
+        {
+            bytes = [];
+            return false;
+        }
+
+        for (int i = 0; i < compact.Length; i++)
+        {
+            if (!Uri.IsHexDigit(compact[i]))
+            {
+                bytes = [];
+                return false;
+            }
+        }
+
+        bytes = new byte[compact.Length / 2];
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            bytes[i] = Convert.ToByte(compact.Substring(i * 2, 2), 16);
+        }
+        return true;
     }
 
     private void DoSelectAll()
@@ -1712,26 +1912,13 @@ public sealed partial class MainWindow : Window
 
     private void ShowAboutDialog()
     {
-        string version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "0.0.0";
-        string buildDate = "";
-        foreach (System.Reflection.CustomAttributeData attr in typeof(MainWindow).Assembly.CustomAttributes)
-        {
-            if (attr.AttributeType == typeof(System.Reflection.AssemblyMetadataAttribute)
-                && attr.ConstructorArguments.Count == 2
-                && attr.ConstructorArguments[0].Value is string key
-                && key == "BuildDateUtc"
-                && attr.ConstructorArguments[1].Value is string val)
-            {
-                buildDate = val;
-                break;
-            }
-        }
+        string buildDate = _buildIdentity.BuildDateUtc ?? "";
 
         Window aboutWindow = new()
         {
             Title = "About Leviathan",
             Width = 400,
-            Height = 200,
+            Height = 220,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -1744,7 +1931,7 @@ public sealed partial class MainWindow : Window
         };
         content.Children.Add(new TextBlock { Text = "Leviathan", FontSize = 22, FontWeight = FontWeight.Bold });
         content.Children.Add(new TextBlock { Text = "Large File Editor — Avalonia GUI", FontSize = 13, Opacity = 0.6 });
-        content.Children.Add(new TextBlock { Text = $"Version {version}", FontSize = 12, Opacity = 0.5 });
+        content.Children.Add(new TextBlock { Text = $"Version {_buildIdentity.AboutVersion}", FontSize = 12, Opacity = 0.5, TextWrapping = TextWrapping.Wrap });
         if (!string.IsNullOrEmpty(buildDate))
             content.Children.Add(new TextBlock { Text = $"Built {buildDate}", FontSize = 12, Opacity = 0.5 });
 
@@ -1754,6 +1941,48 @@ public sealed partial class MainWindow : Window
 
         aboutWindow.Content = content;
         aboutWindow.ShowDialog(this);
+    }
+
+    private readonly record struct BuildIdentity(string FileVersion, string AboutVersion, string BrandedTitle, string? BuildDateUtc)
+    {
+        public static BuildIdentity Create(Assembly assembly)
+        {
+            string version = ThisAssembly.AssemblyFileVersion;
+            if (string.IsNullOrWhiteSpace(version))
+                version = assembly.GetName().Version?.ToString() ?? "0.0.0";
+
+            string commit = ThisAssembly.GitCommitId;
+            if (string.IsNullOrWhiteSpace(commit))
+                commit = "unknown";
+            if (commit.Length > 12)
+                commit = commit[..12];
+
+            int? depth = TryParseVersionDepth(version);
+            string aboutVersion = depth.HasValue
+                ? $"{version} (depth {depth.Value}, sha {commit})"
+                : $"{version} (sha {commit})";
+            string title = $"Leviathan v{version}";
+            string? buildDate = ReadAssemblyMetadata(assembly, "BuildDateUtc");
+            return new BuildIdentity(version, aboutVersion, title, buildDate);
+        }
+
+        private static int? TryParseVersionDepth(string version)
+        {
+            return System.Version.TryParse(version, out System.Version? parsed) && parsed.Revision >= 0
+                ? parsed.Revision
+                : null;
+        }
+
+        private static string? ReadAssemblyMetadata(Assembly assembly, string key)
+        {
+            foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
+            {
+                if (string.Equals(metadata.Key, key, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(metadata.Value))
+                    return metadata.Value;
+            }
+            return null;
+        }
     }
 
     private void ShowKeyboardShortcuts()
@@ -1778,6 +2007,7 @@ public sealed partial class MainWindow : Window
             F6              Text view
             F7              CSV view
             F8              CSV settings
+            Ctrl+X          Cut selection
             Ctrl+C          Copy selection
             Ctrl+V          Paste
             Ctrl+A          Select all

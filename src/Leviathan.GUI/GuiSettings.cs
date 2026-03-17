@@ -187,24 +187,6 @@ public sealed class GuiSettings
                 {
                     CsvFileSettings.TryAdd(kvp.Key, kvp.Value);
                 }
-
-                foreach (string recent in diskSettings.RecentFiles)
-                {
-                    if (!RecentFiles.Contains(recent) && RecentFiles.Count < MaxRecentFiles)
-                        RecentFiles.Add(recent);
-                }
-
-                foreach (string pinned in diskSettings.PinnedFiles)
-                {
-                    if (!PinnedFiles.Contains(pinned))
-                        PinnedFiles.Add(pinned);
-                }
-
-                foreach (string query in diskSettings.FindHistory)
-                {
-                    if (!FindHistory.Contains(query) && FindHistory.Count < MaxFindHistory)
-                        FindHistory.Add(query);
-                }
             }
 
             fs.SetLength(0);

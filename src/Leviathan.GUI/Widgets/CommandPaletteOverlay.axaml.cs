@@ -10,9 +10,11 @@ namespace Leviathan.GUI.Widgets;
 /// </summary>
 public sealed partial class CommandPaletteOverlay : UserControl
 {
+    private const int MaxRecentCommands = 12;
     private readonly AppState _state;
     private readonly List<CommandEntry> _allCommands = [];
     private readonly List<CommandEntry> _filteredCommands = [];
+    private readonly List<string> _recentCommands = [];
     private readonly Action<long> _gotoOffset;
     private readonly Action<long, int?> _gotoTextPosition;
     private readonly Action<long> _gotoTextOffset;
@@ -238,7 +240,19 @@ public sealed partial class CommandPaletteOverlay : UserControl
         _filteredCommands.Clear();
         if (string.IsNullOrEmpty(query))
         {
-            _filteredCommands.AddRange(_allCommands);
+            foreach (string recent in _recentCommands)
+            {
+                CommandEntry? recentEntry = _allCommands.FirstOrDefault(c =>
+                    string.Equals(c.SearchName, recent, StringComparison.OrdinalIgnoreCase));
+                if (recentEntry is not null && !_filteredCommands.Contains(recentEntry))
+                    _filteredCommands.Add(recentEntry);
+            }
+
+            foreach (CommandEntry entry in _allCommands)
+            {
+                if (!_filteredCommands.Contains(entry))
+                    _filteredCommands.Add(entry);
+            }
         }
         else
         {
@@ -248,12 +262,34 @@ public sealed partial class CommandPaletteOverlay : UserControl
                 || c.Description.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)));
         }
 
-        CommandList.ItemsSource = _filteredCommands.Select(FormatCommandDisplay).ToArray();
+        CommandList.ItemsSource = _filteredCommands.Select(entry => FormatCommandDisplay(entry, string.IsNullOrEmpty(query))).ToArray();
         CommandList.SelectedIndex = _filteredCommands.Count > 0 ? 0 : -1;
     }
 
-    private static string FormatCommandDisplay(CommandEntry entry) =>
-        $"{entry.DisplayName()} - {entry.Description}";
+    private string FormatCommandDisplay(CommandEntry entry, bool showRecentMarker)
+    {
+        if (showRecentMarker && IsRecent(entry.SearchName))
+            return $"★ {entry.DisplayName()} - {entry.Description}";
+        return $"{entry.DisplayName()} - {entry.Description}";
+    }
+
+    private bool IsRecent(string searchName)
+    {
+        foreach (string recent in _recentCommands)
+        {
+            if (string.Equals(recent, searchName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private void RecordRecentCommand(string searchName)
+    {
+        _recentCommands.RemoveAll(name => string.Equals(name, searchName, StringComparison.OrdinalIgnoreCase));
+        _recentCommands.Insert(0, searchName);
+        if (_recentCommands.Count > MaxRecentCommands)
+            _recentCommands.RemoveRange(MaxRecentCommands, _recentCommands.Count - MaxRecentCommands);
+    }
 
     private void ExecuteSelectionOrConfirmGoto()
     {
@@ -274,6 +310,7 @@ public sealed partial class CommandPaletteOverlay : UserControl
         if (entry.CloseOnExecute)
             Hide(restoreFocus: false);
 
+        RecordRecentCommand(entry.SearchName);
         entry.Execute();
 
         if (entry.CloseOnExecute && entry.RestoreFocusAfterExecute && _restoreFocus is not null)
