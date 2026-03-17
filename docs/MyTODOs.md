@@ -49,12 +49,12 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: revision of the command palette. Maybe some options should open sub menus (like: encoding or bytes per row?) instead of being inline in the command palette. 
 
-[ ] avalonia front-end: it would be nice if the command palette had a "recently used" section at the top, so that I can quickly access the commands I use most often.
+[x] avalonia front-end: it would be nice if the command palette had a "recently used" section at the top, so that I can quickly access the commands I use most often.
 
-[ ] avalonia front-end: the edit > copy/paste/cut should have standard keyboard shortcuts.
+[x] avalonia front-end: the edit > copy/paste/cut should have standard keyboard shortcuts.
 
-[ ] avalonia front-end: in the welcome view, pin works but unpin does not.
+[x] avalonia front-end: in the welcome view, pin works but unpin does not.
 
-[ ] avalonia front-end, csv view: what's the point of having in the status bar R x/n and then another fields with "rows: n"? One of them shows when it's approximate, the other doesn't. But apart from that... 
+[x] avalonia front-end, csv view: what's the point of having in the status bar R x/n and then another fields with "rows: n"? One of them shows when it's approximate, the other doesn't. But apart from that... 
 
 [ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? 

@@ -14,6 +14,28 @@ namespace Leviathan.GUI;
 /// </summary>
 public sealed class AppState
 {
+    private static readonly HashSet<string> CsvExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".csv", ".tsv", ".tab"
+    };
+
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".log", ".md", ".markdown", ".rst",
+        ".json", ".jsonc", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".config",
+        ".cs", ".csx", ".csproj", ".sln", ".slnx", ".props", ".targets",
+        ".xaml", ".axaml",
+        ".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".sass", ".less", ".html", ".htm",
+        ".sql", ".ps1", ".psm1", ".psd1", ".cmd", ".bat", ".sh",
+        ".py", ".go", ".java", ".c", ".h", ".cpp", ".hpp", ".cc", ".hh", ".rs"
+    };
+
+    private static readonly HashSet<string> TextFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "README", "LICENSE", "CHANGELOG", "Makefile", "Dockerfile",
+        ".gitignore", ".gitattributes", ".editorconfig"
+    };
+
     // --- Document ---
     public Document? Document { get; set; }
     public string? CurrentFilePath { get; set; }
@@ -213,13 +235,46 @@ public sealed class AppState
 
         Settings.AddRecent(path);
 
-        // Auto-detect CSV if extension matches
-        string ext = Path.GetExtension(path).ToLowerInvariant();
-        if (ext is ".csv" or ".tsv" or ".tab")
+        ActiveView = DetermineDefaultView(path, sample, encoding);
+        if (ActiveView == ViewMode.Csv)
         {
-            ActiveView = ViewMode.Csv;
             InitCsvView();
         }
+    }
+
+    private static ViewMode DetermineDefaultView(string path, ReadOnlySpan<byte> sample, TextEncoding encoding)
+    {
+        string ext = Path.GetExtension(path);
+        if (CsvExtensions.Contains(ext))
+            return ViewMode.Csv;
+
+        if (TextExtensions.Contains(ext) || TextFileNames.Contains(Path.GetFileName(path)))
+            return ViewMode.Text;
+
+        return LooksLikeTextContent(sample, encoding) ? ViewMode.Text : ViewMode.Hex;
+    }
+
+    private static bool LooksLikeTextContent(ReadOnlySpan<byte> sample, TextEncoding encoding)
+    {
+        if (sample.IsEmpty)
+            return true;
+
+        if (encoding == TextEncoding.Utf16Le)
+            return true;
+
+        int controlCount = 0;
+        for (int i = 0; i < sample.Length; i++)
+        {
+            byte b = sample[i];
+            if (b == 0)
+                return false;
+
+            if (b < 0x20 && b is not (byte)'\t' and not (byte)'\r' and not (byte)'\n' and not (byte)'\f' and not (byte)'\b')
+                controlCount++;
+        }
+
+        int maxControlChars = Math.Max(1, sample.Length / 100);
+        return controlCount <= maxControlChars;
     }
 
     /// <summary>

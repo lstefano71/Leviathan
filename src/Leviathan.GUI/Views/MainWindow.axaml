@@ -11,22 +11,22 @@
         <!-- Menu Bar -->
         <Menu DockPanel.Dock="Top" x:Name="MainMenu">
             <MenuItem Header="_File" x:Name="FileMenu">
-                <MenuItem Header="_Open... (Ctrl+O)" x:Name="MenuOpen" HotKey="Ctrl+O" />
-                <MenuItem Header="_Close (Ctrl+W)" x:Name="MenuClose" HotKey="Ctrl+W" />
-                <MenuItem Header="_Save (Ctrl+S)" x:Name="MenuSave" HotKey="Ctrl+S" />
+                <MenuItem Header="_Open..." x:Name="MenuOpen" HotKey="Ctrl+O" InputGesture="Ctrl+O" />
+                <MenuItem Header="_Close" x:Name="MenuClose" HotKey="Ctrl+W" InputGesture="Ctrl+W" />
+                <MenuItem Header="_Save" x:Name="MenuSave" HotKey="Ctrl+S" InputGesture="Ctrl+S" />
                 <MenuItem Header="Save _As..." x:Name="MenuSaveAs" />
                 <Separator />
                 <!-- MRU items inserted dynamically -->
                 <Separator x:Name="MruSeparator" IsVisible="False" />
-                <MenuItem Header="E_xit (Ctrl+Q)" x:Name="MenuExit" HotKey="Ctrl+Q" />
+                <MenuItem Header="E_xit" x:Name="MenuExit" HotKey="Ctrl+Q" InputGesture="Ctrl+Q" />
             </MenuItem>
             <MenuItem Header="_View">
-                <MenuItem Header="_Hex View (F5)" x:Name="MenuViewHex" HotKey="F5" />
-                <MenuItem Header="_Text View (F6)" x:Name="MenuViewText" HotKey="F6" />
-                <MenuItem Header="_CSV View (F7)" x:Name="MenuViewCsv" HotKey="F7" />
+                <MenuItem Header="_Hex View" x:Name="MenuViewHex" HotKey="F5" InputGesture="F5" />
+                <MenuItem Header="_Text View" x:Name="MenuViewText" HotKey="F6" InputGesture="F6" />
+                <MenuItem Header="_CSV View" x:Name="MenuViewCsv" HotKey="F7" InputGesture="F7" />
                 <Separator />
                 <MenuItem Header="_Line Wrap" x:Name="MenuWordWrap" />
-                <MenuItem Header="Show _Gutter (Ctrl+Shift+G)" x:Name="MenuGutter" HotKey="Ctrl+Shift+G" />
+                <MenuItem Header="Show _Gutter" x:Name="MenuGutter" HotKey="Ctrl+Shift+G" InputGesture="Ctrl+Shift+G" />
                 <MenuItem Header="_Decimal Offsets" x:Name="MenuDecimalOffsets" />
                 <MenuItem Header="_Encoding" x:Name="MenuEncoding">
                     <MenuItem Header="UTF-8" x:Name="MenuEncodingUtf8" />
@@ -42,7 +42,7 @@
                     <MenuItem Header="48" x:Name="MenuBpr48" />
                     <MenuItem Header="64" x:Name="MenuBpr64" />
                 </MenuItem>
-                <MenuItem Header="CSV _Settings... (F8)" x:Name="MenuCsvSettings" HotKey="F8" IsVisible="False" />
+                <MenuItem Header="CSV _Settings..." x:Name="MenuCsvSettings" HotKey="F8" InputGesture="F8" IsVisible="False" />
                 <Separator />
                 <MenuItem Header="_Theme" x:Name="MenuTheme" />
                 <MenuItem Header="_Font" x:Name="MenuFont">
@@ -53,24 +53,24 @@
                 </MenuItem>
             </MenuItem>
             <MenuItem Header="_Navigate">
-                <MenuItem Header="_Go to Offset/Line... (Ctrl+G)" x:Name="MenuGoto" HotKey="Ctrl+G" />
+                <MenuItem Header="_Go to Offset/Line..." x:Name="MenuGoto" HotKey="Ctrl+G" InputGesture="Ctrl+G" />
             </MenuItem>
             <MenuItem Header="_Search">
-                <MenuItem Header="_Command Palette... (Ctrl+P)" x:Name="MenuCommandPalette" HotKey="Ctrl+P" />
+                <MenuItem Header="_Command Palette..." x:Name="MenuCommandPalette" HotKey="Ctrl+P" InputGesture="Ctrl+P" />
                 <Separator />
-                <MenuItem Header="_Find... (Ctrl+F)" x:Name="MenuFind" HotKey="Ctrl+F" />
-                <MenuItem Header="Find _Next (F3)" x:Name="MenuFindNext" HotKey="F3" />
-                <MenuItem Header="Find _Previous (Shift+F3)" x:Name="MenuFindPrev" HotKey="Shift+F3" />
+                <MenuItem Header="_Find..." x:Name="MenuFind" HotKey="Ctrl+F" InputGesture="Ctrl+F" />
+                <MenuItem Header="Find _Next" x:Name="MenuFindNext" HotKey="F3" InputGesture="F3" />
+                <MenuItem Header="Find _Previous" x:Name="MenuFindPrev" HotKey="Shift+F3" InputGesture="Shift+F3" />
             </MenuItem>
             <MenuItem Header="_Edit">
-                <MenuItem Header="Cu_t (Ctrl+X)" x:Name="MenuCut" HotKey="Ctrl+X" />
-                <MenuItem Header="_Copy (Ctrl+C)" x:Name="MenuCopy" HotKey="Ctrl+C" />
-                <MenuItem Header="_Paste (Ctrl+V)" x:Name="MenuPaste" HotKey="Ctrl+V" />
-                <MenuItem Header="Select _All (Ctrl+A)" x:Name="MenuSelectAll" HotKey="Ctrl+A" />
+                <MenuItem Header="Cu_t" x:Name="MenuCut" HotKey="Ctrl+X" InputGesture="Ctrl+X" />
+                <MenuItem Header="_Copy" x:Name="MenuCopy" HotKey="Ctrl+C" InputGesture="Ctrl+C" />
+                <MenuItem Header="_Paste" x:Name="MenuPaste" HotKey="Ctrl+V" InputGesture="Ctrl+V" />
+                <MenuItem Header="Select _All" x:Name="MenuSelectAll" HotKey="Ctrl+A" InputGesture="Ctrl+A" />
                 <MenuItem Header="_Delete Row(s)" x:Name="MenuDeleteRows" />
             </MenuItem>
             <MenuItem Header="_Help">
-                <MenuItem Header="_Keyboard Shortcuts (F1)" x:Name="MenuKeyboardShortcuts" HotKey="F1" />
+                <MenuItem Header="_Keyboard Shortcuts" x:Name="MenuKeyboardShortcuts" HotKey="F1" InputGesture="F1" />
                 <MenuItem Header="_About" x:Name="MenuAbout" />
             </MenuItem>
         </Menu>

@@ -32,6 +32,7 @@ internal sealed class TextViewControl : Control
     private int _lastTextAreaCols;
     private long _cachedTopOffset;
     private long _cachedTopLineNumber = 1;
+    private bool _alignViewportToEnd;
 
     internal Action? StateChanged;
 
@@ -379,6 +380,7 @@ internal sealed class TextViewControl : Control
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         long oldCursor = _state.TextCursorOffset;
+        _alignViewportToEnd = false;
         if (_state.WordWrap && _lastRenderedLineCount > 0)
         {
             switch (e.Key)
@@ -453,7 +455,15 @@ internal sealed class TextViewControl : Control
                 break;
             case Key.End:
                 _desiredColumn = -1;
-                newCursor = ctrl ? _state.FileLength : FindLineEnd(oldCursor);
+                if (ctrl)
+                {
+                    newCursor = _state.FileLength;
+                    _alignViewportToEnd = true;
+                }
+                else
+                {
+                    newCursor = FindLineEnd(oldCursor);
+                }
                 break;
             case Key.Back:
                 _desiredColumn = -1;
@@ -645,6 +655,14 @@ internal sealed class TextViewControl : Control
         int vpHeight = _state.VisibleRows;
         if (vpHeight <= 0) vpHeight = 24;
 
+        if (_alignViewportToEnd && _state.TextCursorOffset >= _state.Document.Length)
+        {
+            _state.TextTopOffset = ComputeViewportTopForDocumentEnd(vpHeight, textAreaCols);
+            _alignViewportToEnd = false;
+            return;
+        }
+        _alignViewportToEnd = false;
+
         if (_state.TextCursorOffset < _state.TextTopOffset)
         {
             if (_state.WordWrap)
@@ -705,6 +723,49 @@ internal sealed class TextViewControl : Control
                 _state.TextTopOffset = newTop;
             }
         }
+    }
+
+    private long ComputeViewportTopForDocumentEnd(int viewportRows, int textAreaCols)
+    {
+        if (_state.Document is null)
+            return _state.BomLength;
+
+        long docLength = _state.Document.Length;
+        if (docLength <= _state.BomLength)
+            return _state.BomLength;
+
+        int rowsToBacktrack = Math.Max(0, viewportRows - 2);
+        long anchor = docLength;
+        if (IsNewlineBefore(anchor))
+            anchor = Math.Max(_state.BomLength, anchor - _state.Decoder.MinCharBytes);
+
+        if (_state.WordWrap)
+        {
+            int maxCols = Math.Max(1, textAreaCols);
+            long wrapTop = FindVisualLineContaining(anchor, maxCols, out VisualLine anchorLine)
+                ? anchorLine.DocOffset
+                : FindLineStart(anchor);
+            for (int i = 0; i < rowsToBacktrack && wrapTop > _state.BomLength; i++)
+            {
+                if (!FindPreviousVisualLine(wrapTop, maxCols, out VisualLine previousVisualLine))
+                    break;
+                wrapTop = previousVisualLine.DocOffset;
+            }
+
+            return Math.Clamp(wrapTop, _state.BomLength, docLength);
+        }
+
+        long noWrapTop = FindLineStart(anchor);
+        int minChar = _state.Decoder.MinCharBytes;
+        for (int i = 0; i < rowsToBacktrack && noWrapTop > _state.BomLength; i++)
+        {
+            long prevCandidate = Math.Max(_state.BomLength, noWrapTop - minChar);
+            long prev = FindLineStart(prevCandidate);
+            if (prev >= noWrapTop) break;
+            noWrapTop = prev;
+        }
+
+        return Math.Clamp(noWrapTop, _state.BomLength, docLength);
     }
 
     private void ScrollByRows(int rowDelta)

@@ -152,11 +152,7 @@ public sealed partial class WelcomeScreen : UserControl
         entry.DateText = dateText;
         entry.IsUnavailable = isUnavailable;
 
-        // Find the visual element for this entry and update it
-        if (entry.MetadataTextBlock is not null)
-        {
-            entry.MetadataTextBlock.Text = BuildMetadataLine(entry);
-        }
+        UpdateEntryMetadataText(entry);
     }
 
     // ─── Filtering ───
@@ -261,7 +257,6 @@ public sealed partial class WelcomeScreen : UserControl
     private Border CreateFileRow(FileEntry entry, string? digitBadge)
     {
         string fileName = Path.GetFileName(entry.FullPath);
-        string metadataLine = BuildMetadataLine(entry);
 
         // File name line with optional digit badge and pin icon
         StackPanel nameLine = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -301,19 +296,50 @@ public sealed partial class WelcomeScreen : UserControl
             FontWeight = FontWeight.SemiBold
         });
 
-        // Metadata line: path + size + date
-        TextBlock metadataBlock = new()
+        Grid topLine = new()
         {
-            Text = metadataLine,
-            FontSize = 12,
-            Opacity = 0.5,
+            ColumnDefinitions = new ColumnDefinitions("*,90,120")
+        };
+        topLine.Children.Add(nameLine);
+
+        TextBlock sizeBlock = new()
+        {
+            FontSize = 13,
+            FontWeight = FontWeight.SemiBold,
+            Opacity = 0.75,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontFamily = new FontFamily("Consolas, Courier New, monospace")
+        };
+        Grid.SetColumn(sizeBlock, 1);
+        topLine.Children.Add(sizeBlock);
+
+        TextBlock dateBlock = new()
+        {
+            FontSize = 13,
+            FontWeight = FontWeight.SemiBold,
+            Opacity = 0.75,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontFamily = new FontFamily("Consolas, Courier New, monospace")
+        };
+        Grid.SetColumn(dateBlock, 2);
+        topLine.Children.Add(dateBlock);
+
+        TextBlock pathBlock = new()
+        {
+            Text = entry.FullPath,
+            FontSize = 11,
+            Opacity = 0.45,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
-        entry.MetadataTextBlock = metadataBlock;
+        entry.SizeTextBlock = sizeBlock;
+        entry.DateTextBlock = dateBlock;
+        UpdateEntryMetadataText(entry);
 
         StackPanel content = new() { Spacing = 2 };
-        content.Children.Add(nameLine);
-        content.Children.Add(metadataBlock);
+        content.Children.Add(topLine);
+        content.Children.Add(pathBlock);
 
         Border row = new()
         {
@@ -340,21 +366,26 @@ public sealed partial class WelcomeScreen : UserControl
         return row;
     }
 
-    private static string BuildMetadataLine(FileEntry entry)
+    private static void UpdateEntryMetadataText(FileEntry entry)
     {
         if (entry.IsUnavailable)
-            return $"{entry.FullPath}  —  unavailable";
-
-        string path = entry.FullPath;
-        string size = entry.SizeText ?? "…";
-        string date = entry.DateText ?? "";
+        {
+            if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "—";
+            if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "unavailable";
+            return;
+        }
 
         if (entry.SizeText is null && entry.DateText is null && !entry.IsUnavailable)
-            return $"{path}  —  loading…";
+        {
+            if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "…";
+            if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "loading…";
+            return;
+        }
 
-        return string.IsNullOrEmpty(date)
-            ? $"{path}  —  {size}"
-            : $"{path}  —  {size}  —  {date}";
+        if (entry.SizeTextBlock is not null)
+            entry.SizeTextBlock.Text = entry.SizeText ?? "—";
+        if (entry.DateTextBlock is not null)
+            entry.DateTextBlock.Text = entry.DateText ?? "";
     }
 
     // ─── Selection ───
@@ -572,8 +603,11 @@ public sealed partial class WelcomeScreen : UserControl
         public string? DateText { get; set; }
         public bool IsUnavailable { get; set; }
 
-        /// <summary>Reference to the metadata TextBlock for in-place updates.</summary>
-        public TextBlock? MetadataTextBlock { get; set; }
+        /// <summary>Reference to the size TextBlock for in-place updates.</summary>
+        public TextBlock? SizeTextBlock { get; set; }
+
+        /// <summary>Reference to the modified-date TextBlock for in-place updates.</summary>
+        public TextBlock? DateTextBlock { get; set; }
 
         /// <summary>Reference to the visual row Border for selection highlighting.</summary>
         public Border? VisualRow { get; set; }

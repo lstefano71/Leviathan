@@ -1957,20 +1957,10 @@ public sealed partial class MainWindow : Window
             if (commit.Length > 12)
                 commit = commit[..12];
 
-            int? depth = TryParseVersionDepth(version);
-            string aboutVersion = depth.HasValue
-                ? $"{version} (depth {depth.Value}, sha {commit})"
-                : $"{version} (sha {commit})";
+            string aboutVersion =  $"{version} (sha {commit})";
             string title = $"Leviathan v{version}";
             string? buildDate = ReadAssemblyMetadata(assembly, "BuildDateUtc");
             return new BuildIdentity(version, aboutVersion, title, buildDate);
-        }
-
-        private static int? TryParseVersionDepth(string version)
-        {
-            return System.Version.TryParse(version, out System.Version? parsed) && parsed.Revision >= 0
-                ? parsed.Revision
-                : null;
         }
 
         private static string? ReadAssemblyMetadata(Assembly assembly, string key)
