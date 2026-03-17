@@ -27,6 +27,16 @@ if [ -z "$TUI2_VERSION" ] && [ -z "$GUI_VERSION" ]; then
   exit 1
 fi
 
+validate_version() {
+  if ! echo "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Invalid version '$1'. Expected format: X.Y.Z (e.g. 1.2.3)" >&2
+    exit 1
+  fi
+}
+
+[ -n "$TUI2_VERSION" ] && validate_version "$TUI2_VERSION"
+[ -n "$GUI_VERSION"  ] && validate_version "$GUI_VERSION"
+
 bump_version() {
   local file="$1" version="$2"
   if [ ! -f "$file" ]; then echo "File not found: $file" >&2; exit 2; fi

@@ -18,6 +18,16 @@ if (-not $Tui2Version -and -not $GuiVersion) {
     exit 1
 }
 
+function Assert-SemVer($version, $param) {
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        Write-Error "Invalid version '$version' for $param. Expected format: X.Y.Z (e.g. 1.2.3)"
+        exit 1
+    }
+}
+
+if ($Tui2Version) { Assert-SemVer $Tui2Version '-Tui2Version' }
+if ($GuiVersion)  { Assert-SemVer $GuiVersion  '-GuiVersion'  }
+
 function Bump-Version($file, $version) {
     if (-not (Test-Path $file)) { Write-Error "File not found: $file"; exit 2 }
     if ($DryRun) {
