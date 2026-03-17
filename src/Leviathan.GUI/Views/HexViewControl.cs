@@ -5,10 +5,12 @@ using Avalonia.Media;
 using Avalonia.Threading;
 
 using Leviathan.Core.Search;
+using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
 
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace Leviathan.GUI.Views;
 
@@ -45,6 +47,10 @@ internal sealed class HexViewControl : Control
     private bool _addressCacheDecimal;
     private int _addressCacheDigits;
     private double _cachedCharWidth;
+    private bool _isPointerSelectionActive;
+    private bool _pointerSelectionExtended;
+    private bool _pointerSelectionStartedWithShift;
+    private long _pointerSelectionStartOffset = -1;
 
     /// <summary>Lookup table for zero-alloc byte-to-hex conversion.</summary>
     private static ReadOnlySpan<byte> HexChars => "0123456789ABCDEF"u8;
@@ -59,6 +65,7 @@ internal sealed class HexViewControl : Control
             _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
+        BuildContextMenu();
     }
 
     /// <summary>
@@ -69,6 +76,80 @@ internal sealed class HexViewControl : Control
     {
         _theme = _state.ActiveTheme;
         InvalidateVisual();
+    }
+
+    private void BuildContextMenu()
+    {
+        MenuItem copyAsHex = new() { Header = "Copy as Hex" };
+        copyAsHex.Click += async (_, _) => await CopySelectionAsHexAsync();
+
+        MenuItem copyAsText = new() { Header = "Copy as Text" };
+        copyAsText.Click += async (_, _) => await CopySelectionAsTextAsync();
+
+        ContextMenu menu = new();
+        menu.Items.Add(copyAsHex);
+        menu.Items.Add(copyAsText);
+        menu.Opening += (_, _) => {
+            bool hasSelection = _state.HexSelStart >= 0 && _state.HexSelEnd >= _state.HexSelStart;
+            copyAsHex.IsEnabled = hasSelection;
+            copyAsText.IsEnabled = hasSelection;
+        };
+        ContextMenu = menu;
+    }
+
+    private async Task CopySelectionAsHexAsync()
+    {
+        if (!TryReadSelectionBytes(262144, out byte[] bytes))
+            return;
+
+        StringBuilder sb = new(bytes.Length * 3);
+        for (int i = 0; i < bytes.Length; i++) {
+            if (i > 0)
+                sb.Append(' ');
+            sb.Append(bytes[i].ToString("X2"));
+        }
+
+        TopLevel? root = TopLevel.GetTopLevel(this);
+        if (root?.Clipboard is null)
+            return;
+        await root.Clipboard.SetTextAsync(sb.ToString());
+    }
+
+    private async Task CopySelectionAsTextAsync()
+    {
+        if (!TryReadSelectionBytes(262144, out byte[] bytes))
+            return;
+
+        Encoding encoding = _state.Decoder.Encoding switch {
+            TextEncoding.Utf16Le => Encoding.Unicode,
+            TextEncoding.Windows1252 => Encoding.Latin1,
+            _ => Encoding.UTF8
+        };
+
+        TopLevel? root = TopLevel.GetTopLevel(this);
+        if (root?.Clipboard is null)
+            return;
+        await root.Clipboard.SetTextAsync(encoding.GetString(bytes));
+    }
+
+    private bool TryReadSelectionBytes(int maxBytes, out byte[] bytes)
+    {
+        bytes = [];
+        if (_state.Document is null)
+            return false;
+
+        long selectionStart = _state.HexSelStart;
+        long selectionEnd = _state.HexSelEnd;
+        if (selectionStart < 0 || selectionEnd < selectionStart)
+            return false;
+
+        int length = (int)Math.Min(selectionEnd - selectionStart + 1, maxBytes);
+        if (length <= 0)
+            return false;
+
+        bytes = new byte[length];
+        _state.Document.Read(selectionStart, bytes);
+        return true;
     }
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -480,16 +561,76 @@ internal sealed class HexViewControl : Control
         Focus();
 
         if (_state.Document is null) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
         Point pos = e.GetPosition(this);
         long offset = HitTest(pos);
         if (offset >= 0) {
+            bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+            _state.HexSelectionAnchor = ResolvePointerSelectionAnchor(_state.HexSelectionAnchor, _state.HexCursorOffset, offset, shift);
             _state.HexCursorOffset = offset;
-            _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
+            _isPointerSelectionActive = true;
+            _pointerSelectionExtended = false;
+            _pointerSelectionStartedWithShift = shift;
+            _pointerSelectionStartOffset = offset;
+            e.Pointer.Capture(this);
+            e.Handled = true;
             InvalidateVisual();
             StateChanged?.Invoke();
         }
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_isPointerSelectionActive || _state.Document is null)
+            return;
+
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed && e.Pointer.Captured != this)
+            return;
+
+        long offset = HitTestForPointerSelection(e.GetPosition(this));
+        if (offset < 0 || offset == _state.HexCursorOffset)
+            return;
+
+        _state.HexCursorOffset = offset;
+        _state.NibbleLow = false;
+        _pointerSelectionExtended = _pointerSelectionExtended || offset != _pointerSelectionStartOffset;
+        EnsureCursorVisible();
+        e.Handled = true;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (!_isPointerSelectionActive)
+            return;
+
+        if (e.Pointer.Captured == this)
+            e.Pointer.Capture(null);
+
+        if (ShouldClearSelectionAfterPointerRelease(_pointerSelectionStartedWithShift, _pointerSelectionExtended))
+            _state.HexSelectionAnchor = -1;
+
+        _isPointerSelectionActive = false;
+        _pointerSelectionExtended = false;
+        _pointerSelectionStartedWithShift = false;
+        _pointerSelectionStartOffset = -1;
+        e.Handled = true;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _isPointerSelectionActive = false;
+        _pointerSelectionExtended = false;
+        _pointerSelectionStartedWithShift = false;
+        _pointerSelectionStartOffset = -1;
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -586,6 +727,38 @@ internal sealed class HexViewControl : Control
 
         return _state.HexBaseOffset + (long)row * bytesPerRow;
     }
+
+    private long HitTestForPointerSelection(Point point)
+    {
+        long offset = HitTest(point);
+        if (offset >= 0 || _state.Document is null || _state.FileLength <= 0)
+            return offset;
+
+        double lineHeight = _state.ContentFontSize + LinePadding;
+        if (point.Y < lineHeight)
+            return Math.Clamp(_state.HexBaseOffset, 0, _state.FileLength - 1);
+
+        int row = Math.Max(0, _state.VisibleRows - 1);
+        long lastVisibleOffset = _state.HexBaseOffset + (long)row * _state.BytesPerRow;
+        return Math.Clamp(lastVisibleOffset, 0, _state.FileLength - 1);
+    }
+
+    internal static long ResolvePointerSelectionAnchor(long currentAnchor, long currentCursor, long hitOffset, bool shiftPressed)
+    {
+        if (!shiftPressed)
+            return hitOffset;
+
+        if (currentAnchor >= 0)
+            return currentAnchor;
+
+        if (currentCursor >= 0)
+            return currentCursor;
+
+        return hitOffset;
+    }
+
+    internal static bool ShouldClearSelectionAfterPointerRelease(bool shiftPressed, bool selectionExtended)
+        => !shiftPressed && !selectionExtended;
 
     private void InsertHexNibble(int digit)
     {

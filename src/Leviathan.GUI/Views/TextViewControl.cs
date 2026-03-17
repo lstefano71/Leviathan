@@ -36,13 +36,24 @@ internal sealed class TextViewControl : Control
     private long _cachedTopOffset;
     private long _cachedTopLineNumber = 1;
     private bool _alignViewportToEnd;
+    private bool _isPointerSelectionActive;
+    private bool _pointerSelectionExtended;
+    private bool _pointerSelectionStartedWithShift;
+    private long _pointerSelectionStartOffset = -1;
 
     internal Action? StateChanged;
 
-    /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
-    internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
+    /// <summary>Vertical scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? VerticalScrollBar { get; set; }
+    /// <summary>Horizontal scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? HorizontalScrollBar { get; set; }
     private bool _updatingScroll;
     private bool _scrollUpdateQueued;
+    private bool _updatingHorizontalScroll;
+    private bool _horizontalScrollUpdateQueued;
+    private bool _hasHorizontalOverflow;
+    private int _horizontalViewportColumns;
+    private int _horizontalContentColumns;
 
     public TextViewControl(AppState state)
     {
@@ -69,7 +80,7 @@ internal sealed class TextViewControl : Control
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
-        if (_updatingScroll || _state.Document is null || ScrollBar is null) return;
+        if (_updatingScroll || _state.Document is null || VerticalScrollBar is null) return;
         Core.Document doc = _state.Document;
         long newTop;
         if (_state.LineIndex is { SparseEntryCount: > 0 }) {
@@ -95,7 +106,7 @@ internal sealed class TextViewControl : Control
 
     private void UpdateScrollBar()
     {
-        if (_state.Document is null || ScrollBar is null) return;
+        if (_state.Document is null || VerticalScrollBar is null) return;
         _updatingScroll = true;
         try {
             if (_state.LineIndex?.TotalLineCount > 0)
@@ -106,14 +117,56 @@ internal sealed class TextViewControl : Control
             long currentLine = ComputeLineNumber(_state.TextTopOffset);
             double scrollPos = Math.Clamp(currentLine - 1, 0, (long)maxTop);
 
-            ScrollBar.Maximum = maxTop;
-            ScrollBar.ViewportSize = Math.Max(1, _state.VisibleRows);
+            VerticalScrollBar.Maximum = maxTop;
+            VerticalScrollBar.ViewportSize = Math.Max(1, _state.VisibleRows);
             if (_userScrollFrames > 0)
                 _userScrollFrames--;
             else
-                ScrollBar.Value = scrollPos;
+                VerticalScrollBar.Value = scrollPos;
         } finally {
             _updatingScroll = false;
+        }
+    }
+
+    internal void OnHorizontalScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingHorizontalScroll || HorizontalScrollBar is null) return;
+        _state.TextHorizontalScroll = Math.Max(0, (int)Math.Round(e.NewValue));
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
+    private void UpdateHorizontalScrollBar()
+    {
+        if (HorizontalScrollBar is null) return;
+
+        bool show = !_state.WordWrap &&
+                    _hasHorizontalOverflow &&
+                    _horizontalContentColumns > _horizontalViewportColumns;
+
+        _updatingHorizontalScroll = true;
+        try {
+            HorizontalScrollBar.IsVisible = show;
+            if (!show) {
+                _state.TextHorizontalScroll = 0;
+                HorizontalScrollBar.Minimum = 0;
+                HorizontalScrollBar.Maximum = 0;
+                HorizontalScrollBar.Value = 0;
+                HorizontalScrollBar.ViewportSize = 1;
+                return;
+            }
+
+            int maxScroll = Math.Max(0, _horizontalContentColumns - _horizontalViewportColumns);
+            _state.TextHorizontalScroll = Math.Clamp(_state.TextHorizontalScroll, 0, maxScroll);
+
+            HorizontalScrollBar.Minimum = 0;
+            HorizontalScrollBar.Maximum = maxScroll;
+            HorizontalScrollBar.ViewportSize = Math.Max(1, _horizontalViewportColumns);
+            HorizontalScrollBar.SmallChange = 1;
+            HorizontalScrollBar.LargeChange = Math.Max(1, _horizontalViewportColumns - 1);
+            HorizontalScrollBar.Value = _state.TextHorizontalScroll;
+        } finally {
+            _updatingHorizontalScroll = false;
         }
     }
 
@@ -124,6 +177,16 @@ internal sealed class TextViewControl : Control
         Dispatcher.UIThread.Post(() => {
             _scrollUpdateQueued = false;
             UpdateScrollBar();
+        }, DispatcherPriority.Background);
+    }
+
+    private void QueueHorizontalScrollBarUpdate()
+    {
+        if (_horizontalScrollUpdateQueued) return;
+        _horizontalScrollUpdateQueued = true;
+        Dispatcher.UIThread.Post(() => {
+            _horizontalScrollUpdateQueued = false;
+            UpdateHorizontalScrollBar();
         }, DispatcherPriority.Background);
     }
 
@@ -210,6 +273,9 @@ internal sealed class TextViewControl : Control
 
         long currentLineNumber = ComputeLineNumber(topOffset) - 1;
         bool clipToViewport = !_state.WordWrap;
+        int horizontalScroll = clipToViewport ? Math.Max(0, _state.TextHorizontalScroll) : 0;
+        bool hasHorizontalOverflow = false;
+        int maxRenderedColumns = 0;
 
         for (int row = 0; row < lineCount; row++) {
             VisualLine vl = _visualLines[row];
@@ -260,9 +326,6 @@ internal sealed class TextViewControl : Control
             int charCol = 0;
             int byteIdx = 0;
             while (byteIdx < lineData.Length) {
-                if (clipToViewport && charCol >= textAreaCols)
-                    break;
-
                 (System.Text.Rune rune, int runeBytes) = _state.Decoder.DecodeRune(lineData, byteIdx);
                 if (runeBytes <= 0) { byteIdx++; continue; }
 
@@ -290,30 +353,56 @@ internal sealed class TextViewControl : Control
                     break;
                 }
                 if (isMatch) {
-                    context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
-                        new Rect(textX + charCol * charWidth, y, charWidth, lineHeight));
+                    int visibleCol = charCol - horizontalScroll;
+                    if (!clipToViewport || (visibleCol >= 0 && visibleCol < textAreaCols)) {
+                        context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
+                            new Rect(textX + visibleCol * charWidth, y, charWidth, lineHeight));
+                    }
                 }
 
-                // Selection highlight
+                if (codePoint == '\t') {
+                    int tabStop = _state.TabWidth - (charCol % _state.TabWidth);
+                    charCol += tabStop;
+                    if (clipToViewport && charCol > horizontalScroll + textAreaCols)
+                        hasHorizontalOverflow = true;
+                    byteIdx += runeBytes;
+                    continue;
+                }
+
+                if (clipToViewport && charCol >= horizontalScroll + textAreaCols) {
+                    hasHorizontalOverflow = true;
+                    charCol++;
+                    byteIdx += runeBytes;
+                    continue;
+                }
+
+                if (clipToViewport && charCol < horizontalScroll) {
+                    charCol++;
+                    byteIdx += runeBytes;
+                    continue;
+                }
+
+                int drawCol = charCol - horizontalScroll;
+                if (drawCol < 0) {
+                    charCol++;
+                    byteIdx += runeBytes;
+                    continue;
+                }
+
                 if (selStart >= 0 && absOffset >= selStart && absOffset <= selEnd) {
                     context.FillRectangle(selectionBrush,
-                        new Rect(textX + charCol * charWidth, y, charWidth, lineHeight));
+                        new Rect(textX + drawCol * charWidth, y, charWidth, lineHeight));
                 }
 
                 // Cursor
                 if (absOffset == _state.TextCursorOffset) {
                     context.FillRectangle(cursorBrush,
-                        new Rect(textX + charCol * charWidth, y, 2, lineHeight));
+                        new Rect(textX + drawCol * charWidth, y, 2, lineHeight));
                 }
 
                 // Character
                 char ch;
-                if (codePoint == '\t') {
-                    int tabStop = _state.TabWidth - (charCol % _state.TabWidth);
-                    charCol += tabStop;
-                    byteIdx += runeBytes;
-                    continue;
-                } else if (codePoint == '\n' || codePoint == '\r') {
+                if (codePoint == '\n' || codePoint == '\r') {
                     byteIdx += runeBytes;
                     continue;
                 } else if (codePoint >= 0x20 && codePoint < 0x10000) {
@@ -325,14 +414,23 @@ internal sealed class TextViewControl : Control
                 FormattedText charText = new(ch.ToString(),
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
-                context.DrawText(charText, new Point(textX + charCol * charWidth, y));
+                context.DrawText(charText, new Point(textX + drawCol * charWidth, y));
 
                 charCol++;
                 byteIdx += runeBytes;
             }
+
+            maxRenderedColumns = Math.Max(maxRenderedColumns, charCol);
         }
 
+        _hasHorizontalOverflow = clipToViewport && Math.Max(maxRenderedColumns, hasHorizontalOverflow ? textAreaCols + 1 : 0) > textAreaCols;
+        _horizontalViewportColumns = textAreaCols;
+        _horizontalContentColumns = hasHorizontalOverflow
+            ? Math.Max(textAreaCols + 1, maxRenderedColumns)
+            : maxRenderedColumns;
+
         QueueScrollBarUpdate();
+        QueueHorizontalScrollBarUpdate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -427,6 +525,11 @@ internal sealed class TextViewControl : Control
                 _desiredColumn = -1;
                 if (_state.IsReadOnly)
                     break;
+                if (TryDeleteSelection()) {
+                    newCursor = _state.TextCursorOffset;
+                    shift = false;
+                    break;
+                }
                 if (oldCursor > _state.BomLength) {
                     long deleteAt = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
                     long deleteLen = oldCursor - deleteAt;
@@ -439,6 +542,11 @@ internal sealed class TextViewControl : Control
                 _desiredColumn = -1;
                 if (_state.IsReadOnly)
                     break;
+                if (TryDeleteSelection()) {
+                    newCursor = _state.TextCursorOffset;
+                    shift = false;
+                    break;
+                }
                 if (oldCursor < _state.FileLength) {
                     _state.Document.Delete(oldCursor, _state.Decoder.MinCharBytes);
                     _state.InvalidateSearchResults();
@@ -475,6 +583,7 @@ internal sealed class TextViewControl : Control
         if (_state.Document is null || string.IsNullOrEmpty(e.Text) || _state.IsReadOnly) return;
 
         _desiredColumn = -1;
+        TryDeleteSelection();
         byte[] encoded = _state.Decoder.EncodeString(e.Text);
         _state.Document.Insert(_state.TextCursorOffset, encoded);
         _state.TextCursorOffset += encoded.Length;
@@ -487,56 +596,71 @@ internal sealed class TextViewControl : Control
         base.OnPointerPressed(e);
         Focus();
         if (_state.Document is null) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
-        Point pos = e.GetPosition(this);
-        double charWidth = MeasureCharWidth();
-        double lineHeight = _state.ContentFontSize + LinePadding;
+        long offset = HitTest(e.GetPosition(this));
+        if (offset < 0) return;
 
-        // Compute gutter width
-        long totalLines = Math.Max(1, _state.EstimatedTotalLines);
-        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
-        double gutterWidth = _state.GutterVisible ? (gutterDigits + 3) * charWidth : 0;
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        _state.TextSelectionAnchor = ResolvePointerSelectionAnchor(_state.TextSelectionAnchor, _state.TextCursorOffset, offset, shift);
+        _state.TextCursorOffset = offset;
+        _desiredColumn = -1;
+        _isPointerSelectionActive = true;
+        _pointerSelectionExtended = false;
+        _pointerSelectionStartedWithShift = shift;
+        _pointerSelectionStartOffset = offset;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+        OnStateChanged();
+    }
 
-        if (gutterWidth > 0 && pos.X < gutterWidth) return; // clicked in gutter
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_isPointerSelectionActive || _state.Document is null)
+            return;
 
-        int row = (int)(pos.Y / lineHeight);
-        int col = (int)((pos.X - gutterWidth) / charWidth);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed && e.Pointer.Captured != this)
+            return;
 
-        // Read data and compute visual lines (same as Render)
-        long topOffset = _state.TextTopOffset;
-        int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - topOffset);
-        if (readLen <= 0) return;
-        _state.Document.Read(topOffset, _readBuffer.AsSpan(0, readLen));
-        ReadOnlySpan<byte> data = _readBuffer.AsSpan(0, readLen);
+        long offset = HitTestForPointerSelection(e.GetPosition(this));
+        if (offset < 0 || offset == _state.TextCursorOffset)
+            return;
 
-        double textAreaWidth = Bounds.Width - gutterWidth;
-        int columnsAvailable = _state.WordWrap ? Math.Max(1, (int)(textAreaWidth / charWidth)) : int.MaxValue;
-        int lineCount = _wrapEngine.ComputeVisualLines(data, topOffset, columnsAvailable, _state.WordWrap, _visualLines.AsSpan(), _state.Decoder);
+        _state.TextCursorOffset = offset;
+        _desiredColumn = -1;
+        _pointerSelectionExtended = _pointerSelectionExtended || offset != _pointerSelectionStartOffset;
+        e.Handled = true;
+        OnStateChanged();
+    }
 
-        if (row >= 0 && row < lineCount) {
-            VisualLine vl = _visualLines[row];
-            // Walk bytes to find the column
-            int localOffset = (int)(vl.DocOffset - topOffset);
-            if (localOffset < 0 || localOffset + vl.ByteLength > data.Length) return;
-            ReadOnlySpan<byte> lineData = data.Slice(localOffset, vl.ByteLength);
-            int charCol = 0;
-            int byteIdx = 0;
-            long targetOffset = vl.DocOffset; // default to line start
-            while (byteIdx < lineData.Length && charCol < col) {
-                (System.Text.Rune rune, int runeBytes) = _state.Decoder.DecodeRune(lineData, byteIdx);
-                if (runeBytes <= 0) { byteIdx++; continue; }
-                targetOffset = vl.DocOffset + byteIdx;
-                charCol++;
-                byteIdx += runeBytes;
-            }
-            if (charCol >= col && byteIdx < lineData.Length)
-                targetOffset = vl.DocOffset + byteIdx;
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (!_isPointerSelectionActive)
+            return;
 
-            _state.TextCursorOffset = targetOffset;
+        if (e.Pointer.Captured == this)
+            e.Pointer.Capture(null);
+
+        if (ShouldClearSelectionAfterPointerRelease(_pointerSelectionStartedWithShift, _pointerSelectionExtended))
             _state.TextSelectionAnchor = -1;
-            _desiredColumn = -1;
-            OnStateChanged();
-        }
+
+        _isPointerSelectionActive = false;
+        _pointerSelectionExtended = false;
+        _pointerSelectionStartedWithShift = false;
+        _pointerSelectionStartOffset = -1;
+        e.Handled = true;
+        OnStateChanged();
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _isPointerSelectionActive = false;
+        _pointerSelectionExtended = false;
+        _pointerSelectionStartedWithShift = false;
+        _pointerSelectionStartOffset = -1;
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -547,6 +671,69 @@ internal sealed class TextViewControl : Control
         int rows = e.Delta.Y > 0 ? -3 : 3;
         ScrollByRows(rows);
         InvalidateVisual();
+    }
+
+    private long HitTest(Point point) => HitTestCore(point, clampToViewport: false, allowGutterHit: false);
+
+    private long HitTestForPointerSelection(Point point) => HitTestCore(point, clampToViewport: true, allowGutterHit: true);
+
+    private long HitTestCore(Point point, bool clampToViewport, bool allowGutterHit)
+    {
+        if (_state.Document is null)
+            return -1;
+
+        double charWidth = MeasureCharWidth();
+        if (charWidth <= 0)
+            return -1;
+
+        double lineHeight = _state.ContentFontSize + LinePadding;
+        if (lineHeight <= 0)
+            return -1;
+
+        long totalLines = Math.Max(1, _state.EstimatedTotalLines);
+        int gutterDigits = Math.Max(4, (int)Math.Ceiling(Math.Log10(totalLines + 1)));
+        double gutterWidth = _state.GutterVisible ? (gutterDigits + 3) * charWidth : 0;
+
+        if (!allowGutterHit && gutterWidth > 0 && point.X < gutterWidth)
+            return -1;
+
+        int row = (int)Math.Floor(point.Y / lineHeight);
+        if (!clampToViewport && row < 0)
+            return -1;
+
+        double x = allowGutterHit ? Math.Max(point.X, gutterWidth) : point.X;
+        int col = (int)Math.Floor((x - gutterWidth) / charWidth);
+        col = Math.Max(0, col);
+        if (!_state.WordWrap)
+            col += Math.Max(0, _state.TextHorizontalScroll);
+
+        long topOffset = _state.TextTopOffset;
+        int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - topOffset);
+        if (readLen <= 0)
+            return -1;
+
+        _state.Document.Read(topOffset, _readBuffer.AsSpan(0, readLen));
+        ReadOnlySpan<byte> data = _readBuffer.AsSpan(0, readLen);
+
+        double textAreaWidth = Math.Max(charWidth, Bounds.Width - gutterWidth);
+        int columnsAvailable = _state.WordWrap ? Math.Max(1, (int)(textAreaWidth / charWidth)) : int.MaxValue;
+        int lineCount = _wrapEngine.ComputeVisualLines(data, topOffset, columnsAvailable, _state.WordWrap, _visualLines.AsSpan(), _state.Decoder);
+        if (lineCount <= 0)
+            return -1;
+
+        if (!clampToViewport && row >= lineCount)
+            return -1;
+
+        int clampedRow = Math.Clamp(row, 0, lineCount - 1);
+        VisualLine vl = _visualLines[clampedRow];
+        int localOffset = (int)(vl.DocOffset - topOffset);
+        if (localOffset < 0 || localOffset + vl.ByteLength > data.Length)
+            return -1;
+
+        ReadOnlySpan<byte> lineData = data.Slice(localOffset, vl.ByteLength);
+        int targetByteOffset = DisplayColumnToByteOffset(lineData, col, _state.Decoder);
+        long lineEnd = Math.Min(vl.DocOffset + vl.ByteLength, _state.FileLength);
+        return Math.Clamp(vl.DocOffset + targetByteOffset, _state.BomLength, lineEnd);
     }
 
     /// <summary>Navigates to a specific line number (1-based).</summary>
@@ -682,6 +869,30 @@ internal sealed class TextViewControl : Control
                 _state.TextTopOffset = newTop;
             }
         }
+
+        EnsureHorizontalCursorVisibleNoWrap();
+    }
+
+    private void EnsureHorizontalCursorVisibleNoWrap()
+    {
+        if (_state.Document is null || _state.WordWrap)
+            return;
+
+        long lineStart = Math.Max(FindLineStart(_state.TextCursorOffset), _state.BomLength);
+        long lineEnd = FindLineEnd(_state.TextCursorOffset);
+        int lineLength = (int)Math.Min(lineEnd - lineStart + NewlineLengthAt(lineEnd), int.MaxValue);
+        if (lineLength <= 0)
+            return;
+
+        EnsureBuffer(lineLength);
+        _state.Document.Read(lineStart, _readBuffer.AsSpan(0, lineLength));
+        int cursorColumn = ByteOffsetToDisplayColumn(_readBuffer.AsSpan(0, lineLength), _state.TextCursorOffset - lineStart, _state.Decoder);
+
+        int viewportColumns = Math.Max(1, _lastTextAreaCols > 0 ? _lastTextAreaCols : GetColumnsAvailable());
+        if (cursorColumn < _state.TextHorizontalScroll)
+            _state.TextHorizontalScroll = cursorColumn;
+        else if (cursorColumn >= _state.TextHorizontalScroll + viewportColumns)
+            _state.TextHorizontalScroll = cursorColumn - viewportColumns + 1;
     }
 
     private long ComputeViewportTopForDocumentEnd(int viewportRows, int textAreaCols)
@@ -1660,6 +1871,51 @@ internal sealed class TextViewControl : Control
         Span<byte> buffer = stackalloc byte[2];
         _state.Document.Read(docOffset - readLen, buffer[..readLen]);
         return _state.Decoder.IsNewline(buffer[..readLen], 0, out _);
+    }
+
+    internal static long ResolvePointerSelectionAnchor(long currentAnchor, long currentCursor, long hitOffset, bool shiftPressed)
+    {
+        if (!shiftPressed)
+            return hitOffset;
+
+        if (currentAnchor >= 0)
+            return currentAnchor;
+
+        if (currentCursor >= 0)
+            return currentCursor;
+
+        return hitOffset;
+    }
+
+    internal static bool ShouldClearSelectionAfterPointerRelease(bool shiftPressed, bool selectionExtended)
+        => !shiftPressed && !selectionExtended;
+
+    internal static bool TryGetSelectionDeleteRange(long selectionStart, long selectionEnd, out long deleteStart, out long deleteLength)
+    {
+        if (selectionStart < 0 || selectionEnd < selectionStart) {
+            deleteStart = 0;
+            deleteLength = 0;
+            return false;
+        }
+
+        deleteStart = selectionStart;
+        deleteLength = selectionEnd - selectionStart + 1;
+        return deleteLength > 0;
+    }
+
+    private bool TryDeleteSelection()
+    {
+        if (_state.Document is null)
+            return false;
+
+        if (!TryGetSelectionDeleteRange(_state.TextSelStart, _state.TextSelEnd, out long deleteStart, out long deleteLength))
+            return false;
+
+        _state.Document.Delete(deleteStart, deleteLength);
+        _state.TextCursorOffset = deleteStart;
+        _state.TextSelectionAnchor = -1;
+        _state.InvalidateSearchResults();
+        return true;
     }
 
     private void OnStateChanged()

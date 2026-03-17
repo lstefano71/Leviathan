@@ -21,6 +21,7 @@ public sealed partial class CsvDetailPanel : UserControl
 
     private long _lastRow = -2;
     private int _lastCol = -2;
+    private int _lastHiddenColumnsSignature = int.MinValue;
     private int _fieldCount;
     private long _lastRowOffset;
 
@@ -46,13 +47,15 @@ public sealed partial class CsvDetailPanel : UserControl
 
         long cursorRow = state.CsvCursorRow;
         int cursorCol = state.CsvCursorCol;
+        int hiddenColumnsSignature = ComputeHiddenColumnsSignature(state.CsvHiddenColumns);
 
-        if (cursorRow == _lastRow && cursorCol == _lastCol)
+        if (cursorRow == _lastRow && cursorCol == _lastCol && hiddenColumnsSignature == _lastHiddenColumnsSignature)
             return;
 
-        if (cursorRow != _lastRow) {
+        if (cursorRow != _lastRow || hiddenColumnsSignature != _lastHiddenColumnsSignature) {
             RebuildFields(state, csvView, cursorRow);
             _lastRow = cursorRow;
+            _lastHiddenColumnsSignature = hiddenColumnsSignature;
         }
 
         UpdateHighlight(cursorCol, state);
@@ -66,10 +69,19 @@ public sealed partial class CsvDetailPanel : UserControl
     {
         _lastRow = -2;
         _lastCol = -2;
+        _lastHiddenColumnsSignature = int.MinValue;
         _fieldCount = 0;
         _lastRowOffset = -1;
         TitleText.Text = "Record Detail";
         FieldsPanel.Children.Clear();
+    }
+
+    internal static int ComputeHiddenColumnsSignature(HashSet<int> hiddenColumns)
+    {
+        int signature = hiddenColumns.Count;
+        foreach (int column in hiddenColumns)
+            signature ^= HashCode.Combine(column, 397);
+        return signature;
     }
 
     private void RebuildFields(AppState state, Views.CsvViewControl csvView, long cursorRow)

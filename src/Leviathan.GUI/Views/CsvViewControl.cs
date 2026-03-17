@@ -29,10 +29,17 @@ internal sealed class CsvViewControl : Control
     internal Action? StateChanged;
     internal Action? OnRecordDetail;
 
-    /// <summary>Scrollbar exposed for composition in MainWindow.</summary>
-    internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
+    /// <summary>Vertical scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? VerticalScrollBar { get; set; }
+    /// <summary>Horizontal scrollbar exposed for composition in MainWindow.</summary>
+    internal Avalonia.Controls.Primitives.ScrollBar? HorizontalScrollBar { get; set; }
     private bool _updatingScroll;
     private bool _scrollUpdateQueued;
+    private bool _updatingHorizontalScroll;
+    private bool _horizontalScrollUpdateQueued;
+    private bool _hasHorizontalOverflow;
+    private int _horizontalViewportColumns = 1;
+    private int _horizontalMaxStartColumn;
 
     public CsvViewControl(AppState state)
     {
@@ -106,26 +113,66 @@ internal sealed class CsvViewControl : Control
 
     internal void OnScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
     {
-        if (_updatingScroll || _state.CsvRowIndex is null || ScrollBar is null) return;
+        if (_updatingScroll || _state.CsvRowIndex is null || VerticalScrollBar is null) return;
         long totalRows = _state.CsvRowIndex.TotalRowCount;
         long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
-        long newTop = (long)(e.NewValue / Math.Max(1, ScrollBar.Maximum) * maxTop);
+        long newTop = (long)(e.NewValue / Math.Max(1, VerticalScrollBar.Maximum) * maxTop);
         _state.CsvTopRowIndex = Math.Clamp(newTop, 0, maxTop);
         InvalidateVisual();
     }
 
     private void UpdateScrollBar()
     {
-        if (_state.CsvRowIndex is null || ScrollBar is null) return;
+        if (_state.CsvRowIndex is null || VerticalScrollBar is null) return;
         _updatingScroll = true;
         try {
             long totalRows = _state.CsvRowIndex.TotalRowCount;
             long maxTop = Math.Max(0, totalRows - _state.VisibleRows);
-            ScrollBar.Maximum = 10000;
-            ScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
-            ScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
+            VerticalScrollBar.Maximum = 10000;
+            VerticalScrollBar.Value = maxTop > 0 ? (double)_state.CsvTopRowIndex / maxTop * 10000 : 0;
+            VerticalScrollBar.ViewportSize = totalRows > 0 ? (double)_state.VisibleRows / totalRows * 10000 : 10000;
         } finally {
             _updatingScroll = false;
+        }
+    }
+
+    internal void OnHorizontalScrollBarValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingHorizontalScroll || HorizontalScrollBar is null) return;
+        int clamped = Math.Clamp((int)Math.Round(e.NewValue), 0, Math.Max(0, _state.CsvColumnCount - 1));
+        if (clamped == _state.CsvHorizontalScroll) return;
+        _state.CsvHorizontalScroll = clamped;
+        InvalidateVisual();
+        StateChanged?.Invoke();
+    }
+
+    private void UpdateHorizontalScrollBar()
+    {
+        if (HorizontalScrollBar is null) return;
+
+        bool show = _hasHorizontalOverflow && _horizontalMaxStartColumn > 0;
+
+        _updatingHorizontalScroll = true;
+        try {
+            HorizontalScrollBar.IsVisible = show;
+            if (!show) {
+                _state.CsvHorizontalScroll = 0;
+                HorizontalScrollBar.Minimum = 0;
+                HorizontalScrollBar.Maximum = 0;
+                HorizontalScrollBar.Value = 0;
+                HorizontalScrollBar.ViewportSize = 1;
+                return;
+            }
+
+            _state.CsvHorizontalScroll = Math.Clamp(_state.CsvHorizontalScroll, 0, _horizontalMaxStartColumn);
+            HorizontalScrollBar.Minimum = 0;
+            HorizontalScrollBar.Maximum = _horizontalMaxStartColumn;
+            HorizontalScrollBar.ViewportSize = Math.Max(1, Math.Min(_horizontalViewportColumns, _horizontalMaxStartColumn + 1));
+            HorizontalScrollBar.SmallChange = 1;
+            HorizontalScrollBar.LargeChange = Math.Max(1, _horizontalViewportColumns - 1);
+            HorizontalScrollBar.Value = _state.CsvHorizontalScroll;
+        } finally {
+            _updatingHorizontalScroll = false;
         }
     }
 
@@ -136,6 +183,16 @@ internal sealed class CsvViewControl : Control
         Dispatcher.UIThread.Post(() => {
             _scrollUpdateQueued = false;
             UpdateScrollBar();
+        }, DispatcherPriority.Background);
+    }
+
+    private void QueueHorizontalScrollBarUpdate()
+    {
+        if (_horizontalScrollUpdateQueued) return;
+        _horizontalScrollUpdateQueued = true;
+        Dispatcher.UIThread.Post(() => {
+            _horizontalScrollUpdateQueued = false;
+            UpdateHorizontalScrollBar();
         }, DispatcherPriority.Background);
     }
 
@@ -191,6 +248,7 @@ internal sealed class CsvViewControl : Control
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
         HashSet<int> hiddenCols = _state.CsvHiddenColumns;
+        UpdateHorizontalScrollMetrics(colWidths, colCount, bounds.Width - gutterWidth, charWidth, hiddenCols);
 
         int hScroll = _state.CsvHorizontalScroll;
 
@@ -331,6 +389,7 @@ internal sealed class CsvViewControl : Control
         }
 
         QueueScrollBarUpdate();
+        QueueHorizontalScrollBarUpdate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -346,6 +405,83 @@ internal sealed class CsvViewControl : Control
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double GetTextOriginY(double rowY, double baseline, FormattedText text) =>
         rowY + baseline - text.Baseline;
+
+    private void UpdateHorizontalScrollMetrics(
+        int[] colWidths,
+        int colCount,
+        double viewportWidth,
+        double charWidth,
+        HashSet<int> hiddenCols)
+    {
+        double effectiveViewport = Math.Max(1, viewportWidth);
+        double totalVisibleWidth = 0;
+        int visibleColCount = 0;
+        for (int c = 0; c < colCount; c++) {
+            if (hiddenCols.Contains(c))
+                continue;
+
+            totalVisibleWidth += (colWidths[c] + 2) * charWidth + CellPaddingX;
+            visibleColCount++;
+        }
+
+        _hasHorizontalOverflow = visibleColCount > 0 && totalVisibleWidth > effectiveViewport + 0.5;
+        if (!_hasHorizontalOverflow) {
+            _horizontalViewportColumns = Math.Max(1, visibleColCount);
+            _horizontalMaxStartColumn = 0;
+            return;
+        }
+
+        _horizontalMaxStartColumn = ComputeMaxHorizontalStartColumn(colWidths, colCount, hiddenCols, effectiveViewport, charWidth);
+        _horizontalViewportColumns = Math.Max(1, EstimateVisibleColumnsFrom(_state.CsvHorizontalScroll, colWidths, colCount, hiddenCols, effectiveViewport, charWidth));
+    }
+
+    private static int ComputeMaxHorizontalStartColumn(
+        int[] colWidths,
+        int colCount,
+        HashSet<int> hiddenCols,
+        double viewportWidth,
+        double charWidth)
+    {
+        int maxStart = 0;
+        for (int start = 0; start < colCount; start++) {
+            if (hiddenCols.Contains(start))
+                continue;
+
+            int visibleCount = EstimateVisibleColumnsFrom(start, colWidths, colCount, hiddenCols, viewportWidth, charWidth);
+            if (visibleCount > 0)
+                maxStart = start;
+        }
+
+        return maxStart;
+    }
+
+    private static int EstimateVisibleColumnsFrom(
+        int start,
+        int[] colWidths,
+        int colCount,
+        HashSet<int> hiddenCols,
+        double viewportWidth,
+        double charWidth)
+    {
+        double used = 0;
+        int count = 0;
+        for (int c = Math.Max(0, start); c < colCount; c++) {
+            if (hiddenCols.Contains(c))
+                continue;
+
+            double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
+            if (count > 0 && used + cellWidth > viewportWidth)
+                break;
+
+            used += cellWidth;
+            count++;
+
+            if (cellWidth > viewportWidth)
+                break;
+        }
+
+        return count;
+    }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {

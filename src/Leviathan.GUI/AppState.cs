@@ -66,6 +66,8 @@ public sealed class AppState
     public long TextTopOffset { get; set; }
     public long TextCursorOffset { get; set; } = -1;
     public long TextSelectionAnchor { get; set; } = -1;
+    /// <summary>Horizontal scroll offset (number of columns scrolled).</summary>
+    public int TextHorizontalScroll { get; set; }
     public bool WordWrap { get; set; } = true;
     public int TabWidth { get; set; } = 4;
     public long EstimatedTotalLines { get; set; }
@@ -212,6 +214,7 @@ public sealed class AppState
         TextTopOffset = 0;
         TextCursorOffset = bomLength;
         TextSelectionAnchor = -1;
+        TextHorizontalScroll = 0;
         EstimatedTotalLines = Math.Max(1, Document.Length / 80);
 
         // Start background line indexing
@@ -298,6 +301,7 @@ public sealed class AppState
         TextTopOffset = 0;
         TextCursorOffset = -1;
         TextSelectionAnchor = -1;
+        TextHorizontalScroll = 0;
         EstimatedTotalLines = 0;
         BomLength = 0;
         SearchResults = [];
@@ -375,21 +379,21 @@ public sealed class AppState
     }
 
     /// <summary>
-    /// Invalidates search results after a document edit. Clears all match data
-    /// and notifies the UI so the find bar shows the stale-results state.
+    /// Handles document edits while search is active. When a query/search context exists,
+    /// requests a debounced search restart from the UI.
     /// </summary>
     public void InvalidateSearchResults()
     {
-        if (SearchResults.Count == 0 && CurrentMatchIndex < 0) return;
-        CancelSearch();
-        SearchResults = [];
-        CurrentMatchIndex = -1;
-        SearchStatus = SearchStatus.Length > 0 ? "Results invalidated — search again" : "";
-        SearchInvalidated?.Invoke();
+        if (string.IsNullOrWhiteSpace(FindInput))
+            return;
+        if (!IsSearching && SearchResults.Count == 0 && SearchStatus.Length == 0)
+            return;
+
+        SearchRestartRequested?.Invoke();
     }
 
-    /// <summary>Callback invoked when search results are invalidated by an edit.</summary>
-    public Action? SearchInvalidated { get; set; }
+    /// <summary>Callback invoked when an edit should trigger a debounced search restart.</summary>
+    public Action? SearchRestartRequested { get; set; }
 
     /// <summary>
     /// Initialises CSV view state for the currently open file.

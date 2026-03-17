@@ -21,6 +21,7 @@ namespace Leviathan.GUI.Views;
 public sealed partial class MainWindow : Window
 {
     private const string OnlineHelpUrl = "https://github.com/lstefano71/Leviathan/blob/main/docs/help.md";
+    private static readonly TimeSpan SearchRestartDebounceInterval = TimeSpan.FromMilliseconds(300);
     private static FilePickerFileType ThemeJsonFileType { get; } = new("Theme JSON") {
         Patterns = ["*.json"]
     };
@@ -32,6 +33,7 @@ public sealed partial class MainWindow : Window
     private Grid? _csvOuterGrid;
     private GridSplitter? _csvSplitter;
     private DispatcherTimer? _indexingTimer;
+    private DispatcherTimer? _searchRestartTimer;
     private FindBar? _findBar;
     private GotoBar? _gotoBar;
     private CommandPaletteOverlay? _commandPalette;
@@ -76,6 +78,8 @@ public sealed partial class MainWindow : Window
         _indexingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _indexingTimer.Tick += (_, _) => UpdateIndexingStatus();
         _indexingTimer.Start();
+        _searchRestartTimer = new DispatcherTimer { Interval = SearchRestartDebounceInterval };
+        _searchRestartTimer.Tick += OnSearchRestartTimerTick;
 
         // Handle window closing for unsaved changes guard
         Closing += OnWindowClosing;
@@ -353,6 +357,7 @@ public sealed partial class MainWindow : Window
         if (_state.IsModified) {
             e.Cancel = true;
             if (await GuardUnsavedChanges()) {
+                _searchRestartTimer?.Stop();
                 _state.CancelSearch();
                 _state.CsvRowIndexer?.Dispose();
                 _state.Indexer?.Dispose();
@@ -361,6 +366,7 @@ public sealed partial class MainWindow : Window
                 Close();
             }
         } else {
+            _searchRestartTimer?.Stop();
             _state.CancelSearch();
             _state.CsvRowIndexer?.Dispose();
             _state.Indexer?.Dispose();
@@ -422,22 +428,28 @@ public sealed partial class MainWindow : Window
         _textView.StateChanged = UpdateStatusBar;
         _csvView.StateChanged = OnCsvStateChanged;
         _csvView.OnRecordDetail = ToggleCsvDetailPanel;
-        _state.SearchInvalidated = () => _findBar?.UpdateMatchStatus();
+        _state.SearchRestartRequested = QueueSearchRestartAfterEdit;
 
         // Create scrollbars and compose each view + scrollbar in a Grid
-        ContentArea.Children.Add(CreateViewWithScrollBar(_hexView, sb => {
+        ContentArea.Children.Add(CreateViewWithScrollBars(_hexView, sb => {
             _hexView.ScrollBar = sb;
             sb.ValueChanged += _hexView.OnScrollBarValueChanged;
         }));
-        ContentArea.Children.Add(CreateViewWithScrollBar(_textView, sb => {
-            _textView.ScrollBar = sb;
+        ContentArea.Children.Add(CreateViewWithScrollBars(_textView, sb => {
+            _textView.VerticalScrollBar = sb;
             sb.ValueChanged += _textView.OnScrollBarValueChanged;
+        }, sb => {
+            _textView.HorizontalScrollBar = sb;
+            sb.ValueChanged += _textView.OnHorizontalScrollBarValueChanged;
         }));
 
         // CSV view + detail panel composed in an outer Grid with splitter
-        Grid csvInner = CreateViewWithScrollBar(_csvView, sb => {
-            _csvView.ScrollBar = sb;
+        Grid csvInner = CreateViewWithScrollBars(_csvView, sb => {
+            _csvView.VerticalScrollBar = sb;
             sb.ValueChanged += _csvView.OnScrollBarValueChanged;
+        }, sb => {
+            _csvView.HorizontalScrollBar = sb;
+            sb.ValueChanged += _csvView.OnHorizontalScrollBarValueChanged;
         });
 
         _csvDetailPanel = new CsvDetailPanel {
@@ -464,22 +476,43 @@ public sealed partial class MainWindow : Window
         ContentArea.Children.Add(csvOuter);
     }
 
-    private static Grid CreateViewWithScrollBar(Control view, Action<Avalonia.Controls.Primitives.ScrollBar> configure)
+    private static Grid CreateViewWithScrollBars(
+        Control view,
+        Action<Avalonia.Controls.Primitives.ScrollBar> configureVertical,
+        Action<Avalonia.Controls.Primitives.ScrollBar>? configureHorizontal = null)
     {
+        bool hasHorizontal = configureHorizontal is not null;
         Grid grid = new() {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto")
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            RowDefinitions = hasHorizontal ? new RowDefinitions("*,Auto") : new RowDefinitions("*")
         };
         Grid.SetColumn(view, 0);
+        Grid.SetRow(view, 0);
         grid.Children.Add(view);
 
-        Avalonia.Controls.Primitives.ScrollBar sb = new() {
+        Avalonia.Controls.Primitives.ScrollBar vertical = new() {
             Orientation = Avalonia.Layout.Orientation.Vertical,
             Minimum = 0,
             Width = 14
         };
-        Grid.SetColumn(sb, 1);
-        grid.Children.Add(sb);
-        configure(sb);
+        Grid.SetColumn(vertical, 1);
+        Grid.SetRow(vertical, 0);
+        grid.Children.Add(vertical);
+        configureVertical(vertical);
+
+        if (configureHorizontal is null)
+            return grid;
+
+        Avalonia.Controls.Primitives.ScrollBar horizontal = new() {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Minimum = 0,
+            Height = 14,
+            IsVisible = false
+        };
+        Grid.SetColumn(horizontal, 0);
+        Grid.SetRow(horizontal, 1);
+        grid.Children.Add(horizontal);
+        configureHorizontal(horizontal);
         return grid;
     }
 
@@ -1757,17 +1790,47 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void QueueSearchRestartAfterEdit()
+    {
+        _state.CancelSearch();
+        _state.SearchResults = [];
+        _state.CurrentMatchIndex = -1;
+        _state.SearchStatus = "Refreshing search...";
+        _findBar?.UpdateMatchStatus();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        _csvView?.InvalidateVisual();
+
+        _searchRestartTimer?.Stop();
+        _searchRestartTimer?.Start();
+    }
+
+    private void OnSearchRestartTimerTick(object? sender, EventArgs e)
+    {
+        _searchRestartTimer?.Stop();
+        StartSearch(addToHistory: false);
+    }
+
     private void StartSearch()
     {
-        if (_state.Document is null || string.IsNullOrEmpty(_state.FindInput)) return;
+        StartSearch(addToHistory: true);
+    }
 
+    private void StartSearch(bool addToHistory)
+    {
+        if (_state.Document is null || string.IsNullOrWhiteSpace(_state.FindInput))
+            return;
+
+        _searchRestartTimer?.Stop();
         _state.CancelSearch();
         _state.SearchResults = [];
         _state.CurrentMatchIndex = -1;
         _state.IsSearching = true;
+        _state.SearchStatus = "Searching...";
         _findBar?.UpdateMatchStatus();
 
-        _state.Settings.AddFindHistory(_state.FindInput);
+        if (addToHistory)
+            _state.Settings.AddFindHistory(_state.FindInput);
 
         CancellationTokenSource cts = new();
         _state.SearchCts = cts;
@@ -1783,14 +1846,18 @@ public sealed partial class MainWindow : Window
         // Validate pattern before launching background task
         if (isHex) {
             try { SearchEngine.ParseHexPattern(query); } catch (FormatException) {
+                _state.SearchCts = null;
                 _state.IsSearching = false;
                 _state.SearchStatus = "Invalid hex pattern";
+                cts.Dispose();
                 _findBar?.UpdateMatchStatus();
                 return;
             }
         } else if (isRegex && !SearchEngine.IsValidRegex(query)) {
+            _state.SearchCts = null;
             _state.IsSearching = false;
             _state.SearchStatus = "Invalid regex";
+            cts.Dispose();
             _findBar?.UpdateMatchStatus();
             return;
         }
@@ -1808,19 +1875,19 @@ public sealed partial class MainWindow : Window
             }
 
             // Stream results in batches for responsive UI
-            const int BatchSize = 500;
+            const int BatchSize = 128;
             List<SearchResult> batch = new(BatchSize);
-            int totalSoFar = 0;
 
             foreach (SearchResult r in source) {
                 batch.Add(r);
                 if (batch.Count >= BatchSize) {
                     List<SearchResult> toPost = batch;
                     batch = new List<SearchResult>(BatchSize);
-                    int batchTotal = totalSoFar + toPost.Count;
-                    totalSoFar = batchTotal;
                     Dispatcher.UIThread.Post(() => {
+                        if (_state.SearchCts != cts) return;
+
                         _state.SearchResults.AddRange(toPost);
+                        _state.SearchStatus = $"{_state.SearchResults.Count} matches (searching...)";
                         if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
                             _state.CurrentMatchIndex = 0;
                             NavigateToMatch(0);
@@ -1836,6 +1903,8 @@ public sealed partial class MainWindow : Window
             // Post final batch
             List<SearchResult> finalBatch = batch;
             Dispatcher.UIThread.Post(() => {
+                if (_state.SearchCts != cts) return;
+
                 if (finalBatch.Count > 0)
                     _state.SearchResults.AddRange(finalBatch);
 

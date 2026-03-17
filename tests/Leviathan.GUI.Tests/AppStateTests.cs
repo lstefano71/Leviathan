@@ -63,6 +63,48 @@ public sealed class AppStateTests
         }
     }
 
+    [Fact]
+    public void CloseFile_ResetsHorizontalScrollState()
+    {
+        string path = CreateTempFile(".csv", "a,b,c\r\n1,2,3\r\n"u8.ToArray());
+        AppState state = new();
+        try {
+            state.OpenFile(path);
+            state.TextHorizontalScroll = 12;
+            state.CsvHorizontalScroll = 7;
+
+            state.CloseFile();
+
+            Assert.Equal(0, state.TextHorizontalScroll);
+            Assert.Equal(0, state.CsvHorizontalScroll);
+        } finally {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void InvalidateSearchResults_NoQuery_DoesNotRequestRestart()
+    {
+        AppState state = new();
+        int callbacks = 0;
+        state.SearchRestartRequested = () => callbacks++;
+        state.InvalidateSearchResults();
+        Assert.Equal(0, callbacks);
+    }
+
+    [Fact]
+    public void InvalidateSearchResults_WithActiveSearchStatus_RequestsRestart()
+    {
+        AppState state = new() {
+            FindInput = "needle",
+            SearchStatus = "No matches"
+        };
+        int callbacks = 0;
+        state.SearchRestartRequested = () => callbacks++;
+        state.InvalidateSearchResults();
+        Assert.Equal(1, callbacks);
+    }
+
     private static string CreateTempFile(string extension, byte[] content)
     {
         string path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}{extension}");
