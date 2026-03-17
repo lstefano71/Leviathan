@@ -341,21 +341,19 @@ public sealed partial class WelcomeScreen : UserControl
     private static void UpdateEntryMetadataText(FileEntry entry)
     {
         if (entry.IsUnavailable) {
-            if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "—";
-            if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "unavailable";
+            entry.SizeTextBlock?.Text = "—";
+            entry.DateTextBlock?.Text = "unavailable";
             return;
         }
 
         if (entry.SizeText is null && entry.DateText is null && !entry.IsUnavailable) {
-            if (entry.SizeTextBlock is not null) entry.SizeTextBlock.Text = "…";
-            if (entry.DateTextBlock is not null) entry.DateTextBlock.Text = "loading…";
+            entry.SizeTextBlock?.Text = "…";
+            entry.DateTextBlock?.Text = "loading…";
             return;
         }
 
-        if (entry.SizeTextBlock is not null)
-            entry.SizeTextBlock.Text = entry.SizeText ?? "—";
-        if (entry.DateTextBlock is not null)
-            entry.DateTextBlock.Text = entry.DateText ?? "";
+        entry.SizeTextBlock?.Text = entry.SizeText ?? "—";
+        entry.DateTextBlock?.Text = entry.DateText ?? "";
     }
 
     // ─── Selection ───
@@ -368,8 +366,7 @@ public sealed partial class WelcomeScreen : UserControl
         // Deselect old
         if (_selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count) {
             FileEntry old = _filteredEntries[_selectedIndex];
-            if (old.VisualRow is not null)
-                old.VisualRow.Background = Brushes.Transparent;
+            old.VisualRow?.Background = Brushes.Transparent;
         }
 
         _selectedIndex = index;

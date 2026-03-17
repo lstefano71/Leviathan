@@ -114,7 +114,7 @@ public sealed class CsvRowIndexTests
     [Fact]
     public unsafe void ScanChunk_EmptyFile_ZeroRows()
     {
-        byte[] data = Array.Empty<byte>();
+        byte[] data = [];
         CsvRowIndex index = new(sparseFactor: 100);
         CsvDialect dialect = CsvDialect.Csv();
 

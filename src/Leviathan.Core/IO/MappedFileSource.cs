@@ -61,7 +61,7 @@ public sealed class MappedFileSource : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (Length == 0 || length == 0)
-            return ReadOnlySpan<byte>.Empty;
+            return [];
 
         if ((ulong)offset + (ulong)length > (ulong)Length)
             throw new ArgumentOutOfRangeException(nameof(offset));

@@ -27,7 +27,7 @@ public class DocumentTests
     [Fact]
     public void Read_ReturnsOriginalContent()
     {
-        var data = new byte[] { 0x48, 0x65, 0x6C, 0x6C, 0x6F }; // "Hello"
+        var data = "Hello"u8.ToArray(); // "Hello"
         var path = CreateTempFile(data);
 
         try {
@@ -50,7 +50,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(50, new byte[] { 0xFF, 0xFE });
+            doc.Insert(50, [0xFF, 0xFE]);
 
             Assert.Equal(102, doc.Length);
         } finally {
@@ -66,7 +66,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(2, new byte[] { 0xAA, 0xBB });
+            doc.Insert(2, [0xAA, 0xBB]);
 
             Span<byte> buf = stackalloc byte[7];
             doc.Read(0, buf);
@@ -108,7 +108,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(2, new byte[] { 0xAA });
+            doc.Insert(2, [0xAA]);
             doc.SaveTo(savePath);
 
             var saved = File.ReadAllBytes(savePath);
@@ -130,7 +130,7 @@ public class DocumentTests
     public void EmptyDocument_InsertAndRead()
     {
         using var doc = new Document();
-        doc.Insert(0, new byte[] { 0x41, 0x42, 0x43 }); // "ABC"
+        doc.Insert(0, [0x41, 0x42, 0x43]); // "ABC"
 
         Assert.Equal(3, doc.Length);
 
@@ -150,7 +150,7 @@ public class DocumentTests
 
         try {
             File.WriteAllBytes(srcPath, data);
-            File.WriteAllBytes(dstPath, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
+            File.WriteAllBytes(dstPath, [0xFF, 0xFF, 0xFF, 0xFF]);
 
             using var doc = new Document(srcPath);
             doc.SaveTo(dstPath);
@@ -200,7 +200,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(0, new byte[] { 0xFF });
+            doc.Insert(0, [0xFF]);
             Assert.True(doc.IsModified);
         } finally {
             File.Delete(path);
@@ -231,7 +231,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(0, new byte[] { 0xFF });
+            doc.Insert(0, [0xFF]);
             Assert.True(doc.IsModified);
 
             doc.SaveTo(savePath);
@@ -250,7 +250,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(2, new byte[] { 0xAA });
+            doc.Insert(2, [0xAA]);
             doc.SaveTo(path);
 
             var saved = File.ReadAllBytes(path);
@@ -268,7 +268,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(0, new byte[] { 0xFF });
+            doc.Insert(0, [0xFF]);
             Assert.True(doc.IsModified);
 
             doc.SaveTo(path);
@@ -286,7 +286,7 @@ public class DocumentTests
 
         try {
             using var doc = new Document(path);
-            doc.Insert(2, new byte[] { 0xAA });
+            doc.Insert(2, [0xAA]);
             doc.SaveTo(path);
 
             // Document should reflect the saved content
@@ -297,7 +297,7 @@ public class DocumentTests
             Assert.True(buf.SequenceEqual(new byte[] { 1, 2, 0xAA, 3, 4, 5 }));
 
             // Further edits should still work
-            doc.Insert(0, new byte[] { 0xBB });
+            doc.Insert(0, [0xBB]);
             Assert.Equal(7, doc.Length);
             Assert.True(doc.IsModified);
 

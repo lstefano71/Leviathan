@@ -32,9 +32,10 @@ public sealed class WelcomeScreenTests
     [Fact]
     public void FileEntry_MetadataCanBeUpdated()
     {
-        WelcomeScreen.FileEntry entry = new(@"C:\file.dat", isPinned: false);
-        entry.SizeText = "12.4 MB";
-        entry.DateText = "2026-03-15";
+        WelcomeScreen.FileEntry entry = new(@"C:\file.dat", isPinned: false) {
+            SizeText = "12.4 MB",
+            DateText = "2026-03-15"
+        };
 
         Assert.Equal("12.4 MB", entry.SizeText);
         Assert.Equal("2026-03-15", entry.DateText);
@@ -44,8 +45,9 @@ public sealed class WelcomeScreenTests
     [Fact]
     public void FileEntry_UnavailableFlag()
     {
-        WelcomeScreen.FileEntry entry = new(@"\\server\share\file.bin", isPinned: false);
-        entry.IsUnavailable = true;
+        WelcomeScreen.FileEntry entry = new(@"\\server\share\file.bin", isPinned: false) {
+            IsUnavailable = true
+        };
 
         Assert.True(entry.IsUnavailable);
     }

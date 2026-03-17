@@ -103,7 +103,7 @@ public sealed class CsvFieldParserTests
     [Fact]
     public void ParseRecord_EmptyRecord_ReturnsOneEmptyField()
     {
-        ReadOnlySpan<byte> record = ReadOnlySpan<byte>.Empty;
+        ReadOnlySpan<byte> record = [];
         Span<CsvField> fields = stackalloc CsvField[4];
 
         int count = CsvFieldParser.ParseRecord(record, CsvDialect.Csv(), fields);

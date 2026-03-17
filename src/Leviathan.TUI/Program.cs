@@ -9,7 +9,8 @@ using Leviathan.Core.Text;
 using Leviathan.TUI;
 using Leviathan.TUI.Views;
 using Leviathan.TUI.Widgets;
-
+
+
 // ─── Console encoding ───
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.InputEncoding = System.Text.Encoding.UTF8;
@@ -171,7 +172,7 @@ Hex1bWidget BuildMainView(RootContext ctx, int width, int height)
 
     // Wrap with PastableWidget to handle terminal bracketed paste (Ctrl+V)
     return ctx.Pastable(interactable)
-        .OnPaste(async (PasteEventArgs e) => {
+        .OnPaste(async e => {
             string pastedText = await e.Paste.ReadToEndAsync();
             if (string.IsNullOrEmpty(pastedText)) return;
 

@@ -53,7 +53,7 @@ public static class Utf8Utils
         if (offset >= data.Length)
             return (Rune.ReplacementChar, 0);
 
-        var status = Rune.DecodeFromUtf8(data.Slice(offset), out Rune rune, out int bytesConsumed);
+        var status = Rune.DecodeFromUtf8(data[offset..], out Rune rune, out int bytesConsumed);
         if (status == System.Buffers.OperationStatus.Done)
             return (rune, bytesConsumed);
 

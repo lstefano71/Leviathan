@@ -81,7 +81,7 @@ public sealed class CsvDialectDetectorTests
     [Fact]
     public void Detect_EmptyFile_ReturnsDefaultDialect()
     {
-        CsvDialect dialect = CsvDialectDetector.Detect(ReadOnlySpan<byte>.Empty);
+        CsvDialect dialect = CsvDialectDetector.Detect([]);
 
         Assert.Equal((byte)',', dialect.Separator);
         Assert.Equal((byte)'"', dialect.Quote);

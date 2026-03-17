@@ -128,7 +128,7 @@ public static class EncodingDetector
                 hasMultiByte = true;
             }
 
-            remaining = remaining.Slice(bytesConsumed);
+            remaining = remaining[bytesConsumed..];
         }
 
         // Pure ASCII — valid UTF-8 by definition.

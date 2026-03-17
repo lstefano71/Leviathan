@@ -27,7 +27,7 @@ public class EncodingDetectorTests
     [Fact]
     public void Detect_EmptySample_ReturnsUtf8()
     {
-        (TextEncoding enc, int bom) = EncodingDetector.Detect(ReadOnlySpan<byte>.Empty);
+        (TextEncoding enc, int bom) = EncodingDetector.Detect([]);
 
         Assert.Equal(TextEncoding.Utf8, enc);
         Assert.Equal(0, bom);

@@ -104,7 +104,7 @@ public class LineWrapEngineTests
     public void EmptyData_ReturnsZeroLines()
     {
         Span<VisualLine> output = stackalloc VisualLine[10];
-        int count = _engine.ComputeVisualLines(ReadOnlySpan<byte>.Empty, 0, 80, true, output, _decoder);
+        int count = _engine.ComputeVisualLines([], 0, 80, true, output, _decoder);
         Assert.Equal(0, count);
     }
 

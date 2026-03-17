@@ -577,16 +577,16 @@ internal sealed class LeviathanCsvView : View
 
     private ReadOnlySpan<byte> ReadRowBytes(long dataRowIndex)
     {
-        if (_state.Document is null) return ReadOnlySpan<byte>.Empty;
+        if (_state.Document is null) return [];
 
         long rowOffset = GetRowByteOffset(dataRowIndex);
-        if (rowOffset < 0) return ReadOnlySpan<byte>.Empty;
+        if (rowOffset < 0) return [];
 
         long nextRowOffset = GetRowByteOffset(dataRowIndex + 1);
         if (nextRowOffset < 0) nextRowOffset = _state.Document.Length;
 
         int rowLen = (int)Math.Min(nextRowOffset - rowOffset, _readBuffer.Length);
-        if (rowLen <= 0) return ReadOnlySpan<byte>.Empty;
+        if (rowLen <= 0) return [];
 
         EnsureBuffer(rowLen);
         int read = _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, rowLen));

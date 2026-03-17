@@ -200,9 +200,9 @@ public sealed partial class MainWindow : Window
         _state.CloseFile();
 
         // Hide any open overlays
-        if (_findBar is not null) _findBar.IsVisible = false;
-        if (_gotoBar is not null) _gotoBar.IsVisible = false;
-        if (_commandPalette is not null) _commandPalette.IsVisible = false;
+        _findBar?.IsVisible = false;
+        _gotoBar?.IsVisible = false;
+        _commandPalette?.IsVisible = false;
 
         // Close detail panel
         SetCsvDetailPanelVisible(false);
@@ -424,9 +424,10 @@ public sealed partial class MainWindow : Window
             sb.ValueChanged += _csvView.OnScrollBarValueChanged;
         });
 
-        _csvDetailPanel = new CsvDetailPanel();
-        _csvDetailPanel.CloseRequested = () => SetCsvDetailPanelVisible(false);
-        _csvDetailPanel.IsVisible = false;
+        _csvDetailPanel = new CsvDetailPanel {
+            CloseRequested = () => SetCsvDetailPanelVisible(false),
+            IsVisible = false
+        };
 
         GridSplitter splitter = new() {
             Width = 4,
@@ -1339,21 +1340,24 @@ public sealed partial class MainWindow : Window
     {
         if (_findBar is not null) return;
 
-        _findBar = new FindBar(_state, StartSearch, FindNext, FindPrevious, FocusActiveViewAsync);
-        _findBar.IsVisible = false;
+        _findBar = new FindBar(_state, StartSearch, FindNext, FindPrevious, FocusActiveViewAsync) {
+            IsVisible = false
+        };
 
         _gotoBar = new GotoBar(_state,
             offset => _hexView?.GotoOffset(offset),
-            line => _textView?.GotoLine(line));
-        _gotoBar.IsVisible = false;
+            line => _textView?.GotoLine(line)) {
+            IsVisible = false
+        };
 
         _commandPalette = new CommandPaletteOverlay(_state,
             offset => _hexView?.GotoOffset(offset),
             (line, column) => _textView?.GotoLine(line, column),
             offset => _textView?.GotoOffset(offset),
             row => _csvView?.GotoRow(row),
-            FocusActiveViewAsync);
-        _commandPalette.IsVisible = false;
+            FocusActiveViewAsync) {
+            IsVisible = false
+        };
         RefreshCommandPaletteCommands();
 
         ContentArea.Children.Add(_findBar);

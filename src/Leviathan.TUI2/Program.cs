@@ -410,12 +410,9 @@ internal sealed class MainWindow : Window
     }  /// <summary>Shows/hides menu items based on active view mode.</summary>
     private void UpdateViewMenuVisibility(ViewMode mode)
     {
-        if (_wordWrapItem is not null)
-            _wordWrapItem.Visible = mode == ViewMode.Text;
-        if (_bprItem is not null)
-            _bprItem.Visible = mode == ViewMode.Hex;
-        if (_csvSettingsItem is not null)
-            _csvSettingsItem.Visible = mode == ViewMode.Csv;
+        _wordWrapItem?.Visible = mode == ViewMode.Text;
+        _bprItem?.Visible = mode == ViewMode.Hex;
+        _csvSettingsItem?.Visible = mode == ViewMode.Csv;
         // Encoding is visible in both modes
     }
 
@@ -439,8 +436,7 @@ internal sealed class MainWindow : Window
         UpdateViewMenuVisibility(_state.ActiveView);
 
         // Sync encoding selector to the auto-detected (or current) encoding
-        if (_encodingSelector is not null)
-            _encodingSelector.Value = (int)_state.Decoder.Encoding;
+        _encodingSelector?.Value = (int)_state.Decoder.Encoding;
 
         UpdateTitle();
         UpdateStatusBar();
@@ -883,8 +879,7 @@ internal sealed class MainWindow : Window
         bool newState = !_state.WordWrap;
         ApplyWordWrap(newState);
         // Sync the CheckBox if toggled from palette/keybind
-        if (_wordWrapCheckBox is not null)
-            _wordWrapCheckBox.Value = newState ? CheckState.Checked : CheckState.UnChecked;
+        _wordWrapCheckBox?.Value = newState ? CheckState.Checked : CheckState.UnChecked;
     }
 
     private void ApplyWordWrap(bool enabled)
@@ -902,8 +897,7 @@ internal sealed class MainWindow : Window
     {
         _state.SwitchEncoding(encoding);
         // Sync the OptionSelector if called from palette/keybind
-        if (_encodingSelector is not null)
-            _encodingSelector.Value = (int)encoding;
+        _encodingSelector?.Value = (int)encoding;
         _hexView.SetNeedsDraw();
         _textView.SetNeedsDraw();
         UpdateStatusBar();
@@ -917,8 +911,7 @@ internal sealed class MainWindow : Window
         _state.Settings.BytesPerRow = value;
         _state.Settings.Save();
         // Sync the OptionSelector if called from palette/keybind
-        if (_bprSelector is not null)
-            _bprSelector.Value = value;
+        _bprSelector?.Value = value;
         _hexView.SetNeedsDraw();
         UpdateStatusBar();
     }

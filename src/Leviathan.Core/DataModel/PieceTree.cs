@@ -193,7 +193,7 @@ public sealed class PieceTree
             var (node, localOff) = FindByOffset(logicalOffset);
             int chunkLen = (int)Math.Min(node.Piece.Length - localOff, toRead - totalRead);
             var span = reader(node.Piece.Source, node.Piece.Offset + localOff, chunkLen);
-            span.CopyTo(destination.Slice(totalRead));
+            span.CopyTo(destination[totalRead..]);
             totalRead += chunkLen;
             logicalOffset += chunkLen;
         }
@@ -377,8 +377,7 @@ public sealed class PieceTree
                     parent = node.Parent;
                 } else {
                     if (sibling.Right is null || !sibling.Right.IsRed) {
-                        if (sibling.Left is not null)
-                            sibling.Left.IsRed = false;
+                        sibling.Left?.IsRed = false;
                         sibling.IsRed = true;
                         RotateRight(sibling);
                         sibling = parent.Right;
@@ -386,8 +385,7 @@ public sealed class PieceTree
 
                     sibling!.IsRed = parent.IsRed;
                     parent.IsRed = false;
-                    if (sibling.Right is not null)
-                        sibling.Right.IsRed = false;
+                    sibling.Right?.IsRed = false;
                     RotateLeft(parent);
                     node = Root;
                     break;
@@ -410,8 +408,7 @@ public sealed class PieceTree
                     parent = node.Parent;
                 } else {
                     if (sibling.Left is null || !sibling.Left.IsRed) {
-                        if (sibling.Right is not null)
-                            sibling.Right.IsRed = false;
+                        sibling.Right?.IsRed = false;
                         sibling.IsRed = true;
                         RotateLeft(sibling);
                         sibling = parent.Left;
@@ -419,8 +416,7 @@ public sealed class PieceTree
 
                     sibling!.IsRed = parent.IsRed;
                     parent.IsRed = false;
-                    if (sibling.Left is not null)
-                        sibling.Left.IsRed = false;
+                    sibling.Left?.IsRed = false;
                     RotateRight(parent);
                     node = Root;
                     break;
@@ -428,16 +424,14 @@ public sealed class PieceTree
             }
         }
 
-        if (node is not null)
-            node.IsRed = false;
+        node?.IsRed = false;
     }
 
     private void RotateLeft(PieceNode node)
     {
         var right = node.Right!;
         node.Right = right.Left;
-        if (right.Left is not null)
-            right.Left.Parent = node;
+        right.Left?.Parent = node;
 
         right.Parent = node.Parent;
         if (node.Parent is null)
@@ -458,8 +452,7 @@ public sealed class PieceTree
     {
         var left = node.Left!;
         node.Left = left.Right;
-        if (left.Right is not null)
-            left.Right.Parent = node;
+        left.Right?.Parent = node;
 
         left.Parent = node.Parent;
         if (node.Parent is null)

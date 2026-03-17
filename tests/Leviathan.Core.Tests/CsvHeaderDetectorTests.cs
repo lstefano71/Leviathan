@@ -57,7 +57,7 @@ public sealed class CsvHeaderDetectorTests
     [Fact]
     public void Detect_EmptySample_ReturnsFalse()
     {
-        bool hasHeader = CsvHeaderDetector.Detect(ReadOnlySpan<byte>.Empty, CsvDialect.Csv());
+        bool hasHeader = CsvHeaderDetector.Detect([], CsvDialect.Csv());
 
         Assert.False(hasHeader);
     }

@@ -115,7 +115,7 @@ public sealed class LineWrapEngine
         while (search > 0) {
             int chunkLen = (int)Math.Min(search, ScanChunkSize);
             long chunkStart = search - chunkLen;
-            int bytesRead = readFunc(chunkStart, buf.Slice(0, chunkLen));
+            int bytesRead = readFunc(chunkStart, buf[..chunkLen]);
             if (bytesRead == 0) return 0;
 
             // Align scan start to character boundary for multi-byte encodings
@@ -125,8 +125,8 @@ public sealed class LineWrapEngine
 
             // Scan backwards through this chunk for a LF newline
             for (int i = scanStart; i >= 0; i -= step) {
-                if (decoder.IsNewline(buf.Slice(0, bytesRead), i, out int nlLen)) {
-                    var (r, _) = decoder.DecodeRune(buf.Slice(0, bytesRead), i);
+                if (decoder.IsNewline(buf[..bytesRead], i, out int nlLen)) {
+                    var (r, _) = decoder.DecodeRune(buf[..bytesRead], i);
                     if (r.Value == '\n') {
                         return chunkStart + i + nlLen; // line starts after the LF
                     }

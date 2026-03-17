@@ -76,7 +76,7 @@ ITextDecoder CreateDecoder(TextEncoding encoding) => encoding switch {
 void SwitchEncoding(TextEncoding encoding)
 {
     activeDecoder = CreateDecoder(encoding);
-    if (textView is not null) textView.Decoder = activeDecoder;
+    textView?.Decoder = activeDecoder;
     findWindow.ActiveDecoder = activeDecoder;
 }
 
@@ -197,7 +197,7 @@ void RenderMainMenuBar()
             bool isAuto = settings.BytesPerRow == 0;
             if (ImGui.MenuItem("Auto Column Width"u8, ""u8, isAuto)) {
                 settings.BytesPerRow = 0;
-                if (hexView is not null) hexView.BytesPerRowSetting = 0;
+                hexView?.BytesPerRowSetting = 0;
                 settings.Save();
             }
 
@@ -206,7 +206,7 @@ void RenderMainMenuBar()
                 bool selected = settings.BytesPerRow == bpr;
                 if (ImGui.MenuItem($"{bpr} Bytes/Row", "", selected)) {
                     settings.BytesPerRow = bpr;
-                    if (hexView is not null) hexView.BytesPerRowSetting = bpr;
+                    hexView?.BytesPerRowSetting = bpr;
                     settings.Save();
                 }
             }
@@ -215,7 +215,7 @@ void RenderMainMenuBar()
             bool wrap = settings.WordWrap;
             if (ImGui.MenuItem("Word Wrap"u8, ""u8, wrap)) {
                 settings.WordWrap = !wrap;
-                if (textView is not null) textView.WordWrap = settings.WordWrap;
+                textView?.WordWrap = settings.WordWrap;
                 settings.Save();
             }
 

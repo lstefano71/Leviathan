@@ -176,7 +176,7 @@ public class SearchTests
     {
         byte[] result = SearchEngine.ParseHexPattern("de ad".AsSpan());
 
-        Assert.Equal(new byte[] { 0xDE, 0xAD }, result);
+        Assert.Equal("ޭ"u8.ToArray(), result);
     }
 
     [Fact]

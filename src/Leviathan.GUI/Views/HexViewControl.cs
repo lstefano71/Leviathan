@@ -168,7 +168,7 @@ internal sealed class HexViewControl : Control
 
             char hi = (char)HexChars[col >> 4];
             char lo = (char)HexChars[col & 0xF];
-            string label = new string([hi, lo]);
+            string label = new([hi, lo]);
 
             FormattedText headerHex = new(label, System.Globalization.CultureInfo.InvariantCulture,
                 FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
@@ -280,7 +280,7 @@ internal sealed class HexViewControl : Control
 
                 char hi = (char)HexChars[b >> 4];
                 char lo = (char)HexChars[b & 0xF];
-                string hexPair = new string([hi, lo]);
+                string hexPair = new([hi, lo]);
 
                 FormattedText hexText = new(hexPair, System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);

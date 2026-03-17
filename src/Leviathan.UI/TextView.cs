@@ -411,9 +411,9 @@ public sealed class TextView
 
         // Fallback: read from document
         Span<byte> tmp = stackalloc byte[4];
-        int read = _document.Read(docOffset - checkLen, tmp.Slice(0, checkLen));
+        int read = _document.Read(docOffset - checkLen, tmp[..checkLen]);
         if (read < checkLen) return false;
-        ReadOnlySpan<byte> fallback = tmp.Slice(0, checkLen);
+        ReadOnlySpan<byte> fallback = tmp[..checkLen];
         if (_decoder.IsNewline(fallback, 0, out _)) {
             var (r, _) = _decoder.DecodeRune(fallback, 0);
             return r.Value == '\n';
@@ -466,7 +466,7 @@ public sealed class TextView
             // Encode the rune as UTF-8 for ImGui display
             if (rune.TryEncodeToUtf8(utf8Tmp, out int utf8Len)) {
                 if (outPos + utf8Len > maxOut) break; // not enough space
-                utf8Tmp.Slice(0, utf8Len).CopyTo(output.Slice(outPos));
+                utf8Tmp[..utf8Len].CopyTo(output[outPos..]);
                 outPos += utf8Len;
             } else {
                 // Can't encode → dot
@@ -597,7 +597,7 @@ public sealed class TextView
                         }
 
                         // Transcode from clipboard UTF-8 to the active encoding
-                        ReadOnlySpan<byte> clipSpan = new ReadOnlySpan<byte>(clipText, len);
+                        ReadOnlySpan<byte> clipSpan = new(clipText, len);
                         byte[] transcoded = TranscodeFromUtf8(clipSpan);
                         _document.Insert(_cursorOffset, transcoded);
                         _cursorOffset += transcoded.Length;
@@ -618,7 +618,7 @@ public sealed class TextView
             }
             Span<byte> nlBytes = stackalloc byte[4];
             int nlLen = _decoder.EncodeRune(new Rune('\n'), nlBytes);
-            _document.Insert(_cursorOffset, nlBytes.Slice(0, nlLen));
+            _document.Insert(_cursorOffset, nlBytes[..nlLen]);
             _cursorOffset += nlLen;
             _selectionAnchor = _cursorOffset;
             InvalidateLineCache();
@@ -676,7 +676,7 @@ public sealed class TextView
                     if (Rune.TryCreate(ch, out Rune rune)) {
                         int written = _decoder.EncodeRune(rune, encoded);
                         if (written > 0) {
-                            _document.Insert(_cursorOffset, encoded.Slice(0, written));
+                            _document.Insert(_cursorOffset, encoded[..written]);
                             _cursorOffset += written;
                             _selectionAnchor = _cursorOffset;
                             InvalidateLineCache();
@@ -706,7 +706,7 @@ public sealed class TextView
         while (searchPos < _document.Length) {
             int read = _document.Read(searchPos, buf);
             if (read == 0) break;
-            int nlIdx = FindNewlineInSpan(buf.Slice(0, read));
+            int nlIdx = FindNewlineInSpan(buf[..read]);
             if (nlIdx >= 0)
                 return searchPos + nlIdx;
             searchPos += read;
@@ -729,9 +729,9 @@ public sealed class TextView
                 int read = _document.Read(offset, buf);
                 if (read == 0) break;
                 // Find next newline
-                int nlPos = FindNewlineInSpan(buf.Slice(0, read));
+                int nlPos = FindNewlineInSpan(buf[..read]);
                 if (nlPos >= 0) {
-                    _decoder.IsNewline(buf.Slice(0, read), nlPos, out int nlByteLen);
+                    _decoder.IsNewline(buf[..read], nlPos, out int nlByteLen);
                     offset += nlPos + nlByteLen;
                 } else {
                     offset += read;
@@ -1056,14 +1056,14 @@ public sealed class TextView
         int backLen = (int)Math.Min(4, offset);
         long readStart = offset - backLen;
         Span<byte> buf = stackalloc byte[4];
-        int read = _document.Read(readStart, buf.Slice(0, backLen));
+        int read = _document.Read(readStart, buf[..backLen]);
         if (read == 0) return Math.Max(0, offset - 1);
 
         int pos = 0;
         int lastStart = 0;
         while (pos < read) {
             lastStart = pos;
-            var (_, byteLen) = _decoder.DecodeRune(buf.Slice(0, read), pos);
+            var (_, byteLen) = _decoder.DecodeRune(buf[..read], pos);
             if (byteLen == 0) { pos++; continue; }
             pos += byteLen;
         }
@@ -1076,7 +1076,7 @@ public sealed class TextView
         Span<byte> buf = stackalloc byte[4];
         int read = _document.Read(offset, buf);
         if (read == 0) return offset;
-        var (_, byteLen) = _decoder.DecodeRune(buf.Slice(0, read), 0);
+        var (_, byteLen) = _decoder.DecodeRune(buf[..read], 0);
         return Math.Min(offset + Math.Max(1, byteLen), _document.Length);
     }
 
@@ -1104,9 +1104,9 @@ public sealed class TextView
         while (searchPos < _document.Length) {
             int read = _document.Read(searchPos, buf);
             if (read == 0) return _document.Length;
-            int nlIdx = FindNewlineInSpan(buf.Slice(0, read));
+            int nlIdx = FindNewlineInSpan(buf[..read]);
             if (nlIdx >= 0) {
-                _decoder.IsNewline(buf.Slice(0, read), nlIdx, out int nlByteLen);
+                _decoder.IsNewline(buf[..read], nlIdx, out int nlByteLen);
                 long nextLineStart = searchPos + nlIdx + nlByteLen;
                 if (nextLineStart >= _document.Length) return _document.Length;
 
@@ -1116,7 +1116,7 @@ public sealed class TextView
 
                 int nextRead = _document.Read(nextLineStart, buf);
                 if (nextRead > 0) {
-                    int nextNl = FindNewlineInSpan(buf.Slice(0, nextRead));
+                    int nextNl = FindNewlineInSpan(buf[..nextRead]);
                     int nextLineLen = nextNl >= 0 ? nextNl : nextRead;
                     return nextLineStart + Math.Min(col, nextLineLen);
                 }
@@ -1206,7 +1206,7 @@ public sealed class TextView
         Span<byte> tmp = stackalloc byte[4];
         int pos = 0;
         while (pos < utf8Data.Length) {
-            OperationStatus status = Rune.DecodeFromUtf8(utf8Data.Slice(pos), out Rune rune, out int consumed);
+            OperationStatus status = Rune.DecodeFromUtf8(utf8Data[pos..], out Rune rune, out int consumed);
             if (status != OperationStatus.Done) {
                 consumed = consumed > 0 ? consumed : 1;
                 rune = Rune.ReplacementChar;
