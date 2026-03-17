@@ -47,6 +47,18 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Detect changed paths
+        id: changes
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            gui:
+              - 'src/Leviathan.GUI/**'
+            tui2:
+              - 'src/Leviathan.TUI2/**'
+            core:
+              - 'src/Leviathan.Core/**'
+
       - name: Publish AOT
         run: dotnet publish ${{ matrix.project }} -c Release -r ${{ matrix.rid }}
 
@@ -74,6 +86,7 @@ jobs:
 
       - name: Compute version
         id: version
+        if: ${{ (steps.changes.outputs.tui2 == 'true' && steps.changes.outputs.gui == 'true') || startsWith(github.ref, 'refs/heads/release/') }}
         run: |
           VERSION_TUI2=$(nbgv get-version -p src/Leviathan.TUI2 -v NuGetPackageVersion)
           VERSION_GUI=$(nbgv get-version -p src/Leviathan.GUI -v NuGetPackageVersion)
