@@ -90,3 +90,97 @@ Color values support common formats such as:
 - Start from a built-in theme and **Duplicate** before customizing.
 - Keep IDs simple (letters, digits, `-`) for portability.
 - Export themes before large edits if you want easy rollback points.
+
+---
+
+## Creating a theme from scratch
+
+You can write a theme JSON file by hand without opening Leviathan at all.
+
+### Minimal example
+
+```json
+{
+  "id": "my-theme",
+  "name": "My Theme",
+  "base": "dark",
+  "colors": {
+    "textPrimary":          "#E8E8E8",
+    "textSecondary":        "#A0A8B0",
+    "textMuted":            "#606878",
+    "background":           "#1E1E2E",
+    "selectionHighlight":   "#3A3A5A",
+    "cursorHighlight":      "#505070",
+    "cursorBar":            "#7070FF",
+    "gridLine":             "#2E2E3E",
+    "headerBackground":     "#252535",
+    "headerText":           "#C8C8D8",
+    "gutterBackground":     "#1A1A2A",
+    "matchHighlight":       "#5A4000",
+    "activeMatchHighlight": "#B07800",
+    "rowStripe":            "#00000010",
+    "columnStripe":         "#FFFFFF08"
+  }
+}
+```
+
+### Color slot reference
+
+| Key | Purpose |
+|---|---|
+| `textPrimary` | Main content text (hex bytes, text characters) |
+| `textSecondary` | Address / offset column text |
+| `textMuted` | ASCII panel, decorators, dimmed labels |
+| `background` | View background fill |
+| `selectionHighlight` | Selected byte / character range background |
+| `cursorHighlight` | Cursor cell / character background |
+| `cursorBar` | Thin cursor-line left-edge indicator |
+| `gridLine` | Hex grid separator lines |
+| `headerBackground` | Column header row background |
+| `headerText` | Column header text |
+| `gutterBackground` | Line number gutter background |
+| `matchHighlight` | Non-focused search match background |
+| `activeMatchHighlight` | Currently focused search match background |
+| `rowStripe` | Alternating even-row tint (use low-alpha for subtlety) |
+| `columnStripe` | Alternating even-column tint (use low-alpha for subtlety) |
+
+### Color value formats
+
+All color values are strings. Supported formats:
+
+| Format | Example | Notes |
+|---|---|---|
+| `#RRGGBB` | `#1E1E2E` | Fully opaque |
+| `#AARRGGBB` | `#801E1E2E` | Alpha in the first byte |
+| `rgba(r,g,b,a)` | `rgba(30,30,46,0.5)` | Alpha 0.0–1.0 |
+
+### `base` field
+
+Set `"base"` to `"dark"` or `"light"`. This tells the theme engine which built-in fallback palette to use for any color slot that is invalid or missing. It also controls the Avalonia window chrome (title bar, scroll bars) on platforms that respect the OS theme variant.
+
+### `id` field
+
+Must be unique across all loaded themes. Use only letters, digits, and `-`. Leviathan auto-adjusts IDs on import if there is a conflict.
+
+---
+
+## Installing a theme manually
+
+If you just want to drop a theme file into Leviathan without using the import dialog:
+
+1. Locate the folder that contains `Leviathan.GUI.exe` (or `Leviathan.GUI` on Linux/macOS).
+2. Create a `themes` sub-folder next to the executable if it doesn't exist yet.
+3. Copy your `.json` file into that folder.
+4. Restart Leviathan (or use **Theme → Import Theme...** to load it without restarting).
+
+The file name does not matter — Leviathan identifies themes by the `id` field inside the JSON.
+
+**Example layout:**
+
+```
+C:\Apps\Leviathan\
+├── Leviathan.GUI.exe
+└── themes\
+    ├── my-theme.json
+    └── colleague-theme.json
+```

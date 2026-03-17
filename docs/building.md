@@ -29,21 +29,14 @@ dotnet test tests/Leviathan.Core.Tests/ --filter "FullyQualifiedName~PieceTreeTe
 
 ## Run the Frontends
 
-### TUI2 (Terminal.Gui — recommended)
+### GUI (Avalonia desktop)
 
 ```powershell
-dotnet run --project src/Leviathan.TUI2
-dotnet run --project src/Leviathan.TUI2 -- path/to/file
+dotnet run --project src/Leviathan.GUI
+dotnet run --project src/Leviathan.GUI -- path/to/file
 ```
 
-### GUI (ImGui/OpenGL)
-
-```powershell
-dotnet run --project src/Leviathan.UI
-dotnet run --project src/Leviathan.UI -- path/to/file
-```
-
-### TUI (original, Hex1b-based)
+### TUI2 (Terminal.Gui — recommended terminal UI)
 
 ```powershell
 dotnet run --project src/Leviathan.TUI
@@ -80,28 +73,44 @@ The project uses GitHub Actions for continuous integration and releases:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | Push to any branch, PRs to main | Builds solution + runs Core/TUI/GUI tests |
-| `prerelease.yml` | Push to non-`main` branches | Builds TUI2 + GUI for win-x64/linux-x64 and creates rolling branch pre-release |
-| `release.yml` | Push of `v*` tag | Builds TUI2 + GUI for win-x64/linux-x64 and creates official GitHub Release |
+| `prerelease.yml` | Push to non-`main` branches | Builds TUI2 + GUI for win-x64/linux-x64 and creates rolling branch pre-releases |
+| `release-tui2.yml` | Push of `tui2/v*` tag | Builds TUI2 for win-x64/linux-x64 and creates official TUI2 GitHub Release |
+| `release-gui.yml` | Push of `gui/v*` tag | Builds GUI for win-x64/linux-x64 and creates official GUI GitHub Release |
 
 Versioning is managed by [Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning)
 in both `src/Leviathan.TUI2` and `src/Leviathan.GUI`.
 
-**To create an official release:**
+**To create an official release**, use the coordinated release script:
 
 ```bash
-git tag v0.1.0
-git push --tags
+# Release TUI2 only
+./scripts/release-coordinated.sh --tui2 0.2.2
+
+# Release GUI only
+./scripts/release-coordinated.sh --gui 0.4.1
+
+# Release both at the same time
+./scripts/release-coordinated.sh --tui2 0.2.2 --gui 0.4.1
 ```
+
+Or in PowerShell:
+
+```powershell
+.\scripts\release-coordinated.ps1 -GuiVersion 0.4.1
+.\scripts\release-coordinated.ps1 -Tui2Version 0.2.2 -GuiVersion 0.4.1
+```
+
+The scripts bump `version.json`, commit, create the product-scoped tag (`tui2/vX.Y.Z` or `gui/vX.Y.Z`), and push. See **[Release Process](release.md)** for details.
 
 ## Project Structure
 
 | Project | Type | AOT | Description |
 |---|---|---|---|
 | `src/Leviathan.Core` | Library | Compatible | Headless data engine |
-| `src/Leviathan.TUI2` | Exe | ✅ | Terminal UI (Terminal.Gui) |
 | `src/Leviathan.GUI` | Exe | ✅ | Avalonia desktop frontend |
-| `src/Leviathan.UI` | Exe | ✅ | ImGui/OpenGL frontend |
-| `src/Leviathan.TUI` | Exe | ✅ | Terminal UI (Hex1b) |
+| `src/Leviathan.TUI2` | Exe | ✅ | Terminal UI (Terminal.Gui) |
+| `src/Leviathan.UI` | Exe | ✅ | ImGui/OpenGL frontend (legacy) |
+| `src/Leviathan.TUI` | Exe | ✅ | Terminal UI (Hex1b, legacy) |
 | `tests/Leviathan.Core.Tests` | Test | — | xUnit tests for Core |
 | `tests/Leviathan.GUI.Tests` | Test | — | xUnit tests for GUI |
 | `tests/Leviathan.TUI.Tests` | Test | — | xUnit tests for TUI |

@@ -20,30 +20,42 @@ This document is a comprehensive technical reference for contributors and curiou
 - [CSV Engine](#csv-engine)
 - [Atomic Save](#atomic-save)
 - [Design Principles](#design-principles)
+- [GUI Front-end (Avalonia)](#gui-front-end-avalonia)
 
 ---
 
 ## System Overview
 
-The solution is split into four projects with a strict dependency rule: **Core knows nothing about UI**.
+The solution is split into five projects with a strict dependency rule: **Core knows nothing about UI**.
 
 | Project | Role | AOT | Framework |
 |---|---|---|---|
 | `Leviathan.Core` | Headless data engine — zero UI dependencies, zero NuGet dependencies | `IsAotCompatible` | — |
-| `Leviathan.UI` | Desktop GUI — OpenGL 3.3 + Dear ImGui | Trim-analyzed | Silk.NET + Hexa.NET.ImGui |
-| `Leviathan.TUI` | Terminal UI — raw ANSI escape codes | `PublishAot` | Hex1b |
+| `Leviathan.GUI` | Desktop GUI — Avalonia UI | `PublishAot` | Avalonia |
 | `Leviathan.TUI2` | Terminal UI — rich widget toolkit | `PublishAot` | Terminal.Gui v2 |
+| `Leviathan.TUI` | Terminal UI — raw ANSI escape codes | `PublishAot` | Hex1b |
+| `Leviathan.UI` | Desktop GUI — OpenGL 3.3 + Dear ImGui (legacy) | Trim-analyzed | Silk.NET + Hexa.NET.ImGui |
 
-All three frontends reference `Leviathan.Core` and compose the same `Document` / `LineIndexer` / `SearchEngine` / `ITextDecoder` APIs. Each has its own composition root (`Program.cs` with top-level statements), settings persistence (`*-settings.json` with source-generated `JsonSerializerContext`), and view implementations.
+| Project | Role | AOT | Framework |
+|---|---|---|---|
+| `Leviathan.Core` | Headless data engine — zero UI dependencies, zero NuGet dependencies | `IsAotCompatible` | — |
+| `Leviathan.GUI` | Desktop GUI | `PublishAot` | Avalonia |
+| `Leviathan.TUI2` | Terminal UI — rich widget toolkit | `PublishAot` | Terminal.Gui v2 |
+| `Leviathan.TUI` | Terminal UI — raw ANSI escape codes | `PublishAot` | Hex1b |
+| `Leviathan.UI` | Desktop GUI (legacy) | Trim-analyzed | Silk.NET + Hexa.NET.ImGui |
+
+All frontends reference `Leviathan.Core` and compose the same `Document` / `LineIndexer` / `SearchEngine` / `ITextDecoder` APIs. Each has its own composition root (`Program.cs` with top-level statements), settings persistence (`*-settings.json` with source-generated `JsonSerializerContext`), and view implementations.
 
 ```mermaid
 graph TD
     Core["Leviathan.Core<br/><i>Headless data engine</i>"]
 
-    UI["Leviathan.UI<br/><i>Silk.NET + ImGui</i><br/>Hex · Text"]
+    GUI["Leviathan.GUI<br/><i>Avalonia</i><br/>Hex · Text · CSV"]
+    UI["Leviathan.UI<br/><i>Silk.NET + ImGui (legacy)</i><br/>Hex · Text"]
     TUI["Leviathan.TUI<br/><i>Hex1b</i><br/>Hex · Text"]
     TUI2["Leviathan.TUI2<br/><i>Terminal.Gui v2</i><br/>Hex · Text · CSV"]
 
+    GUI --> Core
     UI --> Core
     TUI --> Core
     TUI2 --> Core
@@ -52,7 +64,8 @@ graph TD
     Tests --> Core
 
     style Core fill:#2d6a4f,stroke:#1b4332,color:#fff
-    style UI fill:#264653,stroke:#1d3557,color:#fff
+    style GUI fill:#1a4a7a,stroke:#0d2d4f,color:#fff
+    style UI fill:#264653,stroke:#1d3557,color:#aaa
     style TUI fill:#264653,stroke:#1d3557,color:#fff
     style TUI2 fill:#264653,stroke:#1d3557,color:#fff
     style Tests fill:#6c757d,stroke:#495057,color:#fff
@@ -735,3 +748,100 @@ Every class in Leviathan is `sealed`. There are no inheritance hierarchies. Poly
 - No `dynamic` or `Activator.CreateInstance`.
 - All JSON serialization uses **source-generated** `JsonSerializerContext` (e.g., `SettingsJsonContext`, `TuiSettingsContext`).
 - `rd.xml` TrimmerRootDescriptors preserve types from linker trimming where needed.
+
+---
+
+## GUI Front-end (Avalonia)
+
+`Leviathan.GUI` is the primary desktop front-end. It is built with [Avalonia UI](https://avaloniaui.net/) — a cross-platform, open-source .NET UI framework backed by SkiaSharp for rendering, with a XAML + code-behind model that feels at home to any WPF developer while running on Windows, macOS, and Linux.
+
+### Why Avalonia
+
+Avalonia was chosen over the original ImGui/OpenGL prototype (`Leviathan.UI`) because it provides:
+
+- **Native-looking controls** — menus, dialogs, file pickers, scroll bars, and fonts that integrate with the OS
+- **Accessibility and keyboard navigation** out of the box
+- **Retained-mode layout** — the framework handles resizing, HiDPI scaling, and OS theme variants (Dark/Light) automatically
+- **AOT-publishable** — `Leviathan.GUI` publishes as a Native AOT single-file executable with `PublishAot = true`
+- **Full color picker** — Avalonia ships a `ColorPicker` control used by the theme editor
+
+The custom hex/text/CSV views inside Avalonia are still written as low-level `Control` subclasses that paint directly onto a `DrawingContext`, so the zero-allocation principle applies to the drawing path.
+
+### Composition
+
+```
+Leviathan.GUI/
+├── Program.cs              # Top-level composition root
+├── App.axaml / .cs         # Application class; applies persisted color theme at startup
+├── AppState.cs             # Shared mutable state: Document, ViewMode, search, scroll, settings
+├── GuiSettings.cs          # Persisted settings (gui-settings.json); source-generated JSON context
+├── Views/
+│   ├── MainWindow.axaml    # Window shell: menu bar, status bar, view host
+│   ├── HexViewControl.cs   # Custom Avalonia control — hex editor
+│   ├── TextViewControl.cs  # Custom Avalonia control — text editor
+│   └── CsvViewControl.cs   # Custom Avalonia control — CSV grid
+├── Widgets/
+│   ├── CommandPaletteOverlay  # Fuzzy-filtered command launcher, recently-used section
+│   ├── FindBar                # Text/hex/regex search bar with streaming highlights
+│   ├── GotoBar                # Jump to offset or line number
+│   ├── ThemeEditorDialog      # Full theme editor window
+│   ├── WelcomeScreen          # MRU + pinned files start page
+│   ├── CsvDetailPanel         # Field list for the selected CSV row
+│   ├── CsvSettingsDialog      # Dialect settings
+│   └── ColumnVisibilityDialog # Show/hide CSV columns
+└── Helpers/
+    ├── ColorTheme.cs          # Runtime theme engine (15 color slots, 3 built-ins, JSON I/O)
+    ├── ViewTheme.cs           # Resolves ColorTheme to Avalonia IBrush / IPen properties
+    ├── EditableThemeModel.cs  # Form-binding model for the theme editor
+    ├── ThemeEditorLivePreviewSession.cs  # Preview / Commit / Revert lifecycle
+    ├── UserThemeFileOperations.cs        # Load / save / import / export / delete user themes
+    └── ...                    # HexFormatter, HitTestHelper, ScrollMapping, SearchHighlightHelper, ViewAnchorSync
+```
+
+`AppState` is the single source of truth passed by reference to every view and widget. `MainWindow` is the composition root that wires menu events, timers, drag-and-drop, and keyboard shortcuts; it does not contain business logic.
+
+### Theme System
+
+The theme system is a first-class feature. `ColorTheme` defines **15 named color slots**:
+
+| Key | Used for |
+|---|---|
+| `textPrimary` | Main content text |
+| `textSecondary` | Address / offset columns |
+| `textMuted` | Decorators, ASCII side panel |
+| `background` | View background |
+| `selectionHighlight` | Selected byte / text range background |
+| `cursorHighlight` | Cursor cell / character background |
+| `cursorBar` | Thin cursor-line indicator |
+| `gridLine` | Hex grid separator lines |
+| `headerBackground` | Column header row background |
+| `headerText` | Column header text |
+| `gutterBackground` | Line number gutter background |
+| `matchHighlight` | Search match background |
+| `activeMatchHighlight` | Current (focused) search match background |
+| `rowStripe` | Alternating row stripe tint |
+| `columnStripe` | Alternating column stripe tint |
+
+Three themes ship built-in: **Dark**, **Light**, and **GreenPhosphor**. Built-ins are immutable; the user creates customisations via **Duplicate**.
+
+`ThemeEditorLivePreviewSession` manages the three-phase lifecycle of theme editing:
+1. **Preview** — apply without persisting; sets `HasUncommittedPreview = true`
+2. **Commit (Apply)** — new revert baseline, session-only
+3. **Commit (Save)** — writes `.json` to the `themes/` folder, persists as selected theme
+4. **Revert** — called on Cancel/Esc; restores the last committed theme
+
+### Linked View Tabs and Viewport Sync
+
+`MainWindow` hosts Hex, Text, and CSV tabs for the same open document. Switching tabs preserves the reading position via `ViewAnchorSync.MapAnchor`:
+
+- The source view exports a **logical byte offset** for its top-visible line.
+- The target view maps that offset to its own valid row range and scrolls to match.
+- This is pure static arithmetic — no Avalonia binding machinery, no heap allocations.
+
+### AOT Considerations
+
+`Leviathan.GUI` publishes with `PublishAot = true` and `InvariantGlobalization = true`. The AOT-relevant constraints:
+
+- All JSON (`GuiSettings`, `ThemeDto`) uses **source-generated** `JsonSerializerContext`.
+- No runtime `Activator.CreateInstance` or `dynamic`.
+- Avalonia's AOT support requires the `Avalonia.Generators` source generator to produce XAML backing fields at compile time — no reflection-based `FindControl<T>` in the hot path.

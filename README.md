@@ -1,4 +1,4 @@
-[![CI](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml) [![Pre-release](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml) [![Release workflow](https://github.com/lstefano71/Leviathan/actions/workflows/release.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/release.yml)
+[![CI](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml) [![Pre-release](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml) [![Release TUI2](https://github.com/lstefano71/Leviathan/actions/workflows/release-tui2.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/release-tui2.yml) [![Release GUI](https://github.com/lstefano71/Leviathan/actions/workflows/release-gui.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/release-gui.yml)
 
 # Leviathan
 
@@ -12,35 +12,51 @@ A native-AOT hex + text + CSV editor that opens **50 GB+ files in under 500 ms**
 - **Hex + Text + CSV views** — three viewing modes in one editor
 - **SIMD-accelerated line indexing** — AVX2/SSE2/NEON cascade scans at GB/s speeds
 - **Multi-encoding support** — UTF-8, UTF-16 LE, Windows-1252 with automatic detection
-- **Boyer-Moore-Horspool search** — fast pattern matching across the entire file, text and hex patterns
+- **Boyer-Moore-Horspool search** — fast pattern matching across the entire file, text and hex patterns, streaming results, regex and whole-word support
 - **Atomic save** — edits are never lost, even on crash during save
 - **Native AOT** — single-file executable, no runtime required
 - **Red-Black piece table** — O(log N) insert/delete at any position
+- **Full theme system** — built-in Dark / Light / GreenPhosphor themes, live theme editor, import/export JSON themes
+- **Undo / redo** — multi-level edit history
 
-## 🖥️ Leviathan TUI2
+## 🖥️ Front-ends
 
-**The recommended way to use Leviathan.** Built on [Terminal.Gui 2.x](https://github.com/gui-cs/Terminal.Gui), it runs in any modern terminal on Windows, macOS, and Linux.
+### Desktop GUI
 
-- **Three view modes** — Hex view (address/hex/ASCII columns, cursor navigation, editing, selection), Text view (encoding-aware, word wrap via `LineWrapEngine`, visual lines), CSV view (tabular grid, sticky header, cell cursor, row selection)
-- **Command Palette** (`Ctrl+P`) — VS Code-style fuzzy-filtered command launcher with categories and keyboard shortcuts
-- **Find Bar** — VS Code-style find: text search, case toggle `[Aa]`, hex pattern toggle `[Hx]`, match counter, prev/next navigation
-- **Go-to Bar** — jump to any offset or line number instantly
+- **Three view modes** — Hex (address/hex/ASCII, cursor, selection, copy-as-hex), Text (encoding-aware, word wrap), CSV (tabular grid, sticky header, column visibility)
+- **Command Palette** (`Ctrl+P`) — VS Code-style fuzzy launcher with recently-used section
+- **Find Bar** (`Ctrl+F`) — text/hex search, regex, whole-word, case toggle, streaming match highlights
+- **Theme Editor** — live-preview color editor with a built-in color picker, Duplicate-from-built-in workflow, import/export JSON themes
+- **Linked view tabs** — open the same file in Hex + Text side-by-side with synchronized scrolling
+- Drag-and-drop, MRU file list, font picker, interactive status bar
+
+### Terminal UI (TUI2)
+
+Built on [Terminal.Gui 2.x](https://github.com/gui-cs/Terminal.Gui) — runs in any modern terminal on Windows, macOS, and Linux.
+
+- **Three view modes** — Hex, Text, and CSV
+- **Command Palette**, **Find Bar**, **Go-to Bar**
 - **CSV tools** — dialect detection (comma/tab/semicolon/pipe), header detection, record detail dialog
 
 ## 📦 Quick Start
 
 ```bash
-# Run TUI2 (recommended)
+# Run the desktop GUI
+dotnet run --project src/Leviathan.GUI -- path/to/large-file
+
+# Or use the terminal UI (any modern terminal)
 dotnet run --project src/Leviathan.TUI2 -- path/to/large-file
 
-# Or publish a native AOT binary
-dotnet publish src/Leviathan.TUI2/Leviathan.TUI2.csproj -c Release -r win-x64
+# Publish a native AOT single-file binary
+dotnet publish src/Leviathan.GUI/Leviathan.GUI.csproj -c Release -r win-x64
 ```
 
 ## 📖 Documentation
 
 - **[Build & Install](docs/building.md)** — prerequisites, build, test, publish AOT binaries
-- **[Architecture Deep-Dive](docs/architecture.md)** — data pipeline, PieceTree, SIMD indexing, search engine, encoding detection
+- **[Architecture Deep-Dive](docs/architecture.md)** — data pipeline, PieceTree, SIMD indexing, search engine, encoding detection, GUI front-end architecture
+- **[Theme Guide](docs/themes.md)** — creating, editing, and installing themes
+- **[Keyboard Shortcuts & Help](docs/help.md)** — full feature reference for the desktop GUI
 - **[Releases](https://github.com/lstefano71/Leviathan/releases)** — download pre-built binaries
 
 ## 🏗️ Architecture at a Glance
@@ -53,9 +69,9 @@ See **[Architecture Deep-Dive](docs/architecture.md)** for the full technical br
 
 | Frontend | Stack | Status | Description |
 |----------|-------|--------|-------------|
-| **TUI2** | Terminal.Gui 2.x | ✅ Primary | Full-featured terminal UI with hex/text/CSV views, command palette, find bar |
-| GUI | ImGui + OpenGL | Functional | Immediate-mode desktop GUI via Silk.NET |
-| TUI | Hex1b | Original | Minimal ANSI-based terminal UI |
+| **GUI** | Desktop GUI | ✅ Primary | Full-featured desktop editor: hex/text/CSV views, theme editor, command palette, find bar, linked tabs |
+| **TUI2** | Terminal.Gui 2.x | ✅ Terminal | Full-featured terminal UI: hex/text/CSV views, command palette, find bar |
+| TUI | Hex1b | Legacy | Minimal ANSI-based terminal UI |
 
 ## Contributing
 
