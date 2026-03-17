@@ -31,4 +31,5 @@
       <Platform Solution="*|x64" Project="x64" />
     </Project>
   </Folder>
+  <Project Path="BenchmarkSuite1/BenchmarkSuite1.csproj" />
 </Solution>

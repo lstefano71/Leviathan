@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
 
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Leviathan.GUI.Views;
@@ -29,6 +30,21 @@ internal sealed class HexViewControl : Control
     internal Avalonia.Controls.Primitives.ScrollBar? ScrollBar { get; set; }
     private bool _updatingScroll;
     private bool _scrollUpdateQueued;
+
+    private Typeface? _cacheTypeface;
+    private double _cacheFontSize;
+    private IBrush? _cacheTextBrush;
+    private IBrush? _cacheAsciiBrush;
+    private IBrush? _cacheHeaderBrush;
+    private IBrush? _cacheAddressBrush;
+    private FormattedText[]? _hexByteTextCache;
+    private FormattedText[]? _asciiByteTextCache;
+    private FormattedText[]? _headerHexTextCache;
+    private FormattedText[]? _headerAsciiTextCache;
+    private readonly Dictionary<long, FormattedText> _addressTextCache = [];
+    private bool _addressCacheDecimal;
+    private int _addressCacheDigits;
+    private double _cachedCharWidth;
 
     /// <summary>Lookup table for zero-alloc byte-to-hex conversion.</summary>
     private static ReadOnlySpan<byte> HexChars => "0123456789ABCDEF"u8;
@@ -104,7 +120,20 @@ internal sealed class HexViewControl : Control
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
 
-        double charWidth = MeasureCharWidth();
+        IBrush textBrush = theme.TextPrimary;
+        IBrush addressBrush = theme.TextSecondary;
+        IBrush asciiBrush = theme.TextMuted;
+        IBrush selectionBrush = theme.SelectionHighlight;
+        IBrush cursorBrush = theme.CursorHighlight;
+        IBrush matchBrush = theme.MatchHighlight;
+        IBrush activeMatchBrush = theme.ActiveMatchHighlight;
+
+        // ── Fixed column header ──────────────────────────────────────
+        IBrush headerBgBrush = theme.HeaderBackground;
+        IBrush headerTextBrush = theme.HeaderText;
+
+        EnsureTextCaches(textBrush, asciiBrush, headerTextBrush, addressBrush);
+        double charWidth = MeasureCharWidth(headerTextBrush);
 
         // Auto-fit bytes per row when setting is 0 (Auto)
         if (_state.BytesPerRowSetting == 0) {
@@ -147,10 +176,6 @@ internal sealed class HexViewControl : Control
         // ASCII column
         double asciiX = separatorX + 3 * charWidth;
 
-        // ── Fixed column header ──────────────────────────────────────
-        IBrush headerBgBrush = theme.HeaderBackground;
-        IBrush headerTextBrush = theme.HeaderText;
-
         context.FillRectangle(headerBgBrush, new Rect(0, 0, bounds.Width, headerHeight));
 
         // "Offset" label in address column
@@ -166,22 +191,14 @@ internal sealed class HexViewControl : Control
             int groupSep = col / 8;
             double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
 
-            char hi = (char)HexChars[col >> 4];
-            char lo = (char)HexChars[col & 0xF];
-            string label = new([hi, lo]);
-
-            FormattedText headerHex = new(label, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            FormattedText headerHex = _headerHexTextCache![col & 0xFF];
             context.DrawText(headerHex, new Point(hexX, 0));
         }
 
         // ASCII column offsets: 0123456789ABCDEF (single char per column)
         for (int col = 0; col < bytesPerRow; col++) {
             double ax = asciiX + col * charWidth;
-            char label = (char)HexChars[col & 0xF];
-
-            FormattedText headerAscii = new(label.ToString(), System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            FormattedText headerAscii = _headerAsciiTextCache![col & 0xF];
             context.DrawText(headerAscii, new Point(ax, 0));
         }
 
@@ -209,13 +226,6 @@ internal sealed class HexViewControl : Control
         long selStart = _state.HexSelStart;
         long selEnd = _state.HexSelEnd;
 
-        IBrush textBrush = theme.TextPrimary;
-        IBrush addressBrush = theme.TextSecondary;
-        IBrush asciiBrush = theme.TextMuted;
-        IBrush selectionBrush = theme.SelectionHighlight;
-        IBrush cursorBrush = theme.CursorHighlight;
-        IBrush matchBrush = theme.MatchHighlight;
-        IBrush activeMatchBrush = theme.ActiveMatchHighlight;
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
 
@@ -233,11 +243,7 @@ internal sealed class HexViewControl : Control
 
             // Address column
             if (gutterVisible) {
-                string address = decimalOffset
-                    ? rowOffset.ToString().PadLeft(addressDigits)
-                    : (addressDigits == 16 ? rowOffset.ToString("X16") : rowOffset.ToString("X8"));
-                FormattedText addressText = new(address, System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, addressBrush);
+                FormattedText addressText = GetAddressText(rowOffset, decimalOffset, addressDigits, addressBrush);
                 context.DrawText(addressText, new Point(charWidth, y));
             }
 
@@ -278,12 +284,7 @@ internal sealed class HexViewControl : Control
                         new Rect(hexX, y, charWidth * 2, lineHeight));
                 }
 
-                char hi = (char)HexChars[b >> 4];
-                char lo = (char)HexChars[b & 0xF];
-                string hexPair = new([hi, lo]);
-
-                FormattedText hexText = new(hexPair, System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
+                FormattedText hexText = _hexByteTextCache![b];
                 context.DrawText(hexText, new Point(hexX, y));
             }
 
@@ -302,9 +303,7 @@ internal sealed class HexViewControl : Control
                         new Rect(ax, y, charWidth, lineHeight));
                 }
 
-                char ch = b >= 0x20 && b < 0x7F ? (char)b : '.';
-                FormattedText asciiText = new(ch.ToString(), System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, asciiBrush);
+                FormattedText asciiText = _asciiByteTextCache![b];
                 context.DrawText(asciiText, new Point(ax, y));
             }
         }
@@ -313,11 +312,95 @@ internal sealed class HexViewControl : Control
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private double MeasureCharWidth()
+    private double MeasureCharWidth(IBrush brush)
     {
+        if (_cachedCharWidth > 0)
+            return _cachedCharWidth;
+
         FormattedText measurement = new("0", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, Brushes.White);
-        return measurement.Width;
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, brush);
+        _cachedCharWidth = measurement.Width;
+        return _cachedCharWidth;
+    }
+
+    private void EnsureTextCaches(IBrush textBrush, IBrush asciiBrush, IBrush headerBrush, IBrush addressBrush)
+    {
+        if (_hexByteTextCache is not null
+            && _asciiByteTextCache is not null
+            && _headerHexTextCache is not null
+            && _headerAsciiTextCache is not null
+            && Equals(_cacheTypeface, _state.ContentTypeface)
+            && _cacheFontSize.Equals(_state.ContentFontSize)
+            && ReferenceEquals(_cacheTextBrush, textBrush)
+            && ReferenceEquals(_cacheAsciiBrush, asciiBrush)
+            && ReferenceEquals(_cacheHeaderBrush, headerBrush)
+            && ReferenceEquals(_cacheAddressBrush, addressBrush)) {
+            return;
+        }
+
+        _cacheTypeface = _state.ContentTypeface;
+        _cacheFontSize = _state.ContentFontSize;
+        _cacheTextBrush = textBrush;
+        _cacheAsciiBrush = asciiBrush;
+        _cacheHeaderBrush = headerBrush;
+        _cacheAddressBrush = addressBrush;
+        _cachedCharWidth = 0;
+        _addressTextCache.Clear();
+
+        _hexByteTextCache = new FormattedText[256];
+        _asciiByteTextCache = new FormattedText[256];
+        for (int i = 0; i < 256; i++) {
+            char hi = (char)HexChars[i >> 4];
+            char lo = (char)HexChars[i & 0xF];
+            string hexPair = new([hi, lo]);
+            _hexByteTextCache[i] = new FormattedText(hexPair, System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
+
+            char ch = i >= 0x20 && i < 0x7F ? (char)i : '.';
+            _asciiByteTextCache[i] = new FormattedText(ch.ToString(), System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, asciiBrush);
+        }
+
+        _headerHexTextCache = new FormattedText[256];
+        for (int i = 0; i < 256; i++) {
+            char hi = (char)HexChars[i >> 4];
+            char lo = (char)HexChars[i & 0xF];
+            string label = new([hi, lo]);
+            _headerHexTextCache[i] = new FormattedText(label, System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerBrush);
+        }
+
+        _headerAsciiTextCache = new FormattedText[16];
+        for (int i = 0; i < 16; i++) {
+            char label = (char)HexChars[i];
+            _headerAsciiTextCache[i] = new FormattedText(label.ToString(), System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerBrush);
+        }
+    }
+
+    private FormattedText GetAddressText(long rowOffset, bool decimalOffset, int addressDigits, IBrush addressBrush)
+    {
+        if (_addressCacheDecimal != decimalOffset || _addressCacheDigits != addressDigits) {
+            _addressCacheDecimal = decimalOffset;
+            _addressCacheDigits = addressDigits;
+            _addressTextCache.Clear();
+        }
+
+        if (_addressTextCache.TryGetValue(rowOffset, out FormattedText? cached))
+            return cached;
+
+        string address = decimalOffset
+            ? rowOffset.ToString().PadLeft(addressDigits)
+            : HexFormatter.FormatOffset(rowOffset, addressDigits);
+
+        FormattedText created = new(address, System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, addressBrush);
+
+        _addressTextCache[rowOffset] = created;
+        if (_addressTextCache.Count > Math.Max(256, _state.VisibleRows * 8))
+            _addressTextCache.Clear();
+
+        return created;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -469,7 +552,7 @@ internal sealed class HexViewControl : Control
 
     private long HitTest(Point point)
     {
-        double charWidth = MeasureCharWidth();
+        double charWidth = MeasureCharWidth(_theme.HeaderText);
         double lineHeight = _state.ContentFontSize + LinePadding;
         double headerHeight = lineHeight;
         int bytesPerRow = _state.BytesPerRow;
