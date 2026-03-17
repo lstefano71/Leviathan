@@ -1,31 +1,69 @@
 # Release process
 
-This repository contains multiple products built from the same source tree: `Leviathan.GUI` and `Leviathan.TUI2`, which both depend on `Leviathan.Core`.
+This repository builds two independent products from the same source tree — `Leviathan.TUI2` and `Leviathan.GUI` — both backed by `Leviathan.Core`.
 
-Summary:
-- CI runs are scoped by path so unrelated changes (docs, etc.) don't trigger expensive builds.
-- `GUI` and `TUI2` can be released independently. A coordinated release script is provided for simultaneous releases.
+## Independent release cycles
 
-When CI runs
-- The main CI (`.github/workflows/ci.yml`) runs only when files under `src/**` or `tests/**` change.
-- The pre-release workflow (`.github/workflows/prerelease.yml`) still builds artifacts, but the version-parity check only runs when both `GUI` and `TUI2` are changed in the same push/PR, or when a `release/*` branch is used.
-- The release workflow (`.github/workflows/release.yml`) runs on tag pushes (`v*`) and publishes artifacts for both products.
+Each product has its own version number in its `version.json` and its own release tag namespace:
 
-Coordinated release
-- Use the provided scripts to bump both `version.json` files and create a `vX.Y.Z` tag.
+| Product | `version.json` | Tag namespace | Workflow |
+|---|---|---|---|
+| TUI2 | `src/Leviathan.TUI2/version.json` | `tui2/v*` | `release-tui2.yml` |
+| GUI  | `src/Leviathan.GUI/version.json`  | `gui/v*`  | `release-gui.yml`  |
 
-POSIX:
+Pushing a `tui2/v*` tag triggers **only** the TUI2 release workflow. Pushing a `gui/v*` tag triggers **only** the GUI release workflow. The two products can be released at completely different cadences.
+
+[Nerdbank.GitVersioning](https://github.com/dotnet/Nerdbank.GitVersioning) computes each product's version from its `version.json` plus the number of commits since the last tag in its own namespace. Bumping and tagging one product has zero effect on the other's commit height.
+
+## Releasing
+
+Use the release script, which bumps `version.json`, commits, creates the product-scoped tag, and pushes:
+
+**POSIX:**
+```bash
+# TUI2 only
+./scripts/release-coordinated.sh --tui2 0.2.2
+
+# GUI only
+./scripts/release-coordinated.sh --gui 0.4.0
+
+# Both at once (coordinated release)
+./scripts/release-coordinated.sh --tui2 0.2.2 --gui 0.4.0
+
+# Preview without committing
+./scripts/release-coordinated.sh --tui2 0.2.2 --dry-run
 ```
-./scripts/release-coordinated.sh 0.3.2
+
+**PowerShell:**
+```powershell
+# TUI2 only
+.\scripts\release-coordinated.ps1 -Tui2Version 0.2.2
+
+# GUI only
+.\scripts\release-coordinated.ps1 -GuiVersion 0.4.0
+
+# Both at once
+.\scripts\release-coordinated.ps1 -Tui2Version 0.2.2 -GuiVersion 0.4.0
+
+# Preview without committing
+.\scripts\release-coordinated.ps1 -Tui2Version 0.2.2 -DryRun
+
+# Sign tags with GPG
+.\scripts\release-coordinated.ps1 -Tui2Version 0.2.2 -Sign
 ```
 
-PowerShell:
-```
-.\scripts\release-coordinated.ps1 -Version 0.3.2
+Or manually, if you prefer:
+```bash
+# Edit src/Leviathan.TUI2/version.json, bump "version" field, then:
+git add src/Leviathan.TUI2/version.json
+git commit -m "Bump tui2 to 0.2.2"
+git tag -a tui2/v0.2.2 -m "Release tui2/v0.2.2"
+git push origin --follow-tags
 ```
 
-Use `--dry-run` (POSIX) or `-DryRun` (PowerShell) to preview file updates without committing.
+## When CI runs
 
-Notes
-- Coordinated releases create a tag `vX.Y.Z` which triggers the `release.yml` workflow to build and publish artifacts.
-- If you prefer to release only one product, bump that product's `version.json` manually and open a PR; parity checks will not block unless both products were changed.
+- **`ci.yml`** — runs on every push to `main` and on PRs when files under `src/**` or `tests/**` change.
+- **`prerelease.yml`** — runs on every non-`main` branch push; builds both products and creates per-product rolling pre-release entries (`pre-<branch>-tui2`, `pre-<branch>-gui`).
+- **`release-tui2.yml`** — runs on `tui2/v*` tag pushes; builds a production TUI2 release.
+- **`release-gui.yml`** — runs on `gui/v*` tag pushes; builds a production GUI release.

@@ -1,0 +1,116 @@
+name: Release GUI
+
+on:
+  push:
+    tags: ["gui/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            artifact: leviathan-gui-win-x64
+            publish_path: src/Leviathan.GUI/bin/Release/net10.0/win-x64/publish/
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: leviathan-gui-linux-x64
+            publish_path: src/Leviathan.GUI/bin/Release/net10.0/linux-x64/publish/
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish AOT
+        run: dotnet publish src/Leviathan.GUI/Leviathan.GUI.csproj -c Release -r ${{ matrix.rid }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.publish_path }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install NBGV
+        run: dotnet tool update --global nbgv
+
+      - name: Compute version
+        id: version
+        run: |
+          VERSION=$(nbgv get-version -p src/Leviathan.GUI -v NuGetPackageVersion)
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Package archives
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          tar -czf "dist/leviathan-gui_${VERSION}_linux-x64.tar.gz" \
+            -C artifacts/leviathan-gui-linux-x64 .
+          (cd artifacts/leviathan-gui-win-x64 && zip -q "../../dist/leviathan-gui_${VERSION}_win-x64.zip" .)
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+
+      - name: Build highlights
+        id: highlights
+        run: |
+          set -e
+          PREV_TAG=$(git tag --sort=-creatordate | grep "^gui/v" | grep -v "^${GITHUB_REF_NAME}$" | head -n 1)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+          else
+            RANGE="${GITHUB_REF_NAME}"
+          fi
+          HIGHLIGHTS=$(git log --no-merges --pretty=format:'- %s' "$RANGE" | head -n 8)
+          if [ -z "$HIGHLIGHTS" ]; then
+            HIGHLIGHTS="- No notable commit messages found."
+          fi
+          {
+            echo "notes<<EOF"
+            echo "## Highlights"
+            echo
+            echo "$HIGHLIGHTS"
+            echo
+            echo "_Detailed categorized notes follow below._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          NOTES="${{ steps.highlights.outputs.notes }}
+
+          - GUI: ${VERSION}"
+          gh release create "$TAG" \
+            --title "GUI ${TAG}" \
+            --notes "$NOTES" \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt
