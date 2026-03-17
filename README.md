@@ -1,4 +1,4 @@
-[![CI](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/lstefano71/Leviathan?style=flat-square)](https://github.com/lstefano71/Leviathan/releases/latest)
+[![CI](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/ci.yml) [![Pre-release](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/prerelease.yml) [![Release workflow](https://github.com/lstefano71/Leviathan/actions/workflows/release.yml/badge.svg)](https://github.com/lstefano71/Leviathan/actions/workflows/release.yml)
 
 # Leviathan
 

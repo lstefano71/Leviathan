@@ -86,61 +86,64 @@ jobs:
 
       - name: Compute version
         id: version
-        if: ${{ (steps.changes.outputs.tui2 == 'true' && steps.changes.outputs.gui == 'true') || startsWith(github.ref, 'refs/heads/release/') }}
         run: |
           VERSION_TUI2=$(nbgv get-version -p src/Leviathan.TUI2 -v NuGetPackageVersion)
           VERSION_GUI=$(nbgv get-version -p src/Leviathan.GUI -v NuGetPackageVersion)
-          if [ "$VERSION_TUI2" != "$VERSION_GUI" ]; then
-            echo "Version mismatch between TUI2 ($VERSION_TUI2) and GUI ($VERSION_GUI)" >&2
-            exit 1
-          fi
 
-          VERSION="$VERSION_TUI2"
           BRANCH="${GITHUB_REF_NAME}"
           SLUG=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
           SHORT_SHA="${GITHUB_SHA::7}"
 
-          TAG="pre-${SLUG}"
-          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"           >> "$GITHUB_OUTPUT"
-          echo "slug=$SLUG"         >> "$GITHUB_OUTPUT"
-          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          TAG_TUI2="pre-${SLUG}-tui2"
+          TAG_GUI="pre-${SLUG}-gui"
+
+          echo "version_tui2=$VERSION_TUI2" >> "$GITHUB_OUTPUT"
+          echo "version_gui=$VERSION_GUI"   >> "$GITHUB_OUTPUT"
+          echo "tag_tui2=$TAG_TUI2"         >> "$GITHUB_OUTPUT"
+          echo "tag_gui=$TAG_GUI"           >> "$GITHUB_OUTPUT"
+          echo "slug=$SLUG"                 >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA"       >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
           path: artifacts
 
-      - name: Package archives
+      - name: Package archives (per-product versions)
         run: |
           set -e
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_TUI2="${{ steps.version.outputs.version_tui2 }}"
+          VERSION_GUI="${{ steps.version.outputs.version_gui }}"
           mkdir -p dist
 
           for PRODUCT in tui2 gui; do
-            tar -czf "dist/leviathan-${PRODUCT}_${VERSION}_linux-x64.tar.gz" \
+            if [ "$PRODUCT" = "tui2" ]; then
+              V=$VERSION_TUI2
+            else
+              V=$VERSION_GUI
+            fi
+            tar -czf "dist/leviathan-${PRODUCT}_${V}_linux-x64.tar.gz" \
               -C "artifacts/leviathan-${PRODUCT}-linux-x64" .
-            (cd "artifacts/leviathan-${PRODUCT}-win-x64" && zip -q "../../dist/leviathan-${PRODUCT}_${VERSION}_win-x64.zip" *)
+            (cd "artifacts/leviathan-${PRODUCT}-win-x64" && zip -q "../../dist/leviathan-${PRODUCT}_${V}_win-x64.zip" *)
           done
 
           # Checksums
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
 
-      - name: Delete previous pre-release for this branch
+      - name: Delete previous pre-releases (per-product)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes --cleanup-tag
-          fi
+          for TAG in "${{ steps.version.outputs.tag_tui2 }}" "${{ steps.version.outputs.tag_gui }}"; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release delete "$TAG" --yes --cleanup-tag
+            fi
+          done
 
-      - name: Create pre-release
+      - name: Create pre-releases (per-product)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
           SLUG="${{ steps.version.outputs.slug }}"
           SHORT_SHA="${{ steps.version.outputs.short_sha }}"
           LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)"
@@ -154,23 +157,34 @@ jobs:
             COMMITS="(no commits since last tag)"
           fi
 
-          NOTES="## Pre-release from branch \`${GITHUB_REF_NAME}\`
+          # Create a release per product
+          for PRODUCT in tui2 gui; do
+            if [ "$PRODUCT" = "tui2" ]; then
+              TAG="${{ steps.version.outputs.tag_tui2 }}"
+              VERSION="${{ steps.version.outputs.version_tui2 }}"
+            else
+              TAG="${{ steps.version.outputs.tag_gui }}"
+              VERSION="${{ steps.version.outputs.version_gui }}"
+            fi
 
-          **Version:** \`${VERSION}\`
-          **Commit:** [\`${SHORT_SHA}\`](../../commit/${GITHUB_SHA})
-          **Assets:** TUI2 + GUI for win-x64 and linux-x64
+            NOTES="## Pre-release for ${PRODUCT} from branch \`${GITHUB_REF_NAME}\`
 
-          ### Highlights
-          ${HIGHLIGHTS}
+            **Version:** \`${VERSION}\`
+            **Commit:** [\`${SHORT_SHA}\`](../../commit/${GITHUB_SHA})
+            **Assets:** ${PRODUCT} for win-x64 and linux-x64
 
-          ### Commits since last release
-          ${COMMITS}
+            ### Highlights
+            ${HIGHLIGHTS}
 
-          ---
-          *This is an automated pre-release build. For stable releases, see the [latest release](../../releases/latest).*"
+            ### Commits since last release
+            ${COMMITS}
 
-          gh release create "$TAG" \
-            --title "Pre-release: ${SLUG} (${SHORT_SHA})" \
-            --notes "$NOTES" \
-            --prerelease \
-            dist/*.tar.gz dist/*.zip dist/checksums.txt
+            ---
+            *This is an automated pre-release build. For stable releases, see the [latest release](../../releases/latest).*"
+
+            gh release create "$TAG" \
+              --title "Pre-release: ${PRODUCT}/${SLUG} (${SHORT_SHA})" \
+              --notes "$NOTES" \
+              --prerelease \
+              dist/leviathan-${PRODUCT}_*.tar.gz dist/leviathan-${PRODUCT}_*.zip dist/checksums.txt
+          done
