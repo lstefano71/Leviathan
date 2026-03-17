@@ -60,4 +60,4 @@ Avalonia standard API: https://docs.avaloniaui.net/api/avalonia
 
 [x] avalonia front-end, csv view: what's the point of having in the status bar R x/n and then another fields with "rows: n"? One of them shows when it's approximate, the other doesn't. But apart from that... 
 
-[ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? The emphasis has now moved to the GUI front-end (no need to scare away the users by mentioning Avalonia).
+[x] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? The emphasis has now moved to the GUI front-end. No need to scare away the users by mentioning Avalonia on the front page. It's fine to extoll its virtues in the deep dives.

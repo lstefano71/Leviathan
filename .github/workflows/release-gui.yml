@@ -74,7 +74,7 @@ jobs:
           mkdir -p dist
           tar -czf "dist/leviathan-gui_${VERSION}_linux-x64.tar.gz" \
             -C artifacts/leviathan-gui-linux-x64 .
-          (cd artifacts/leviathan-gui-win-x64 && zip -q "../../dist/leviathan-gui_${VERSION}_win-x64.zip" .)
+          (cd artifacts/leviathan-gui-win-x64 && zip -qr "../../dist/leviathan-gui_${VERSION}_win-x64.zip" .)
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
 
       - name: Build highlights
