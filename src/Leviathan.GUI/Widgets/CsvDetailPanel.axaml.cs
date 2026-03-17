@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 
 using Leviathan.Core.Csv;
@@ -195,13 +196,37 @@ public sealed partial class CsvDetailPanel : UserControl
         else if (index % 2 == 0)
             bg = StripeBrush;
 
-        return new Border {
+        Border border = new() {
             Child = row,
             Padding = new Thickness(4, 2),
             CornerRadius = new CornerRadius(3),
             Background = bg,
             Tag = "field"
         };
+
+        // Context menu for copying field data
+        MenuItem copyFieldValue = new() { Header = "Copy Field Value" };
+        string capturedValue = isEmpty ? "" : value;
+        copyFieldValue.Click += async (_, _) => {
+            TopLevel? root = TopLevel.GetTopLevel(border);
+            if (root?.Clipboard is null) return;
+            await root.Clipboard.SetTextAsync(capturedValue);
+        };
+
+        MenuItem copyFieldName = new() { Header = "Copy Field Name" };
+        string capturedLabel = label;
+        copyFieldName.Click += async (_, _) => {
+            TopLevel? root = TopLevel.GetTopLevel(border);
+            if (root?.Clipboard is null) return;
+            await root.Clipboard.SetTextAsync(capturedLabel);
+        };
+
+        ContextMenu fieldMenu = new();
+        fieldMenu.Items.Add(copyFieldValue);
+        fieldMenu.Items.Add(copyFieldName);
+        border.ContextMenu = fieldMenu;
+
+        return border;
     }
 
     private void UpdateHighlight(int activeCol, AppState state)

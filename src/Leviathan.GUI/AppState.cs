@@ -2,6 +2,7 @@ using Avalonia.Media;
 
 using Leviathan.Core;
 using Leviathan.Core.Csv;
+using Leviathan.Core.DataModel;
 using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
@@ -134,6 +135,10 @@ public sealed class AppState
     // --- Settings ---
     public GuiSettings Settings { get; set; } = GuiSettings.Load();
 
+    // --- Bookmarks ---
+    /// <summary>Bookmarks for the currently open file.</summary>
+    public BookmarkCollection Bookmarks { get; set; } = new();
+
     // --- Theme & Font ---
     /// <summary>Active color theme used by all custom view controls.</summary>
     internal ColorTheme ActiveTheme { get; set; } = ColorTheme.Dark;
@@ -239,6 +244,9 @@ public sealed class AppState
 
         Settings.AddRecent(path);
 
+        // Load bookmarks for this file
+        BookmarkSerializer.Load(path, Bookmarks);
+
         ActiveView = DetermineDefaultView(path, sample, encoding);
         if (ActiveView == ViewMode.Csv) {
             InitCsvView();
@@ -284,6 +292,11 @@ public sealed class AppState
     /// </summary>
     public void CloseFile()
     {
+        // Save bookmarks before closing
+        if (CurrentFilePath is not null)
+            BookmarkSerializer.Save(CurrentFilePath, Bookmarks);
+        Bookmarks.Clear();
+
         CancelSearch();
         Indexer?.Dispose();
         Indexer = null;

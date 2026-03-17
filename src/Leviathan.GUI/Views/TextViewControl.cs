@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 
+using Leviathan.Core.DataModel;
 using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
@@ -20,6 +21,9 @@ namespace Leviathan.GUI.Views;
 internal sealed class TextViewControl : Control
 {
     private const double LinePadding = 2;
+
+    /// <summary>Distinctive marker color for bookmark indicators in the gutter.</summary>
+    private static readonly IBrush BookmarkMarkerBrush = new SolidColorBrush(Color.FromArgb(220, 255, 120, 50));
 
     private readonly AppState _state;
     private byte[] _readBuffer = new byte[131072]; // 128 KB initial, grows up to 16 MB
@@ -66,6 +70,61 @@ internal sealed class TextViewControl : Control
             _theme = _state.ActiveTheme;
             InvalidateVisual();
         };
+        BuildContextMenu();
+    }
+
+    /// <summary>Fired when the user requests Cut from the context menu.</summary>
+    internal Action? CutRequested;
+    /// <summary>Fired when the user requests Copy from the context menu.</summary>
+    internal Action? CopyRequested;
+    /// <summary>Fired when the user requests Paste from the context menu.</summary>
+    internal Action? PasteRequested;
+    /// <summary>Fired when the user requests Select All from the context menu.</summary>
+    internal Action? SelectAllRequested;
+
+    private void BuildContextMenu()
+    {
+        MenuItem cut = new() { Header = "Cut", InputGesture = new KeyGesture(Key.X, KeyModifiers.Control) };
+        cut.Click += (_, _) => CutRequested?.Invoke();
+
+        MenuItem copy = new() { Header = "Copy", InputGesture = new KeyGesture(Key.C, KeyModifiers.Control) };
+        copy.Click += (_, _) => CopyRequested?.Invoke();
+
+        MenuItem paste = new() { Header = "Paste", InputGesture = new KeyGesture(Key.V, KeyModifiers.Control) };
+        paste.Click += (_, _) => PasteRequested?.Invoke();
+
+        MenuItem selectAll = new() { Header = "Select All", InputGesture = new KeyGesture(Key.A, KeyModifiers.Control) };
+        selectAll.Click += (_, _) => SelectAllRequested?.Invoke();
+
+        MenuItem addBookmark = new() { Header = "Add Bookmark" };
+        addBookmark.Click += (_, _) => {
+            long offset = _state.TextCursorOffset;
+            if (offset >= 0) {
+                _state.Bookmarks.Toggle(offset);
+                InvalidateVisual();
+                StateChanged?.Invoke();
+            }
+        };
+
+        ContextMenu menu = new();
+        menu.Items.Add(cut);
+        menu.Items.Add(copy);
+        menu.Items.Add(paste);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(selectAll);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(addBookmark);
+        menu.Opening += (_, _) => {
+            bool hasSelection = _state.TextSelStart >= 0 && _state.TextSelEnd >= _state.TextSelStart;
+            cut.IsEnabled = hasSelection && !_state.IsReadOnly;
+            copy.IsEnabled = hasSelection;
+            paste.IsEnabled = !_state.IsReadOnly;
+
+            long offset = _state.TextCursorOffset;
+            bool hasBookmark = offset >= 0 && _state.Bookmarks.Contains(offset);
+            addBookmark.Header = hasBookmark ? "Remove Bookmark" : "Add Bookmark";
+        };
+        ContextMenu = menu;
     }
 
     /// <summary>
@@ -314,6 +373,21 @@ internal sealed class TextViewControl : Control
                     double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
                     context.DrawText(wrapText, new Point(wrapX, y));
                 }
+
+                // Bookmark marker: small circle in the gutter
+                long lineStart = vl.DocOffset;
+                long lineEnd = lineStart + vl.ByteLength - 1;
+                IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
+                for (int bi = 0; bi < bookmarks.Count; bi++) {
+                    long bmOff = bookmarks[bi].Offset;
+                    if (bmOff > lineEnd) break;
+                    if (bmOff >= lineStart) {
+                        double markerY = y + lineHeight / 2;
+                        context.DrawEllipse(BookmarkMarkerBrush, null,
+                            new Point(charWidth * 0.4, markerY), charWidth * 0.3, charWidth * 0.3);
+                        break;
+                    }
+                }
             }
 
             // Render text content
@@ -488,32 +562,40 @@ internal sealed class TextViewControl : Control
         switch (e.Key) {
             case Key.Right:
                 _desiredColumn = -1;
+                _state.Document?.BreakCoalescing();
                 newCursor = Math.Min(oldCursor + _state.Decoder.MinCharBytes, _state.FileLength);
                 newCursor = SkipCrLf(newCursor, 1);
                 break;
             case Key.Left:
                 _desiredColumn = -1;
+                _state.Document?.BreakCoalescing();
                 newCursor = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
                 newCursor = SkipCrLf(newCursor, -1);
                 break;
             case Key.Down:
+                _state.Document?.BreakCoalescing();
                 newCursor = MoveVerticalNoWrap(oldCursor, 1, 1);
                 break;
             case Key.Up:
+                _state.Document?.BreakCoalescing();
                 newCursor = MoveVerticalNoWrap(oldCursor, -1, 1);
                 break;
             case Key.PageDown:
+                _state.Document?.BreakCoalescing();
                 newCursor = MoveVerticalNoWrap(oldCursor, 1, Math.Max(1, _state.VisibleRows));
                 break;
             case Key.PageUp:
+                _state.Document?.BreakCoalescing();
                 newCursor = MoveVerticalNoWrap(oldCursor, -1, Math.Max(1, _state.VisibleRows));
                 break;
             case Key.Home:
                 _desiredColumn = -1;
+                _state.Document?.BreakCoalescing();
                 newCursor = ctrl ? _state.BomLength : FindLineStart(oldCursor);
                 break;
             case Key.End:
                 _desiredColumn = -1;
+                _state.Document?.BreakCoalescing();
                 if (ctrl) {
                     newCursor = _state.FileLength;
                     _alignViewportToEnd = true;
@@ -533,7 +615,7 @@ internal sealed class TextViewControl : Control
                 if (oldCursor > _state.BomLength) {
                     long deleteAt = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
                     long deleteLen = oldCursor - deleteAt;
-                    _state.Document.Delete(deleteAt, deleteLen);
+                    _state.Document.Delete(deleteAt, deleteLen, oldCursor);
                     newCursor = deleteAt;
                     _state.InvalidateSearchResults();
                 }
@@ -548,7 +630,7 @@ internal sealed class TextViewControl : Control
                     break;
                 }
                 if (oldCursor < _state.FileLength) {
-                    _state.Document.Delete(oldCursor, _state.Decoder.MinCharBytes);
+                    _state.Document.Delete(oldCursor, _state.Decoder.MinCharBytes, oldCursor);
                     _state.InvalidateSearchResults();
                 }
                 break;
@@ -556,7 +638,8 @@ internal sealed class TextViewControl : Control
                 _desiredColumn = -1;
                 if (_state.IsReadOnly)
                     break;
-                _state.Document.Insert(oldCursor, _state.Decoder.EncodeString("\n"));
+                _state.Document.BreakCoalescing();
+                _state.Document.Insert(oldCursor, _state.Decoder.EncodeString("\n"), oldCursor);
                 newCursor = oldCursor + _state.Decoder.MinCharBytes;
                 _state.InvalidateSearchResults();
                 break;
@@ -583,10 +666,20 @@ internal sealed class TextViewControl : Control
         if (_state.Document is null || string.IsNullOrEmpty(e.Text) || _state.IsReadOnly) return;
 
         _desiredColumn = -1;
-        TryDeleteSelection();
+
+        bool hasSelection = _state.TextSelStart >= 0 && _state.TextSelEnd >= _state.TextSelStart;
+        if (hasSelection) {
+            _state.Document.BeginUndoGroup(_state.TextCursorOffset);
+            TryDeleteSelection();
+        }
+
         byte[] encoded = _state.Decoder.EncodeString(e.Text);
-        _state.Document.Insert(_state.TextCursorOffset, encoded);
+        _state.Document.Insert(_state.TextCursorOffset, encoded, _state.TextCursorOffset);
         _state.TextCursorOffset += encoded.Length;
+
+        if (hasSelection)
+            _state.Document.EndUndoGroup(_state.TextCursorOffset);
+
         _state.InvalidateSearchResults();
         OnStateChanged();
     }
@@ -598,6 +691,7 @@ internal sealed class TextViewControl : Control
         if (_state.Document is null) return;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
+        _state.Document.BreakCoalescing();
         long offset = HitTest(e.GetPosition(this));
         if (offset < 0) return;
 
@@ -1916,7 +2010,8 @@ internal sealed class TextViewControl : Control
         if (!TryGetSelectionDeleteRange(_state.TextSelStart, _state.TextSelEnd, out long deleteStart, out long deleteLength))
             return false;
 
-        _state.Document.Delete(deleteStart, deleteLength);
+        _state.Document.BreakCoalescing();
+        _state.Document.Delete(deleteStart, deleteLength, _state.TextCursorOffset);
         _state.TextCursorOffset = deleteStart;
         _state.TextSelectionAnchor = -1;
         _state.InvalidateSearchResults();

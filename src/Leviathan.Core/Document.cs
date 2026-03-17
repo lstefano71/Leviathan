@@ -12,6 +12,7 @@ public sealed class Document : IDisposable
     private MappedFileSource? _fileSource;
     private readonly AppendBuffer _appendBuffer;
     private readonly PieceTree _tree;
+    private readonly UndoManager _undoManager;
     private bool _disposed;
     private bool _isModified;
 
@@ -33,6 +34,12 @@ public sealed class Document : IDisposable
     /// <summary>The underlying memory-mapped file source, or null for new documents.</summary>
     internal IO.MappedFileSource? FileSource => _fileSource;
 
+    /// <summary>Whether there are undoable edits.</summary>
+    public bool CanUndo => _undoManager.CanUndo;
+
+    /// <summary>Whether there are redoable edits.</summary>
+    public bool CanRedo => _undoManager.CanRedo;
+
     /// <summary>
     /// Opens an existing file for viewing/editing.
     /// </summary>
@@ -41,6 +48,7 @@ public sealed class Document : IDisposable
         _fileSource = new MappedFileSource(filePath);
         _appendBuffer = new AppendBuffer();
         _tree = new PieceTree();
+        _undoManager = new UndoManager(_appendBuffer);
 
         if (_fileSource.Length > 0) {
             _tree.Init(new Piece(PieceSource.Original, 0, _fileSource.Length));
@@ -55,6 +63,7 @@ public sealed class Document : IDisposable
         _fileSource = null;
         _appendBuffer = new AppendBuffer();
         _tree = new PieceTree();
+        _undoManager = new UndoManager(_appendBuffer);
     }
 
     /// <summary>
@@ -69,8 +78,18 @@ public sealed class Document : IDisposable
 
     /// <summary>
     /// Inserts raw bytes at the given logical offset.
+    /// Records an undo entry so the operation can be reversed with <see cref="Undo"/>.
     /// </summary>
     public void Insert(long offset, ReadOnlySpan<byte> data)
+    {
+        Insert(offset, data, offset);
+    }
+
+    /// <summary>
+    /// Inserts raw bytes at the given logical offset, recording the cursor
+    /// position before the edit for undo restoration.
+    /// </summary>
+    public void Insert(long offset, ReadOnlySpan<byte> data, long cursorBefore)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -80,16 +99,128 @@ public sealed class Document : IDisposable
         var piece = new Piece(PieceSource.Append, appendOffset, data.Length);
         _tree.Insert(offset, piece);
         _isModified = true;
+
+        var action = new InsertAction(offset, data.Length, appendOffset);
+        _undoManager.Push(action, cursorBefore, offset + data.Length);
     }
 
     /// <summary>
     /// Deletes a range of bytes from the logical document.
+    /// Captures the deleted bytes for undo and records an undo entry.
     /// </summary>
     public void Delete(long offset, long length)
     {
+        Delete(offset, length, offset);
+    }
+
+    /// <summary>
+    /// Deletes a range of bytes from the logical document, recording the
+    /// cursor position before the edit for undo restoration.
+    /// </summary>
+    public void Delete(long offset, long length, long cursorBefore)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (length <= 0) return;
+
+        // Capture the bytes being deleted for undo.
+        byte[] deletedData = new byte[length];
+        _tree.Read(offset, deletedData, ResolveSpan);
+
         _tree.Delete(offset, length);
         _isModified = true;
+
+        var action = new DeleteAction(offset, deletedData);
+        _undoManager.Push(action, cursorBefore, offset);
+    }
+
+    // ─── Undo / Redo ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Undoes the most recent edit.
+    /// Returns the cursor offset to restore, or null if nothing to undo.
+    /// </summary>
+    public long? Undo()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        long? cursor = _undoManager.Undo(this);
+        if (cursor.HasValue)
+            _isModified = true;
+        return cursor;
+    }
+
+    /// <summary>
+    /// Redoes the most recently undone edit.
+    /// Returns the cursor offset to restore, or null if nothing to redo.
+    /// </summary>
+    public long? Redo()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        long? cursor = _undoManager.Redo(this);
+        if (cursor.HasValue)
+            _isModified = true;
+        return cursor;
+    }
+
+    /// <summary>
+    /// Begins an undo group.  All edits until <see cref="EndUndoGroup"/> are
+    /// treated as a single undoable step.
+    /// </summary>
+    public void BeginUndoGroup(long cursorBefore)
+    {
+        _undoManager.BeginGroup(cursorBefore);
+    }
+
+    /// <summary>Ends the current undo group.</summary>
+    public void EndUndoGroup(long cursorAfter)
+    {
+        _undoManager.EndGroup(cursorAfter);
+    }
+
+    /// <summary>
+    /// Breaks coalescing so the next edit starts a new undo entry.
+    /// Call after cursor jumps or operation-type changes.
+    /// </summary>
+    public void BreakCoalescing()
+    {
+        _undoManager.BreakCoalescing();
+    }
+
+    // ─── Internal methods for UndoManager ──────────────────────────────
+
+    /// <summary>
+    /// Inserts bytes without recording an undo entry.
+    /// Used internally by <see cref="UndoManager"/> during undo/redo.
+    /// </summary>
+    internal void InsertInternal(long offset, ReadOnlySpan<byte> data)
+    {
+        if (data.IsEmpty) return;
+        int appendOffset = _appendBuffer.Append(data);
+        var piece = new Piece(PieceSource.Append, appendOffset, data.Length);
+        _tree.Insert(offset, piece);
+        _isModified = true;
+    }
+
+    /// <summary>
+    /// Deletes bytes without recording an undo entry.
+    /// Used internally by <see cref="UndoManager"/> during undo/redo.
+    /// </summary>
+    internal void DeleteInternal(long offset, long length)
+    {
+        if (length <= 0) return;
+        _tree.Delete(offset, length);
+        _isModified = true;
+    }
+
+    /// <summary>
+    /// Reads bytes from the AppendBuffer.  Used by <see cref="UndoManager"/>
+    /// to retrieve insert data for redo operations.
+    /// </summary>
+    internal byte[] ReadAppendBuffer(int offset, int length)
+    {
+        byte[] data = new byte[length];
+        _appendBuffer.GetSpan(offset, length).CopyTo(data);
+        return data;
     }
 
     /// <summary>
@@ -142,6 +273,9 @@ public sealed class Document : IDisposable
                 _fileSource.Dispose();
                 _fileSource = null;
             }
+
+            // Migrate undo data before resetting the append buffer.
+            _undoManager.MigrateForSave();
 
             // Reopen the file and rebuild the piece tree so the document reflects the saved state.
             var newSource = new MappedFileSource(destinationPath);

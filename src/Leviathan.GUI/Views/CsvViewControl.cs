@@ -58,6 +58,20 @@ internal sealed class CsvViewControl : Control
     {
         ContextMenu menu = new();
 
+        MenuItem copyCellValue = new() { Header = "Copy Cell Value" };
+        copyCellValue.Click += async (_, _) => await CopyCellValueAsync();
+
+        MenuItem copyRowAsCsv = new() { Header = "Copy Row as CSV" };
+        copyRowAsCsv.Click += async (_, _) => await CopyRowAsCsvAsync();
+
+        MenuItem copySelectionAsCsv = new() { Header = "Copy Selection as CSV" };
+        copySelectionAsCsv.Click += async (_, _) => await CopySelectionAsCsvAsync();
+
+        menu.Items.Add(copyCellValue);
+        menu.Items.Add(copyRowAsCsv);
+        menu.Items.Add(copySelectionAsCsv);
+        menu.Items.Add(new Separator());
+
         MenuItem hideCol = new() { Header = "Hide Column" };
         hideCol.Click += (_, _) => {
             int col = _state.CsvCursorCol;
@@ -92,13 +106,121 @@ internal sealed class CsvViewControl : Control
         menu.Items.Add(colVis);
         ContextMenu = menu;
 
-        // Update "Hide Column" header with column name on menu opening
         menu.Opening += (_, _) => {
             int col = _state.CsvCursorCol;
             string[] headers = _state.CsvHeaderNames;
             string colName = col >= 0 && col < headers.Length ? headers[col] : $"Column {col + 1}";
             hideCol.Header = $"Hide Column \"{colName}\"";
+
+            bool hasRow = _state.CsvRowIndex is not null && _state.CsvCursorRow >= 0;
+            copyCellValue.IsEnabled = hasRow;
+            copyRowAsCsv.IsEnabled = hasRow;
+
+            long selAnchor = _state.CsvSelectionAnchorRow;
+            long cursorRow = _state.CsvCursorRow;
+            bool hasMultiRowSelection = selAnchor >= 0 && selAnchor != cursorRow;
+            copySelectionAsCsv.IsEnabled = hasMultiRowSelection;
         };
+    }
+
+    /// <summary>
+    /// Copies the value of the current cell to the clipboard.
+    /// </summary>
+    internal async Task CopyCellValueAsync()
+    {
+        string? value = ReadCellValue(_state.CsvCursorRow, _state.CsvCursorCol);
+        if (value is null) return;
+
+        TopLevel? root = TopLevel.GetTopLevel(this);
+        if (root?.Clipboard is null) return;
+        await root.Clipboard.SetTextAsync(value);
+    }
+
+    /// <summary>
+    /// Copies the current row as a CSV line to the clipboard.
+    /// </summary>
+    private async Task CopyRowAsCsvAsync()
+    {
+        string? row = ReadRowAsCsv(_state.CsvCursorRow);
+        if (row is null) return;
+
+        TopLevel? root = TopLevel.GetTopLevel(this);
+        if (root?.Clipboard is null) return;
+        await root.Clipboard.SetTextAsync(row);
+    }
+
+    /// <summary>
+    /// Copies all selected rows as CSV text to the clipboard.
+    /// </summary>
+    private async Task CopySelectionAsCsvAsync()
+    {
+        long selAnchor = _state.CsvSelectionAnchorRow;
+        long cursorRow = _state.CsvCursorRow;
+        long startRow = selAnchor >= 0 ? Math.Min(selAnchor, cursorRow) : cursorRow;
+        long endRow = selAnchor >= 0 ? Math.Max(selAnchor, cursorRow) : cursorRow;
+
+        StringBuilder sb = new();
+        for (long r = startRow; r <= endRow; r++) {
+            string? row = ReadRowAsCsv(r);
+            if (row is not null)
+                sb.AppendLine(row);
+        }
+
+        if (sb.Length == 0) return;
+
+        TopLevel? root = TopLevel.GetTopLevel(this);
+        if (root?.Clipboard is null) return;
+        await root.Clipboard.SetTextAsync(sb.ToString());
+    }
+
+    /// <summary>
+    /// Reads the text value of a specific cell.
+    /// </summary>
+    internal string? ReadCellValue(long dataRow, int col)
+    {
+        if (_state.Document is null || _state.CsvRowIndex is null)
+            return null;
+
+        long rowOffset = GetRowByteOffset(dataRow);
+        if (rowOffset < 0 || rowOffset >= _state.FileLength)
+            return null;
+
+        int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
+        if (readLen <= 0) return null;
+        _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
+
+        int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), _state.CsvDialect);
+        ReadOnlySpan<byte> rowData = _readBuffer.AsSpan(0, rowLen);
+
+        Span<CsvField> fields = stackalloc CsvField[256];
+        int fieldCount = CsvFieldParser.ParseRecord(rowData, _state.CsvDialect, fields);
+
+        if (col < 0 || col >= fieldCount)
+            return null;
+
+        Span<byte> unescaped = stackalloc byte[4096];
+        int written = CsvFieldParser.UnescapeField(rowData, fields[col], _state.CsvDialect, unescaped);
+        return Encoding.UTF8.GetString(unescaped[..written]);
+    }
+
+    /// <summary>
+    /// Reads an entire row as raw CSV text.
+    /// </summary>
+    private string? ReadRowAsCsv(long dataRow)
+    {
+        if (_state.Document is null || _state.CsvRowIndex is null)
+            return null;
+
+        long rowOffset = GetRowByteOffset(dataRow);
+        if (rowOffset < 0 || rowOffset >= _state.FileLength)
+            return null;
+
+        int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
+        if (readLen <= 0) return null;
+        _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
+
+        int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), _state.CsvDialect);
+        return Encoding.UTF8.GetString(_readBuffer, 0, rowLen);
     }
 
     /// <summary>

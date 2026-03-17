@@ -66,6 +66,9 @@
                 <MenuItem Header="_Read-only Mode" x:Name="MenuReadOnlyMode" />
                 <MenuItem Header="Start in Read-_only" x:Name="MenuStartReadOnly" />
                 <Separator />
+                <MenuItem Header="_Undo" x:Name="MenuUndo" HotKey="Ctrl+Z" InputGesture="Ctrl+Z" />
+                <MenuItem Header="_Redo" x:Name="MenuRedo" HotKey="Ctrl+Y" InputGesture="Ctrl+Y" />
+                <Separator />
                 <MenuItem Header="Cu_t" x:Name="MenuCut" HotKey="Ctrl+X" InputGesture="Ctrl+X" />
                 <MenuItem Header="_Copy" x:Name="MenuCopy" HotKey="Ctrl+C" InputGesture="Ctrl+C" />
                 <MenuItem Header="_Paste" x:Name="MenuPaste" HotKey="Ctrl+V" InputGesture="Ctrl+V" />

@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 
+using Leviathan.Core.DataModel;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
@@ -21,6 +22,9 @@ namespace Leviathan.GUI.Views;
 internal sealed class HexViewControl : Control
 {
     private const double LinePadding = 2;
+
+    /// <summary>Distinctive marker color for bookmark indicators in the gutter.</summary>
+    private static readonly IBrush BookmarkMarkerBrush = new SolidColorBrush(Color.FromArgb(220, 255, 120, 50));
 
     private readonly AppState _state;
     private readonly byte[] _readBuffer = new byte[65536];
@@ -80,22 +84,60 @@ internal sealed class HexViewControl : Control
 
     private void BuildContextMenu()
     {
-        MenuItem copyAsHex = new() { Header = "Copy as Hex" };
-        copyAsHex.Click += async (_, _) => await CopySelectionAsHexAsync();
+        MenuItem cut = new() { Header = "Cut", InputGesture = new KeyGesture(Key.X, KeyModifiers.Control) };
+        cut.Click += (_, _) => CutRequested?.Invoke();
+
+        MenuItem copy = new() { Header = "Copy", InputGesture = new KeyGesture(Key.C, KeyModifiers.Control) };
+        copy.Click += async (_, _) => await CopySelectionAsHexAsync();
 
         MenuItem copyAsText = new() { Header = "Copy as Text" };
         copyAsText.Click += async (_, _) => await CopySelectionAsTextAsync();
 
+        MenuItem paste = new() { Header = "Paste", InputGesture = new KeyGesture(Key.V, KeyModifiers.Control) };
+        paste.Click += (_, _) => PasteRequested?.Invoke();
+
+        MenuItem selectAll = new() { Header = "Select All", InputGesture = new KeyGesture(Key.A, KeyModifiers.Control) };
+        selectAll.Click += (_, _) => SelectAllRequested?.Invoke();
+
+        MenuItem addBookmark = new() { Header = "Add Bookmark" };
+        addBookmark.Click += (_, _) => {
+            long offset = _state.HexCursorOffset;
+            if (offset >= 0) {
+                _state.Bookmarks.Toggle(offset);
+                InvalidateVisual();
+                StateChanged?.Invoke();
+            }
+        };
+
         ContextMenu menu = new();
-        menu.Items.Add(copyAsHex);
+        menu.Items.Add(cut);
+        menu.Items.Add(copy);
         menu.Items.Add(copyAsText);
+        menu.Items.Add(paste);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(selectAll);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(addBookmark);
         menu.Opening += (_, _) => {
             bool hasSelection = _state.HexSelStart >= 0 && _state.HexSelEnd >= _state.HexSelStart;
-            copyAsHex.IsEnabled = hasSelection;
+            cut.IsEnabled = hasSelection && !_state.IsReadOnly;
+            copy.IsEnabled = hasSelection;
             copyAsText.IsEnabled = hasSelection;
+            paste.IsEnabled = !_state.IsReadOnly;
+
+            long offset = _state.HexCursorOffset;
+            bool hasBookmark = offset >= 0 && _state.Bookmarks.Contains(offset);
+            addBookmark.Header = hasBookmark ? "Remove Bookmark" : "Add Bookmark";
         };
         ContextMenu = menu;
     }
+
+    /// <summary>Fired when the user requests Cut from the context menu.</summary>
+    internal Action? CutRequested;
+    /// <summary>Fired when the user requests Paste from the context menu.</summary>
+    internal Action? PasteRequested;
+    /// <summary>Fired when the user requests Select All from the context menu.</summary>
+    internal Action? SelectAllRequested;
 
     private async Task CopySelectionAsHexAsync()
     {
@@ -326,6 +368,20 @@ internal sealed class HexViewControl : Control
             if (gutterVisible) {
                 FormattedText addressText = GetAddressText(rowOffset, decimalOffset, addressDigits, addressBrush);
                 context.DrawText(addressText, new Point(charWidth, y));
+
+                // Bookmark marker: small circle in the gutter
+                long rowEnd = rowOffset + bytesPerRow - 1;
+                IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
+                for (int bi = 0; bi < bookmarks.Count; bi++) {
+                    long bmOff = bookmarks[bi].Offset;
+                    if (bmOff > rowEnd) break;
+                    if (bmOff >= rowOffset) {
+                        double markerY = y + lineHeight / 2;
+                        context.DrawEllipse(BookmarkMarkerBrush, null,
+                            new Point(charWidth * 0.4, markerY), charWidth * 0.3, charWidth * 0.3);
+                        break;
+                    }
+                }
             }
 
             // Hex bytes
@@ -789,9 +845,13 @@ internal sealed class HexViewControl : Control
         }
 
         if (offset < _state.FileLength) {
+            _state.Document.BreakCoalescing();
+            _state.Document.BeginUndoGroup(offset);
             _state.Document.Delete(offset, 1);
             _state.Document.Insert(offset, [value]);
+            _state.Document.EndUndoGroup(offset);
         } else {
+            _state.Document.BreakCoalescing();
             _state.Document.Insert(offset, [value]);
         }
 

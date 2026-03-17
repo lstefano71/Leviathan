@@ -160,6 +160,8 @@ public sealed partial class MainWindow : Window
         MenuCut.Click += (_, _) => DoCut();
         MenuCopy.Click += (_, _) => DoCopy();
         MenuPaste.Click += (_, _) => DoPaste();
+        MenuUndo.Click += (_, _) => DoUndo();
+        MenuRedo.Click += (_, _) => DoRedo();
         MenuSelectAll.Click += (_, _) => DoSelectAll();
         MenuDeleteRows.Click += (_, _) => DoDeleteCsvRows();
         MenuReadOnlyMode.Click += (_, _) => ToggleReadOnlyMode();
@@ -357,6 +359,7 @@ public sealed partial class MainWindow : Window
         if (_state.IsModified) {
             e.Cancel = true;
             if (await GuardUnsavedChanges()) {
+                SaveBookmarks();
                 _searchRestartTimer?.Stop();
                 _state.CancelSearch();
                 _state.CsvRowIndexer?.Dispose();
@@ -366,12 +369,19 @@ public sealed partial class MainWindow : Window
                 Close();
             }
         } else {
+            SaveBookmarks();
             _searchRestartTimer?.Stop();
             _state.CancelSearch();
             _state.CsvRowIndexer?.Dispose();
             _state.Indexer?.Dispose();
             _state.Document?.Dispose();
         }
+    }
+
+    private void SaveBookmarks()
+    {
+        if (_state.CurrentFilePath is not null)
+            Leviathan.Core.DataModel.BookmarkSerializer.Save(_state.CurrentFilePath, _state.Bookmarks);
     }
 
     private void OnDrop(object? sender, DragEventArgs e)
@@ -425,7 +435,16 @@ public sealed partial class MainWindow : Window
         _csvView = new CsvViewControl(_state);
 
         _hexView.StateChanged = UpdateStatusBar;
+        _hexView.CutRequested = DoCut;
+        _hexView.PasteRequested = DoPaste;
+        _hexView.SelectAllRequested = DoSelectAll;
+
         _textView.StateChanged = UpdateStatusBar;
+        _textView.CutRequested = DoCut;
+        _textView.CopyRequested = DoCopy;
+        _textView.PasteRequested = DoPaste;
+        _textView.SelectAllRequested = DoSelectAll;
+
         _csvView.StateChanged = OnCsvStateChanged;
         _csvView.OnRecordDetail = ToggleCsvDetailPanel;
         _state.SearchRestartRequested = QueueSearchRestartAfterEdit;
@@ -1498,6 +1517,14 @@ public sealed partial class MainWindow : Window
                     DoCut();
                     e.Handled = true;
                     return;
+                case Key.Z when !textInputFocused:
+                    DoUndo();
+                    e.Handled = true;
+                    return;
+                case Key.Y when !textInputFocused:
+                    DoRedo();
+                    e.Handled = true;
+                    return;
                 case Key.C when !textInputFocused:
                     DoCopy();
                     e.Handled = true;
@@ -1508,6 +1535,10 @@ public sealed partial class MainWindow : Window
                     return;
                 case Key.A when !textInputFocused:
                     DoSelectAll();
+                    e.Handled = true;
+                    return;
+                case Key.B when !textInputFocused:
+                    DoToggleBookmark();
                     e.Handled = true;
                     return;
             }
@@ -1707,8 +1738,13 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("Cut", "Cut selection (Ctrl+X)", DoCut, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Copy", "Copy selection (Ctrl+C)", DoCopy, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Paste", "Paste from clipboard (Ctrl+V)", DoPaste, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Undo", "Undo last edit (Ctrl+Z)", DoUndo, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Redo", "Redo last undo (Ctrl+Y)", DoRedo, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Select All", "Select entire file (Ctrl+A)", DoSelectAll, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand("Delete Row(s)", "Delete selected CSV rows", DoDeleteCsvRows, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Toggle Bookmark", "Add or remove bookmark at cursor", DoToggleBookmark, restoreFocusAfterExecute: true);
+        _commandPalette.RegisterCommand("Go to Bookmark", "Jump to a bookmark", ShowBookmarkList, closeOnExecute: false);
+        _commandPalette.RegisterCommand("Clear All Bookmarks", "Remove all bookmarks from current file", DoClearBookmarks, restoreFocusAfterExecute: true);
         _commandPalette.RegisterCommand(
             () => _state.IsReadOnly ? "☑ Read-only Mode" : "☐ Read-only Mode",
             "Toggle read-only editing lock",
@@ -1971,6 +2007,57 @@ public sealed partial class MainWindow : Window
         await CopySelectionToClipboardAsync();
     }
 
+    private void DoUndo()
+    {
+        if (_state.Document is null)
+            return;
+
+        _state.Document.BreakCoalescing();
+        long? cursor = _state.Document.Undo();
+        if (cursor is null)
+            return;
+
+        long pos = Math.Max(0, Math.Min(cursor.Value, _state.Document.Length > 0 ? _state.Document.Length - 1 : 0));
+        if (_state.ActiveView == ViewMode.Hex) {
+            _state.HexCursorOffset = pos;
+            _state.HexSelectionAnchor = -1;
+            _state.NibbleLow = false;
+        } else if (_state.ActiveView == ViewMode.Text) {
+            _state.TextCursorOffset = pos;
+            _state.TextSelectionAnchor = -1;
+        }
+
+        _state.InvalidateSearchResults();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
+    private void DoRedo()
+    {
+        if (_state.Document is null)
+            return;
+
+        long? cursor = _state.Document.Redo();
+        if (cursor is null)
+            return;
+
+        long pos = Math.Max(0, Math.Min(cursor.Value, _state.Document.Length > 0 ? _state.Document.Length - 1 : 0));
+        if (_state.ActiveView == ViewMode.Hex) {
+            _state.HexCursorOffset = pos;
+            _state.HexSelectionAnchor = -1;
+            _state.NibbleLow = false;
+        } else if (_state.ActiveView == ViewMode.Text) {
+            _state.TextCursorOffset = pos;
+            _state.TextSelectionAnchor = -1;
+        }
+
+        _state.InvalidateSearchResults();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
     private async void DoCut()
     {
         if (IsEditBlockedByReadOnly())
@@ -1991,7 +2078,7 @@ public sealed partial class MainWindow : Window
             long selStart = _state.HexSelStart;
             long selEnd = _state.HexSelEnd;
             if (selStart >= 0 && selEnd >= selStart) {
-                int len = (int)Math.Min(selEnd - selStart + 1, 65536);
+                int len = (int)Math.Min(selEnd - selStart + 1, 262144);
                 byte[] buf = new byte[len];
                 _state.Document.Read(selStart, buf);
                 text = string.Join(' ', buf.Select(b => b.ToString("X2")));
@@ -2010,6 +2097,8 @@ public sealed partial class MainWindow : Window
                 };
                 text = enc.GetString(buf);
             }
+        } else if (_state.ActiveView == ViewMode.Csv && _csvView is not null) {
+            text = _csvView.ReadCellValue(_state.CsvCursorRow, _state.CsvCursorCol);
         }
 
         if (text is null)
@@ -2032,7 +2121,9 @@ public sealed partial class MainWindow : Window
             if (selStart < 0 || selEnd < selStart)
                 return false;
 
-            _state.Document.Delete(selStart, selEnd - selStart + 1);
+            long deleteLen = selEnd - selStart + 1;
+            _state.Document.Delete(selStart, deleteLen);
+            _state.Bookmarks.AdjustForDelete(selStart, deleteLen);
             _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
             _state.HexCursorOffset = _state.Document.Length > 0
@@ -2044,7 +2135,9 @@ public sealed partial class MainWindow : Window
             if (selStart < 0 || selEnd < selStart)
                 return false;
 
-            _state.Document.Delete(selStart, selEnd - selStart + 1);
+            long deleteLen = selEnd - selStart + 1;
+            _state.Document.Delete(selStart, deleteLen);
+            _state.Bookmarks.AdjustForDelete(selStart, deleteLen);
             _state.TextSelectionAnchor = -1;
             _state.TextCursorOffset = selStart;
         } else {
@@ -2071,18 +2164,24 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrEmpty(clipboardText))
             return;
 
+        _state.Document.BreakCoalescing();
+        _state.Document.BeginUndoGroup(_state.CurrentCursorOffset);
+
         DeleteActiveSelection();
 
         if (_state.ActiveView == ViewMode.Hex) {
             byte[] bytes = TryParseHexClipboard(clipboardText, out byte[] parsed)
                 ? parsed
                 : System.Text.Encoding.UTF8.GetBytes(clipboardText);
-            if (bytes.Length == 0)
+            if (bytes.Length == 0) {
+                _state.Document.EndUndoGroup(_state.CurrentCursorOffset);
                 return;
+            }
 
             long insertAt = Math.Max(0, _state.HexCursorOffset);
             insertAt = Math.Min(insertAt, _state.Document.Length);
             _state.Document.Insert(insertAt, bytes);
+            _state.Bookmarks.AdjustForInsert(insertAt, bytes.Length);
             _state.HexCursorOffset = insertAt + bytes.Length - 1;
             _state.HexSelectionAnchor = -1;
             _state.NibbleLow = false;
@@ -2093,15 +2192,20 @@ public sealed partial class MainWindow : Window
                 _ => System.Text.Encoding.UTF8
             };
             byte[] encoded = enc.GetBytes(clipboardText);
-            if (encoded.Length == 0)
+            if (encoded.Length == 0) {
+                _state.Document.EndUndoGroup(_state.CurrentCursorOffset);
                 return;
+            }
 
             long insertAt = Math.Max(_state.BomLength, _state.TextCursorOffset);
             insertAt = Math.Min(insertAt, _state.Document.Length);
             _state.Document.Insert(insertAt, encoded);
+            _state.Bookmarks.AdjustForInsert(insertAt, encoded.Length);
             _state.TextCursorOffset = insertAt + encoded.Length;
             _state.TextSelectionAnchor = -1;
         }
+
+        _state.Document.EndUndoGroup(_state.CurrentCursorOffset);
 
         _state.InvalidateSearchResults();
         _hexView?.InvalidateVisual();
@@ -2153,6 +2257,58 @@ public sealed partial class MainWindow : Window
             return;
 
         // TODO: implement CSV row deletion
+    }
+
+    private void DoToggleBookmark()
+    {
+        long offset = _state.CurrentCursorOffset;
+        if (offset < 0) return;
+
+        _state.Bookmarks.Toggle(offset);
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
+    private void ShowBookmarkList()
+    {
+        IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
+        if (bookmarks.Count == 0) {
+            _commandPalette?.IsVisible = false;
+            FocusActiveViewAsync();
+            return;
+        }
+
+        // Build a quick-pick list and show it via the command palette
+        _commandPalette?.IsVisible = false;
+
+        ContextMenu bookmarkMenu = new();
+        foreach (Leviathan.Core.DataModel.Bookmark bm in bookmarks) {
+            long capturedOffset = bm.Offset;
+            MenuItem item = new() { Header = $"0x{bm.Offset:X} — {bm.Label}" };
+            item.Click += (_, _) => {
+                if (_state.ActiveView == ViewMode.Hex)
+                    _hexView?.GotoOffset(capturedOffset);
+                else if (_state.ActiveView == ViewMode.Text)
+                    _textView?.GotoOffset(capturedOffset);
+                _hexView?.InvalidateVisual();
+                _textView?.InvalidateVisual();
+                UpdateStatusBar();
+            };
+            bookmarkMenu.Items.Add(item);
+        }
+
+        Control anchor = _hexView as Control ?? _textView as Control ?? this;
+        bookmarkMenu.Closed += (_, _) => FocusActiveViewAsync();
+        bookmarkMenu.Open(anchor);
+    }
+
+    private void DoClearBookmarks()
+    {
+        _state.Bookmarks.Clear();
+        _hexView?.InvalidateVisual();
+        _textView?.InvalidateVisual();
+        UpdateStatusBar();
     }
 
     private void ToggleCsvDetailPanel()
@@ -2317,6 +2473,7 @@ public sealed partial class MainWindow : Window
             F3 / Shift+F3   Find Next / Previous
             Ctrl+G          Go to offset/line
             Ctrl+P          Command Palette
+            Ctrl+B          Toggle bookmark
             F5              Hex view
             F6              Text view
             F7              CSV view
@@ -2324,6 +2481,8 @@ public sealed partial class MainWindow : Window
             Ctrl+X          Cut selection
             Ctrl+C          Copy selection
             Ctrl+V          Paste
+            Ctrl+Z          Undo
+            Ctrl+Y          Redo
             Ctrl+A          Select all
             Home/End        Start/end of line
             Ctrl+Home/End   Start/end of file
