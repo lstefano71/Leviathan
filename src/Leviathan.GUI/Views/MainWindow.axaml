@@ -63,6 +63,9 @@
                 <MenuItem Header="Find _Previous" x:Name="MenuFindPrev" HotKey="Shift+F3" InputGesture="Shift+F3" />
             </MenuItem>
             <MenuItem Header="_Edit">
+                <MenuItem Header="_Read-only Mode" x:Name="MenuReadOnlyMode" />
+                <MenuItem Header="Start in Read-_only" x:Name="MenuStartReadOnly" />
+                <Separator />
                 <MenuItem Header="Cu_t" x:Name="MenuCut" HotKey="Ctrl+X" InputGesture="Ctrl+X" />
                 <MenuItem Header="_Copy" x:Name="MenuCopy" HotKey="Ctrl+C" InputGesture="Ctrl+C" />
                 <MenuItem Header="_Paste" x:Name="MenuPaste" HotKey="Ctrl+V" InputGesture="Ctrl+V" />
@@ -97,41 +100,61 @@
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Margin="6,0" />
                 <!-- Col 4: View mode -->
-                <TextBlock x:Name="SbViewMode" Grid.Column="4" Width="44"
-                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
-                           TextTrimming="CharacterEllipsis" />
+                <Button x:Name="SbViewModeButton" Grid.Column="4" Width="44"
+                        Padding="0" BorderThickness="0" Background="Transparent"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <TextBlock x:Name="SbViewMode"
+                               VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Button>
                 <!-- Col 5: separator -->
                 <TextBlock Text="|" Grid.Column="5" VerticalAlignment="Center" FontSize="12"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Margin="6,0" />
                 <!-- Col 6: Encoding / Separator -->
-                <TextBlock x:Name="SbEncoding" Grid.Column="6" Width="110"
-                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
-                           TextTrimming="None" />
+                <Button x:Name="SbEncodingButton" Grid.Column="6" Width="110"
+                        Padding="0" BorderThickness="0" Background="Transparent"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <TextBlock x:Name="SbEncoding"
+                               VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                               TextTrimming="None" />
+                </Button>
                 <!-- Col 7: separator -->
                 <TextBlock Text="|" Grid.Column="7" VerticalAlignment="Center" FontSize="12"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Margin="6,0" />
                 <!-- Col 8: Position (offset / row,col) -->
-                <TextBlock x:Name="SbPosition" Grid.Column="8" Width="180"
-                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
-                           TextTrimming="CharacterEllipsis" />
+                <Button x:Name="SbPositionButton" Grid.Column="8" Width="180"
+                        Padding="0" BorderThickness="0" Background="Transparent"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <TextBlock x:Name="SbPosition"
+                               VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Button>
                 <!-- Col 9: separator -->
                 <TextBlock Text="|" Grid.Column="9" VerticalAlignment="Center" FontSize="12"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Margin="6,0" />
                 <!-- Col 10: Lines/Rows -->
-                <TextBlock x:Name="SbLines" Grid.Column="10" Width="220"
-                           VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
-                           TextTrimming="None" />
+                <Button x:Name="SbLinesButton" Grid.Column="10" Width="220"
+                        Padding="0" BorderThickness="0" Background="Transparent"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <TextBlock x:Name="SbLines"
+                               VerticalAlignment="Center" FontSize="12" TextAlignment="Center"
+                               TextTrimming="None" />
+                </Button>
                 <!-- Col 11: separator -->
                 <TextBlock Text="|" Grid.Column="11" VerticalAlignment="Center" FontSize="12"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                            Margin="6,0" />
                 <!-- Col 12: File size -->
-                <TextBlock x:Name="SbSize" Grid.Column="12" Width="88"
-                           VerticalAlignment="Center" FontSize="12" TextAlignment="Right"
-                           Margin="0,0,4,0" />
+                <Button x:Name="SbSizeButton" Grid.Column="12" Width="88"
+                        Padding="0" BorderThickness="0" Background="Transparent"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                    <TextBlock x:Name="SbSize"
+                               VerticalAlignment="Center" FontSize="12" TextAlignment="Right"
+                               Margin="0,0,4,0" />
+                </Button>
             </Grid>
         </Border>
 

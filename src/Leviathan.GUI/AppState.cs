@@ -42,6 +42,7 @@ public sealed class AppState
 
     // --- View mode ---
     public ViewMode ActiveView { get; set; } = ViewMode.Hex;
+    public bool IsReadOnly { get; set; }
 
     // --- Display options ---
     /// <summary>Whether the row-number / offset gutter is visible.</summary>

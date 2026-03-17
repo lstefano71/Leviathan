@@ -35,9 +35,9 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: it would be nice if I could open a file in the hex view and then open the same file in the text view in a different tab, and have them synchronized. So that if I scroll in one view, the other view scrolls to the same position. This would be very useful for large files where I want to see both the hex and the text representation at the same time.
 
-[ ] avalonia front-end: status bar toggling of options (like the encoding). It would be nice if I could click on the encoding in the status bar and have a dropdown menu to select a different encoding. Same for other bits of info in the status bar.
+[x] avalonia front-end: status bar toggling of options (like the encoding). It would be nice if I could click on the encoding in the status bar and have a dropdown menu to select a different encoding. Same for other bits of info in the status bar.
 
-[ ] avalonia front-end: read-only mode to guarantee we don't accidentally modify a file. Maybe also a "safe mode" where the app starts in read-only mode and then you can explicitly enable editing if you want to?
+[x] avalonia front-end: read-only mode to guarantee we don't accidentally modify a file. Maybe also a "safe mode" where the app starts in read-only mode and then you can explicitly enable editing if you want to?
 
 [ ] avalonia front-end: F1 should also include a clickable link which would open an external browser pointing to a help page on the Leviathan origin repo. The page does not exist yet and needs to be created as a markdown file in the docs folder. Maybe also link on the welcome page?
 
@@ -57,4 +57,4 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [x] avalonia front-end, csv view: what's the point of having in the status bar R x/n and then another fields with "rows: n"? One of them shows when it's approximate, the other doesn't. But apart from that... 
 
-[ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? 
+[ ] can you update the readme and the deep dives with all the new stuff? In particular, but not exclusively, the new avalonia front-end. For instance: a document on how to create new themes and how to install them? The emphasis has now moved to the GUI front-end (no need to scare away the users by mentioning Avalonia).

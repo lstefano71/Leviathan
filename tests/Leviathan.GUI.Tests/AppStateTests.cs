@@ -59,6 +59,23 @@ public sealed class AppStateTests
         }
     }
 
+    [Fact]
+    public void OpenFile_ReadOnlyAlreadyEnabled_PreservesReadOnlyState()
+    {
+        string path = CreateTempFile(".txt", Encoding.UTF8.GetBytes("hello\nworld"));
+        AppState state = new() { IsReadOnly = true };
+        try
+        {
+            state.OpenFile(path);
+            Assert.True(state.IsReadOnly);
+        }
+        finally
+        {
+            state.CloseFile();
+            File.Delete(path);
+        }
+    }
+
     private static string CreateTempFile(string extension, byte[] content)
     {
         string path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}{extension}");

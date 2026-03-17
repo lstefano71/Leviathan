@@ -22,6 +22,7 @@ public sealed class GuiSettings
 
     public int BytesPerRow { get; set; } // 0 = auto
     public bool WordWrap { get; set; } = true;
+    public bool StartReadOnly { get; set; }
     public List<string> FindHistory { get; set; } = [];
 
     /// <summary>

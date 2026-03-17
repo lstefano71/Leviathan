@@ -45,9 +45,11 @@ public sealed partial class MainWindow : Window
         // Apply persisted settings
         _state.BytesPerRowSetting = _state.Settings.BytesPerRow;
         _state.WordWrap = _state.Settings.WordWrap;
+        _state.IsReadOnly = _state.Settings.StartReadOnly;
         InitializeThemeAndFont();
 
         WireMenuEvents();
+        WireStatusBarInteractions();
         WireWelcomeScreen();
         BuildFileMenuMru();
         BuildThemeMenu();
@@ -56,6 +58,7 @@ public sealed partial class MainWindow : Window
         UpdateGutterCheck();
         UpdateDecimalOffsetsCheck();
         UpdateBprChecks();
+        UpdateReadOnlyChecks();
         UpdateEncodingChecks();
         UpdateViewModeChecks();
         UpdateStatusBar();
@@ -153,9 +156,29 @@ public sealed partial class MainWindow : Window
         MenuPaste.Click += (_, _) => DoPaste();
         MenuSelectAll.Click += (_, _) => DoSelectAll();
         MenuDeleteRows.Click += (_, _) => DoDeleteCsvRows();
+        MenuReadOnlyMode.Click += (_, _) => ToggleReadOnlyMode();
+        MenuStartReadOnly.Click += (_, _) => ToggleStartReadOnly();
         MenuSelectFont.Click += (_, _) => ShowFontPicker();
         MenuFontSizeUp.Click += (_, _) => AdjustFontSize(+1);
         MenuFontSizeDown.Click += (_, _) => AdjustFontSize(-1);
+    }
+
+    private void WireStatusBarInteractions()
+    {
+        SbEncodingButton.Click += (_, _) => OpenEncodingStatusMenu();
+        SbViewModeButton.Click += (_, _) => OpenViewModeStatusMenu();
+        SbLinesButton.Click += (_, _) =>
+        {
+            if (_state.ActiveView == ViewMode.Text)
+                ToggleWordWrap();
+            else if (_state.ActiveView == ViewMode.Hex)
+                OpenBytesPerRowStatusMenu();
+        };
+        SbPositionButton.Click += (_, _) =>
+        {
+            if (_state.ActiveView == ViewMode.Hex)
+                ToggleDecimalOffsets();
+        };
     }
 
     // ─── File operations ───
@@ -856,6 +879,30 @@ public sealed partial class MainWindow : Window
         MenuBpr64.Icon = current == 64 ? new TextBlock { Text = "●", FontSize = 10 } : null;
     }
 
+    private void ToggleReadOnlyMode()
+    {
+        _state.IsReadOnly = !_state.IsReadOnly;
+        UpdateReadOnlyChecks();
+        UpdateStatusBar();
+    }
+
+    private void ToggleStartReadOnly()
+    {
+        _state.Settings.StartReadOnly = !_state.Settings.StartReadOnly;
+        _state.Settings.Save();
+        UpdateReadOnlyChecks();
+    }
+
+    private void UpdateReadOnlyChecks()
+    {
+        MenuReadOnlyMode.Icon = _state.IsReadOnly
+            ? new TextBlock { Text = "✓", FontSize = 12 }
+            : null;
+        MenuStartReadOnly.Icon = _state.Settings.StartReadOnly
+            ? new TextBlock { Text = "✓", FontSize = 12 }
+            : null;
+    }
+
     private void SwitchEncoding(TextEncoding encoding)
     {
         _state.SwitchEncoding(encoding);
@@ -874,17 +921,77 @@ public sealed partial class MainWindow : Window
         _state.Settings.Save();
         UpdateBprChecks();
         _hexView?.InvalidateVisual();
+        UpdateStatusBar();
+    }
+
+    private void OpenEncodingStatusMenu()
+    {
+        if (_state.Document is null || _state.ActiveView == ViewMode.Csv)
+            return;
+
+        TextEncoding current = _state.Decoder.Encoding;
+        MenuItem utf8 = new() { Header = "UTF-8", Icon = current == TextEncoding.Utf8 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        utf8.Click += (_, _) => SwitchEncoding(TextEncoding.Utf8);
+        MenuItem utf16 = new() { Header = "UTF-16 LE", Icon = current == TextEncoding.Utf16Le ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        utf16.Click += (_, _) => SwitchEncoding(TextEncoding.Utf16Le);
+        MenuItem win1252 = new() { Header = "Windows-1252", Icon = current == TextEncoding.Windows1252 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        win1252.Click += (_, _) => SwitchEncoding(TextEncoding.Windows1252);
+        OpenStatusBarMenu(SbEncodingButton, utf8, utf16, win1252);
+    }
+
+    private void OpenViewModeStatusMenu()
+    {
+        if (_state.Document is null)
+            return;
+
+        MenuItem hex = new() { Header = "Hex View", Icon = _state.ActiveView == ViewMode.Hex ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        hex.Click += (_, _) => SwitchView(ViewMode.Hex);
+        MenuItem text = new() { Header = "Text View", Icon = _state.ActiveView == ViewMode.Text ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        text.Click += (_, _) => SwitchView(ViewMode.Text);
+        MenuItem csv = new() { Header = "CSV View", Icon = _state.ActiveView == ViewMode.Csv ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        csv.Click += (_, _) => SwitchView(ViewMode.Csv);
+        OpenStatusBarMenu(SbViewModeButton, hex, text, csv);
+    }
+
+    private void OpenBytesPerRowStatusMenu()
+    {
+        if (_state.Document is null || _state.ActiveView != ViewMode.Hex)
+            return;
+
+        int current = _state.BytesPerRowSetting;
+        MenuItem auto = new() { Header = "Auto", Icon = current == 0 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        auto.Click += (_, _) => SetBytesPerRow(0);
+        MenuItem b8 = new() { Header = "8", Icon = current == 8 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b8.Click += (_, _) => SetBytesPerRow(8);
+        MenuItem b16 = new() { Header = "16", Icon = current == 16 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b16.Click += (_, _) => SetBytesPerRow(16);
+        MenuItem b24 = new() { Header = "24", Icon = current == 24 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b24.Click += (_, _) => SetBytesPerRow(24);
+        MenuItem b32 = new() { Header = "32", Icon = current == 32 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b32.Click += (_, _) => SetBytesPerRow(32);
+        MenuItem b48 = new() { Header = "48", Icon = current == 48 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b48.Click += (_, _) => SetBytesPerRow(48);
+        MenuItem b64 = new() { Header = "64", Icon = current == 64 ? new TextBlock { Text = "●", FontSize = 10 } : null };
+        b64.Click += (_, _) => SetBytesPerRow(64);
+        OpenStatusBarMenu(SbLinesButton, auto, b8, b16, b24, b32, b48, b64);
+    }
+
+    private static void OpenStatusBarMenu(Control anchor, params MenuItem[] items)
+    {
+        ContextMenu menu = new() { ItemsSource = items };
+        menu.Open(anchor);
     }
 
     // ─── Status bar ───
 
     private void UpdateTitle()
     {
-        string title = _buildIdentity.BrandedTitle;
+        string readOnlyPrefix = _state.IsReadOnly ? "[RO] " : "";
+        string title = $"{readOnlyPrefix}{_buildIdentity.BrandedTitle}";
         if (_state.CurrentFilePath is { } path)
         {
             string modifiedPrefix = _state.IsModified ? "• " : "";
-            title = $"{modifiedPrefix}{Path.GetFileName(path)} — {_buildIdentity.BrandedTitle}";
+            title = $"{readOnlyPrefix}{modifiedPrefix}{Path.GetFileName(path)} — {_buildIdentity.BrandedTitle}";
         }
         Title = title;
     }
@@ -903,13 +1010,19 @@ public sealed partial class MainWindow : Window
             SbLines.Text = "";
             SbSize.Text = "";
             ToolTip.SetTip(SbFile, null);
+            SbViewModeButton.IsEnabled = false;
+            SbEncodingButton.IsEnabled = false;
+            SbPositionButton.IsEnabled = false;
+            SbLinesButton.IsEnabled = false;
+            SbSizeButton.IsEnabled = false;
             return;
         }
 
         string fullPath = _state.CurrentFilePath ?? "(untitled)";
         string fileName = MiddleEllipsize(fullPath, ComputeStatusFileChars());
         string modified = _state.IsModified ? " [modified]" : "";
-        SbFile.Text = $" {fileName}{modified}";
+        string readOnly = _state.IsReadOnly ? " [RO]" : "";
+        SbFile.Text = $" {fileName}{modified}{readOnly}";
         ToolTip.SetTip(SbFile, fullPath);
 
         string viewMode = _state.ActiveView switch
@@ -936,7 +1049,12 @@ public sealed partial class MainWindow : Window
         bool lineIndexing = !(_state.Indexer?.Index?.IsComplete ?? true);
         bool csvIndexing = !(_state.CsvRowIndex?.IsComplete ?? true);
         bool searching = _state.IsSearching;
-        SbBackground.Text = BuildBackgroundStatus(lineIndexing, csvIndexing, searching);
+        SbBackground.Text = BuildBackgroundStatus(lineIndexing, csvIndexing, searching, _state.IsReadOnly);
+        SbViewModeButton.IsEnabled = true;
+        SbEncodingButton.IsEnabled = _state.ActiveView != ViewMode.Csv;
+        SbPositionButton.IsEnabled = _state.ActiveView == ViewMode.Hex;
+        SbLinesButton.IsEnabled = _state.ActiveView is ViewMode.Text or ViewMode.Hex;
+        SbSizeButton.IsEnabled = false;
 
         if (_state.ActiveView == ViewMode.Csv && _state.CsvRowIndex is not null)
         {
@@ -964,6 +1082,8 @@ public sealed partial class MainWindow : Window
         string linesInfo = _state.EstimatedTotalLines > 0
             ? $"{linePrefix}{_state.EstimatedTotalLines:N0} lines"
             : (lineIndexing ? "~ lines" : "0 lines");
+        if (_state.ActiveView == ViewMode.Hex)
+            linesInfo = $"{linesInfo} · {_state.BytesPerRow} B/R";
         if (_state.ActiveView == ViewMode.Text)
         {
             string eol = GetLineEndingStatus();
@@ -975,9 +1095,11 @@ public sealed partial class MainWindow : Window
             : linesInfo;
     }
 
-    private string BuildBackgroundStatus(bool lineIndexing, bool csvIndexing, bool searching)
+    private string BuildBackgroundStatus(bool lineIndexing, bool csvIndexing, bool searching, bool readOnly)
     {
         List<string> ops = [];
+        if (readOnly)
+            ops.Add("RO");
         if (lineIndexing || csvIndexing)
             ops.Add("Indexing");
         if (searching)
@@ -1654,6 +1776,15 @@ public sealed partial class MainWindow : Window
 
     // ─── Edit operations ───
 
+    private bool IsEditBlockedByReadOnly()
+    {
+        if (!_state.IsReadOnly)
+            return false;
+
+        UpdateStatusBar();
+        return true;
+    }
+
     private async void DoCopy()
     {
         await CopySelectionToClipboardAsync();
@@ -1661,6 +1792,9 @@ public sealed partial class MainWindow : Window
 
     private async void DoCut()
     {
+        if (IsEditBlockedByReadOnly())
+            return;
+
         bool copied = await CopySelectionToClipboardAsync();
         if (copied)
             DeleteActiveSelection();
@@ -1714,6 +1848,8 @@ public sealed partial class MainWindow : Window
     {
         if (_state.Document is null)
             return false;
+        if (IsEditBlockedByReadOnly())
+            return false;
 
         if (_state.ActiveView == ViewMode.Hex)
         {
@@ -1757,6 +1893,8 @@ public sealed partial class MainWindow : Window
         if (_state.Document is null || Clipboard is not IAsyncDataTransfer clipboard)
             return;
         if (_state.ActiveView == ViewMode.Csv)
+            return;
+        if (IsEditBlockedByReadOnly())
             return;
 
         string? clipboardText = await clipboard.TryGetTextAsync();
@@ -1852,6 +1990,9 @@ public sealed partial class MainWindow : Window
 
     private void DoDeleteCsvRows()
     {
+        if (IsEditBlockedByReadOnly())
+            return;
+
         // TODO: implement CSV row deletion
     }
 

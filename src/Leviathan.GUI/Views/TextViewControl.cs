@@ -467,6 +467,8 @@ internal sealed class TextViewControl : Control
                 break;
             case Key.Back:
                 _desiredColumn = -1;
+                if (_state.IsReadOnly)
+                    break;
                 if (oldCursor > _state.BomLength)
                 {
                     long deleteAt = Math.Max(oldCursor - _state.Decoder.MinCharBytes, _state.BomLength);
@@ -478,6 +480,8 @@ internal sealed class TextViewControl : Control
                 break;
             case Key.Delete:
                 _desiredColumn = -1;
+                if (_state.IsReadOnly)
+                    break;
                 if (oldCursor < _state.FileLength)
                 {
                     _state.Document.Delete(oldCursor, _state.Decoder.MinCharBytes);
@@ -486,6 +490,8 @@ internal sealed class TextViewControl : Control
                 break;
             case Key.Enter:
                 _desiredColumn = -1;
+                if (_state.IsReadOnly)
+                    break;
                 _state.Document.Insert(oldCursor, _state.Decoder.EncodeString("\n"));
                 newCursor = oldCursor + _state.Decoder.MinCharBytes;
                 _state.InvalidateSearchResults();
@@ -513,7 +519,7 @@ internal sealed class TextViewControl : Control
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (_state.Document is null || string.IsNullOrEmpty(e.Text)) return;
+        if (_state.Document is null || string.IsNullOrEmpty(e.Text) || _state.IsReadOnly) return;
 
         _desiredColumn = -1;
         byte[] encoded = _state.Decoder.EncodeString(e.Text);

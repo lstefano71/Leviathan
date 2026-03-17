@@ -388,6 +388,11 @@ internal sealed class HexViewControl : Control
                 int hexDigit = GetHexDigit(e.Key);
                 if (hexDigit >= 0 && _state.HexCursorOffset >= 0)
                 {
+                    if (_state.IsReadOnly)
+                    {
+                        e.Handled = true;
+                        return;
+                    }
                     InsertHexNibble(hexDigit);
                     e.Handled = true;
                     InvalidateVisual();
