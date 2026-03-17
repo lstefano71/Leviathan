@@ -640,11 +640,13 @@ internal sealed class TextViewControl : Control
         if (!_isPointerSelectionActive)
             return;
 
+        bool shiftPressed = _pointerSelectionStartedWithShift;
+        bool selectionExtended = _pointerSelectionExtended;
+
         if (e.Pointer.Captured == this)
             e.Pointer.Capture(null);
 
-        if (ShouldClearSelectionAfterPointerRelease(_pointerSelectionStartedWithShift, _pointerSelectionExtended))
-            _state.TextSelectionAnchor = -1;
+        _state.TextSelectionAnchor = ResolveSelectionAnchorAfterPointerRelease(_state.TextSelectionAnchor, shiftPressed, selectionExtended);
 
         _isPointerSelectionActive = false;
         _pointerSelectionExtended = false;
@@ -1889,6 +1891,9 @@ internal sealed class TextViewControl : Control
 
     internal static bool ShouldClearSelectionAfterPointerRelease(bool shiftPressed, bool selectionExtended)
         => !shiftPressed && !selectionExtended;
+
+    internal static long ResolveSelectionAnchorAfterPointerRelease(long currentAnchor, bool shiftPressed, bool selectionExtended)
+        => ShouldClearSelectionAfterPointerRelease(shiftPressed, selectionExtended) ? -1 : currentAnchor;
 
     internal static bool TryGetSelectionDeleteRange(long selectionStart, long selectionEnd, out long deleteStart, out long deleteLength)
     {

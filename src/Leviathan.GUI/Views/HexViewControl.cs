@@ -609,11 +609,16 @@ internal sealed class HexViewControl : Control
         if (!_isPointerSelectionActive)
             return;
 
+        bool pointerSelectionStartedWithShift = _pointerSelectionStartedWithShift;
+        bool pointerSelectionExtended = _pointerSelectionExtended;
+
         if (e.Pointer.Captured == this)
             e.Pointer.Capture(null);
 
-        if (ShouldClearSelectionAfterPointerRelease(_pointerSelectionStartedWithShift, _pointerSelectionExtended))
-            _state.HexSelectionAnchor = -1;
+        _state.HexSelectionAnchor = ResolveSelectionAnchorAfterPointerRelease(
+            _state.HexSelectionAnchor,
+            pointerSelectionStartedWithShift,
+            pointerSelectionExtended);
 
         _isPointerSelectionActive = false;
         _pointerSelectionExtended = false;
@@ -756,6 +761,9 @@ internal sealed class HexViewControl : Control
 
         return hitOffset;
     }
+
+    internal static long ResolveSelectionAnchorAfterPointerRelease(long currentAnchor, bool shiftPressed, bool selectionExtended)
+        => ShouldClearSelectionAfterPointerRelease(shiftPressed, selectionExtended) ? -1 : currentAnchor;
 
     internal static bool ShouldClearSelectionAfterPointerRelease(bool shiftPressed, bool selectionExtended)
         => !shiftPressed && !selectionExtended;

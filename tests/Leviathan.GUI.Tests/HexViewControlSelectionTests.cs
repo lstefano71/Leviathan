@@ -55,4 +55,18 @@ public sealed class HexViewControlSelectionTests
         bool shouldClear = HexViewControl.ShouldClearSelectionAfterPointerRelease(shiftPressed: true, selectionExtended: false);
         Assert.False(shouldClear);
     }
+
+    [Fact]
+    public void ResolveSelectionAnchorAfterPointerRelease_NoShiftAndNoDrag_ClearsSelection()
+    {
+        long anchor = HexViewControl.ResolveSelectionAnchorAfterPointerRelease(55, shiftPressed: false, selectionExtended: false);
+        Assert.Equal(-1, anchor);
+    }
+
+    [Fact]
+    public void ResolveSelectionAnchorAfterPointerRelease_DragSelection_PreservesSelection()
+    {
+        long anchor = HexViewControl.ResolveSelectionAnchorAfterPointerRelease(55, shiftPressed: false, selectionExtended: true);
+        Assert.Equal(55, anchor);
+    }
 }

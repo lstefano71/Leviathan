@@ -57,6 +57,27 @@ public sealed class TextViewControlSelectionTests
     }
 
     [Fact]
+    public void ResolveSelectionAnchorAfterPointerRelease_ClickWithoutSelection_ClearsAnchor()
+    {
+        long anchor = TextViewControl.ResolveSelectionAnchorAfterPointerRelease(32, shiftPressed: false, selectionExtended: false);
+        Assert.Equal(-1, anchor);
+    }
+
+    [Fact]
+    public void ResolveSelectionAnchorAfterPointerRelease_DragSelection_PreservesAnchor()
+    {
+        long anchor = TextViewControl.ResolveSelectionAnchorAfterPointerRelease(32, shiftPressed: false, selectionExtended: true);
+        Assert.Equal(32, anchor);
+    }
+
+    [Fact]
+    public void ResolveSelectionAnchorAfterPointerRelease_ShiftSelection_PreservesAnchor()
+    {
+        long anchor = TextViewControl.ResolveSelectionAnchorAfterPointerRelease(32, shiftPressed: true, selectionExtended: false);
+        Assert.Equal(32, anchor);
+    }
+
+    [Fact]
     public void TryGetSelectionDeleteRange_ValidRange_ReturnsInclusiveLength()
     {
         bool ok = TextViewControl.TryGetSelectionDeleteRange(10, 14, out long start, out long length);
