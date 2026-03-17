@@ -2,13 +2,14 @@ using Avalonia.Media;
 using Avalonia.Styling;
 
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Leviathan.GUI.Helpers;
 
 /// <summary>
-/// A color theme defining the 13 color roles used by the custom view controls
+/// A color theme defining the color roles used by the custom view controls
 /// (HexView, TextView, CsvView). Themes are either built-in or loaded from JSON
 /// files in the <c>themes/</c> directory.
 /// </summary>
@@ -257,14 +258,20 @@ internal sealed class ColorTheme
             return null;
         }
 
+        return FromThemeDto(dto);
+    }
+
+    /// <summary>
+    /// Creates a theme from a deserialized DTO.
+    /// </summary>
+    internal static ColorTheme? FromThemeDto(ThemeDto? dto)
+    {
         if (dto is null || string.IsNullOrWhiteSpace(dto.Name))
             return null;
 
-        ThemeVariant baseVariant = string.Equals(dto.Base, "light", StringComparison.OrdinalIgnoreCase)
-            ? ThemeVariant.Light
-            : ThemeVariant.Dark;
+        ThemeVariant baseVariant = ParseBaseVariant(dto.Base);
 
-        ColorTheme fallback = baseVariant == ThemeVariant.Light ? Light : Dark;
+        ColorTheme fallback = GetFallbackTheme(baseVariant);
 
         string id = !string.IsNullOrWhiteSpace(dto.Id)
             ? dto.Id!
@@ -276,25 +283,163 @@ internal sealed class ColorTheme
             id: id,
             name: dto.Name!,
             baseVariant: baseVariant,
-            textPrimary: ParseBrush(c, "textPrimary", fallback.TextPrimary),
-            textSecondary: ParseBrush(c, "textSecondary", fallback.TextSecondary),
-            textMuted: ParseBrush(c, "textMuted", fallback.TextMuted),
-            background: ParseBrush(c, "background", fallback.Background),
-            selectionHighlight: ParseBrush(c, "selectionHighlight", fallback.SelectionHighlight),
-            cursorHighlight: ParseBrush(c, "cursorHighlight", fallback.CursorHighlight),
-            gridLine: ParseBrush(c, "gridLine", fallback.GridLine),
-            headerBackground: ParseBrush(c, "headerBackground", fallback.HeaderBackground),
-            headerText: ParseBrush(c, "headerText", fallback.HeaderText),
-            gutterBackground: ParseBrush(c, "gutterBackground", fallback.GutterBackground),
-            cursorBar: ParseBrush(c, "cursorBar", fallback.CursorBar),
-            matchHighlight: ParseBrush(c, "matchHighlight", fallback.MatchHighlight),
-            activeMatchHighlight: ParseBrush(c, "activeMatchHighlight", fallback.ActiveMatchHighlight),
-            rowStripe: ParseBrush(c, "rowStripe", fallback.RowStripe),
-            columnStripe: ParseBrush(c, "columnStripe", fallback.ColumnStripe)
+            textPrimary: ParseBrush(c, ThemeColorKeys.TextPrimary, fallback.TextPrimary),
+            textSecondary: ParseBrush(c, ThemeColorKeys.TextSecondary, fallback.TextSecondary),
+            textMuted: ParseBrush(c, ThemeColorKeys.TextMuted, fallback.TextMuted),
+            background: ParseBrush(c, ThemeColorKeys.Background, fallback.Background),
+            selectionHighlight: ParseBrush(c, ThemeColorKeys.SelectionHighlight, fallback.SelectionHighlight),
+            cursorHighlight: ParseBrush(c, ThemeColorKeys.CursorHighlight, fallback.CursorHighlight),
+            gridLine: ParseBrush(c, ThemeColorKeys.GridLine, fallback.GridLine),
+            headerBackground: ParseBrush(c, ThemeColorKeys.HeaderBackground, fallback.HeaderBackground),
+            headerText: ParseBrush(c, ThemeColorKeys.HeaderText, fallback.HeaderText),
+            gutterBackground: ParseBrush(c, ThemeColorKeys.GutterBackground, fallback.GutterBackground),
+            cursorBar: ParseBrush(c, ThemeColorKeys.CursorBar, fallback.CursorBar),
+            matchHighlight: ParseBrush(c, ThemeColorKeys.MatchHighlight, fallback.MatchHighlight),
+            activeMatchHighlight: ParseBrush(c, ThemeColorKeys.ActiveMatchHighlight, fallback.ActiveMatchHighlight),
+            rowStripe: ParseBrush(c, ThemeColorKeys.RowStripe, fallback.RowStripe),
+            columnStripe: ParseBrush(c, ThemeColorKeys.ColumnStripe, fallback.ColumnStripe)
         );
     }
 
+    /// <summary>
+    /// Serializes this theme to JSON using the ThemeDto schema.
+    /// </summary>
+    internal string ToJson(bool indented = true)
+    {
+        ThemeDto dto = ToDto();
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = indented })) {
+            JsonSerializer.Serialize(writer, dto, ColorThemeJsonContext.Default.ThemeDto);
+        }
+
+        return Encoding.UTF8.GetString(stream.GetBuffer(), 0, checked((int)stream.Length));
+    }
+
+    /// <summary>
+    /// Saves this theme as JSON to disk using atomic replace semantics.
+    /// </summary>
+    internal void SaveToJsonFile(string path, bool indented = true)
+    {
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        string tempPath = path + ".tmp";
+        try {
+            using (FileStream stream = new(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = indented })) {
+                JsonSerializer.Serialize(writer, ToDto(), ColorThemeJsonContext.Default.ThemeDto);
+            }
+
+            File.Move(tempPath, path, overwrite: true);
+        } finally {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    private ThemeDto ToDto()
+    {
+        return new ThemeDto {
+            Id = Id,
+            Name = Name,
+            Base = BaseVariantToString(BaseVariant),
+            Colors = ToColorValues(this)
+        };
+    }
+
     // ── Color parsing helpers ────────────────────────────────────────
+
+    /// <summary>
+    /// Converts a theme variant to its persisted JSON base identifier.
+    /// </summary>
+    internal static string BaseVariantToString(ThemeVariant baseVariant) =>
+        baseVariant == ThemeVariant.Light ? "light" : "dark";
+
+    /// <summary>
+    /// Parses a persisted JSON base identifier.
+    /// </summary>
+    internal static ThemeVariant ParseBaseVariant(string? baseVariant) =>
+        string.Equals(baseVariant, "light", StringComparison.OrdinalIgnoreCase)
+            ? ThemeVariant.Light
+            : ThemeVariant.Dark;
+
+    /// <summary>
+    /// Returns the fallback built-in theme for a base variant.
+    /// </summary>
+    internal static ColorTheme GetFallbackTheme(ThemeVariant baseVariant) =>
+        baseVariant == ThemeVariant.Light ? Light : Dark;
+
+    /// <summary>
+    /// Returns all color slots from a theme as serializable strings.
+    /// </summary>
+    internal static Dictionary<string, string> ToColorValues(ColorTheme theme)
+    {
+        return new Dictionary<string, string>(ThemeColorKeys.All.Count, StringComparer.Ordinal) {
+            [ThemeColorKeys.TextPrimary] = FormatBrushColor(theme.TextPrimary),
+            [ThemeColorKeys.TextSecondary] = FormatBrushColor(theme.TextSecondary),
+            [ThemeColorKeys.TextMuted] = FormatBrushColor(theme.TextMuted),
+            [ThemeColorKeys.Background] = FormatBrushColor(theme.Background),
+            [ThemeColorKeys.SelectionHighlight] = FormatBrushColor(theme.SelectionHighlight),
+            [ThemeColorKeys.CursorHighlight] = FormatBrushColor(theme.CursorHighlight),
+            [ThemeColorKeys.GridLine] = FormatBrushColor(theme.GridLine),
+            [ThemeColorKeys.HeaderBackground] = FormatBrushColor(theme.HeaderBackground),
+            [ThemeColorKeys.HeaderText] = FormatBrushColor(theme.HeaderText),
+            [ThemeColorKeys.GutterBackground] = FormatBrushColor(theme.GutterBackground),
+            [ThemeColorKeys.CursorBar] = FormatBrushColor(theme.CursorBar),
+            [ThemeColorKeys.MatchHighlight] = FormatBrushColor(theme.MatchHighlight),
+            [ThemeColorKeys.ActiveMatchHighlight] = FormatBrushColor(theme.ActiveMatchHighlight),
+            [ThemeColorKeys.RowStripe] = FormatBrushColor(theme.RowStripe),
+            [ThemeColorKeys.ColumnStripe] = FormatBrushColor(theme.ColumnStripe)
+        };
+    }
+
+    /// <summary>
+    /// Returns the fallback color value for a slot and base variant.
+    /// </summary>
+    internal static string GetFallbackColorValue(string colorKey, ThemeVariant baseVariant)
+    {
+        ColorTheme fallback = GetFallbackTheme(baseVariant);
+        return colorKey switch {
+            ThemeColorKeys.TextPrimary => FormatBrushColor(fallback.TextPrimary),
+            ThemeColorKeys.TextSecondary => FormatBrushColor(fallback.TextSecondary),
+            ThemeColorKeys.TextMuted => FormatBrushColor(fallback.TextMuted),
+            ThemeColorKeys.Background => FormatBrushColor(fallback.Background),
+            ThemeColorKeys.SelectionHighlight => FormatBrushColor(fallback.SelectionHighlight),
+            ThemeColorKeys.CursorHighlight => FormatBrushColor(fallback.CursorHighlight),
+            ThemeColorKeys.GridLine => FormatBrushColor(fallback.GridLine),
+            ThemeColorKeys.HeaderBackground => FormatBrushColor(fallback.HeaderBackground),
+            ThemeColorKeys.HeaderText => FormatBrushColor(fallback.HeaderText),
+            ThemeColorKeys.GutterBackground => FormatBrushColor(fallback.GutterBackground),
+            ThemeColorKeys.CursorBar => FormatBrushColor(fallback.CursorBar),
+            ThemeColorKeys.MatchHighlight => FormatBrushColor(fallback.MatchHighlight),
+            ThemeColorKeys.ActiveMatchHighlight => FormatBrushColor(fallback.ActiveMatchHighlight),
+            ThemeColorKeys.RowStripe => FormatBrushColor(fallback.RowStripe),
+            ThemeColorKeys.ColumnStripe => FormatBrushColor(fallback.ColumnStripe),
+            _ => throw new ArgumentOutOfRangeException(nameof(colorKey), colorKey, "Unknown theme color key.")
+        };
+    }
+
+    /// <summary>
+    /// Converts a brush to a persisted hex color string.
+    /// </summary>
+    internal static string FormatBrushColor(IBrush brush)
+    {
+        if (brush is not ISolidColorBrush solidBrush)
+            return "#000000";
+
+        return FormatColor(solidBrush.Color);
+    }
+
+    /// <summary>
+    /// Converts a color to <c>#RRGGBB</c> or <c>#AARRGGBB</c>.
+    /// </summary>
+    internal static string FormatColor(Color color)
+    {
+        return color.A == byte.MaxValue
+            ? $"#{color.R:X2}{color.G:X2}{color.B:X2}"
+            : $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}";
+    }
 
     private static IBrush ParseBrush(Dictionary<string, string>? colors, string key, IBrush fallback)
     {
@@ -363,6 +508,7 @@ internal sealed class ColorTheme
 
     private static SolidColorBrush BrushA(byte a, byte r, byte g, byte b) =>
         new(Color.FromArgb(a, r, g, b));
+
 }
 
 // ── JSON DTO for user theme files ────────────────────────────────────

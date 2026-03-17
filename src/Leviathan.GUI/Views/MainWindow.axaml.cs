@@ -21,6 +21,9 @@ namespace Leviathan.GUI.Views;
 public sealed partial class MainWindow : Window
 {
     private const string OnlineHelpUrl = "https://github.com/lstefano71/Leviathan/blob/main/docs/help.md";
+    private static FilePickerFileType ThemeJsonFileType { get; } = new("Theme JSON") {
+        Patterns = ["*.json"]
+    };
     private readonly AppState _state = new();
     private HexViewControl? _hexView;
     private TextViewControl? _textView;
@@ -510,7 +513,7 @@ public sealed partial class MainWindow : Window
     private void InitializeThemeAndFont()
     {
         // Load user themes from themes/ directory
-        string themesDir = Path.Combine(AppContext.BaseDirectory, "themes");
+        string themesDir = GetThemesDirectory();
         _state.UserThemes = ColorTheme.LoadUserThemes(themesDir);
 
         // Resolve active theme
@@ -523,18 +526,74 @@ public sealed partial class MainWindow : Window
         _state.ContentTypeface = new Typeface($"{fontFamily}, Consolas, Courier New, monospace");
     }
 
+    private static string GetThemesDirectory() => Path.Combine(AppContext.BaseDirectory, "themes");
+
+    private async Task ImportThemeAsync()
+    {
+        IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(
+            new FilePickerOpenOptions {
+                Title = ThemeCommands.ImportTheme,
+                AllowMultiple = false,
+                FileTypeFilter = [ThemeJsonFileType, FilePickerFileTypes.All]
+            });
+
+        if (files.Count == 0 || files[0].TryGetLocalPath() is not { } sourcePath) {
+            FocusActiveViewAsync();
+            return;
+        }
+
+        ThemeFileOperationResult result = UserThemeFileOperations.ImportTheme(sourcePath, GetThemesDirectory());
+        if (!result.Success) {
+            ShowErrorDialog("Import Theme Failed", result.Message);
+            FocusActiveViewAsync();
+            return;
+        }
+
+        _state.UserThemes = ColorTheme.LoadUserThemes(GetThemesDirectory());
+        BuildThemeMenu();
+        RefreshCommandPaletteCommands();
+        FocusActiveViewAsync();
+    }
+
+    private async Task ExportCurrentThemeAsync()
+    {
+        IStorageFile? file = await StorageProvider.SaveFilePickerAsync(
+            new FilePickerSaveOptions {
+                Title = ThemeCommands.ExportCurrentTheme,
+                SuggestedFileName = $"{_state.ActiveTheme.Id}.json",
+                DefaultExtension = "json",
+                FileTypeChoices = [ThemeJsonFileType, FilePickerFileTypes.All]
+            });
+
+        if (file?.TryGetLocalPath() is not { } destinationPath) {
+            FocusActiveViewAsync();
+            return;
+        }
+
+        ThemeFileOperationResult result = UserThemeFileOperations.ExportTheme(_state.ActiveTheme, destinationPath);
+        if (!result.Success)
+            ShowErrorDialog("Export Theme Failed", result.Message);
+
+        FocusActiveViewAsync();
+    }
+
     private void SwitchTheme(string themeId)
     {
         ColorTheme theme = ColorTheme.FindById(themeId, _state.UserThemes);
-        _state.ActiveTheme = theme;
-        _state.Settings.ThemeName = theme.Id;
-        _state.Settings.Save();
+        ApplyTheme(theme, persistSelection: true);
+    }
 
-        // Switch Avalonia chrome variant
+    private void ApplyTheme(ColorTheme theme, bool persistSelection)
+    {
+        _state.ActiveTheme = theme;
+        if (persistSelection) {
+            _state.Settings.ThemeName = theme.Id;
+            _state.Settings.Save();
+        }
+
         if (Application.Current is { } app)
             app.RequestedThemeVariant = theme.BaseVariant;
 
-        // Refresh custom view controls
         _hexView?.ApplyThemeAndFont();
         _textView?.ApplyThemeAndFont();
         _csvView?.ApplyThemeAndFont();
@@ -567,6 +626,28 @@ public sealed partial class MainWindow : Window
                 MenuTheme.Items.Add(item);
             }
         }
+
+        MenuTheme.Items.Add(new Separator());
+        MenuItem importThemeItem = new() { Header = ThemeCommands.ImportTheme };
+        importThemeItem.Click += async (_, _) => {
+            SuppressNextMenuFocusRestore();
+            await ImportThemeAsync();
+        };
+        MenuTheme.Items.Add(importThemeItem);
+
+        MenuItem exportThemeItem = new() { Header = ThemeCommands.ExportCurrentTheme };
+        exportThemeItem.Click += async (_, _) => {
+            SuppressNextMenuFocusRestore();
+            await ExportCurrentThemeAsync();
+        };
+        MenuTheme.Items.Add(exportThemeItem);
+
+        MenuItem themeEditorItem = new() { Header = ThemeCommands.ThemeEditor };
+        themeEditorItem.Click += async (_, _) => {
+            SuppressNextMenuFocusRestore();
+            await ShowThemeEditorDialog();
+        };
+        MenuTheme.Items.Add(themeEditorItem);
     }
 
     private void ShowFontPicker()
@@ -1610,6 +1691,9 @@ public sealed partial class MainWindow : Window
         _commandPalette.RegisterCommand("About", "About Leviathan", ShowAboutDialog);
         _commandPalette.RegisterCommand("Keyboard Shortcuts", "Show key combinations (F1)", ShowKeyboardShortcuts);
         _commandPalette.RegisterCommand("Online Help", "Open docs/help.md in browser", OpenOnlineHelp);
+        _commandPalette.RegisterCommand(ThemeCommands.ImportTheme, "Import a theme JSON file", () => _ = ImportThemeAsync());
+        _commandPalette.RegisterCommand(ThemeCommands.ExportCurrentTheme, "Export the active theme to JSON", () => _ = ExportCurrentThemeAsync());
+        _commandPalette.RegisterCommand(ThemeCommands.ThemeEditor, "Open advanced color theme editor", () => _ = ShowThemeEditorDialog());
 
         // Theme commands
         foreach (ColorTheme theme in ColorTheme.BuiltInThemes) {
@@ -2039,6 +2123,25 @@ public sealed partial class MainWindow : Window
     }
 
     // ─── CSV dialogs ───
+
+    private async Task ShowThemeEditorDialog()
+    {
+        ThemeEditorDialog dialog = new(
+            GetThemesDirectory(),
+            _state.UserThemes,
+            _state.ActiveTheme.Id,
+            ApplyTheme,
+            UpdateUserThemesFromEditor);
+        await dialog.ShowDialog(this);
+        FocusActiveViewAsync();
+    }
+
+    private void UpdateUserThemesFromEditor(List<ColorTheme> userThemes)
+    {
+        _state.UserThemes = userThemes;
+        BuildThemeMenu();
+        RefreshCommandPaletteCommands();
+    }
 
     private async Task ShowCsvSettingsDialog()
     {

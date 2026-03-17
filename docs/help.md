@@ -20,6 +20,50 @@ Leviathan is a large-file editor with Hex, Text, and CSV views.
 - Open with `Ctrl+P` when a file is open.
 - Use it for view switches, encoding changes, bytes/row, themes, and read-only toggles.
 
+## Themes
+
+### Where themes are stored
+
+- **Built-in themes** are bundled with Leviathan and are read-only.
+- **User themes** are JSON files stored in the `themes` folder next to the Leviathan executable.
+- If the folder does not exist yet, it is created the first time you save or import a user theme.
+
+### Import and export
+
+- Open the **Theme** menu and choose:
+  - **Import Theme...** to load a `.json` theme file.
+  - **Export Current Theme...** to save the currently active theme to a `.json` file.
+- You can run the same actions from the Command Palette (`Ctrl+P`) by searching for those command names.
+- If an imported theme conflicts with an existing theme name/ID, Leviathan keeps both by generating a unique name/ID.
+
+### Theme Editor (advanced editor)
+
+- Open it from **Theme → Theme Editor...** (or via Command Palette).
+- Select a theme on the left, then edit:
+  - Theme **ID**, **Name**, and **Base Variant** (Dark/Light)
+  - Individual color slots using **Pick**, direct text input, or **Reset**
+- To customize a built-in theme, start with **Duplicate** and edit the new user copy.
+
+### Live preview, Apply, Save, Cancel
+
+- Valid changes are previewed live while the editor is open.
+- **Apply** updates the current session only (quick try-out, not persisted).
+- **Save** writes the theme to the user `themes` folder and persists it as your selected theme.
+- **Cancel**, `Esc`, or closing the editor discards uncommitted preview changes and restores the previously committed theme.
+
+### Compact Preview panel
+
+- The **Compact Preview** panel is a mini mockup of header, gutter, text, selection/cursor, stripes, grid lines, and search highlights.
+- Use it to quickly verify contrast/readability before applying or saving.
+
+### Safety notes (built-in vs user themes)
+
+- Built-in themes are immutable: you cannot overwrite, rename, or delete them.
+- User themes are editable and can be saved, renamed, deleted, imported, and exported.
+- Theme IDs must be unique and use letters, digits, or `-`.
+
+For a step-by-step guide and JSON examples, see **[Theme Guide](themes.md)**.
+
 ## Keyboard shortcuts
 
 - `Ctrl+O` Open file

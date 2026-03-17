@@ -1,0 +1,153 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Leviathan.GUI.Widgets.ThemeEditorDialog"
+        x:CompileBindings="True"
+        Title="Theme Editor"
+        Width="1120"
+        Height="760"
+        MinWidth="980"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid Margin="12" ColumnDefinitions="280,*" RowDefinitions="*,Auto" ColumnSpacing="12" RowSpacing="10">
+        <Border Grid.Row="0" Grid.Column="0"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                CornerRadius="6"
+                Padding="10">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Themes" FontWeight="SemiBold" />
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+                    <Button x:Name="DuplicateButton" Content="Duplicate" MinWidth="82" />
+                    <Button x:Name="RenameButton" Content="Rename" MinWidth="72" />
+                    <Button x:Name="DeleteButton" Content="Delete" MinWidth="72" />
+                </StackPanel>
+                <ListBox x:Name="ThemeListBox" Margin="0,10,0,0" />
+            </DockPanel>
+        </Border>
+
+        <Border Grid.Row="0" Grid.Column="1"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                CornerRadius="6"
+                Padding="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto" RowSpacing="8">
+                <TextBlock Grid.Row="0" Text="Theme Identity" FontWeight="SemiBold" />
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,220,18,Auto,*" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0" Text="ID" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1" x:Name="ThemeIdTextBox" />
+                    <TextBlock Grid.Column="3" Text="Name" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="4" x:Name="ThemeNameTextBox" />
+                </Grid>
+                <Grid Grid.Row="2" ColumnDefinitions="Auto,180,*" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0" Text="Base Variant" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" x:Name="BaseVariantCombo" SelectedIndex="0">
+                        <ComboBoxItem Content="Dark" Tag="dark" />
+                        <ComboBoxItem Content="Light" Tag="light" />
+                    </ComboBox>
+                </Grid>
+
+                <TextBlock Grid.Row="3" Text="Colors" FontWeight="SemiBold" Margin="0,4,0,0" />
+
+                <Border Grid.Row="4"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                        CornerRadius="4"
+                        Padding="6">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="ColorRowsHost" Spacing="6" />
+                    </ScrollViewer>
+                </Border>
+
+                <Border Grid.Row="5"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                        CornerRadius="4"
+                        Padding="8">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="6">
+                        <TextBlock Grid.Row="0" Text="Compact Preview" FontWeight="SemiBold" />
+                        <Border Grid.Row="1"
+                                x:Name="ThemePreviewRoot"
+                                CornerRadius="4"
+                                BorderThickness="1"
+                                Padding="0">
+                            <Grid RowDefinitions="32,*">
+                                <Border Grid.Row="0" x:Name="ThemePreviewHeader" Padding="8,0">
+                                    <TextBlock x:Name="ThemePreviewHeaderText"
+                                               VerticalAlignment="Center"
+                                               Text="HEADER  offset  hex  text" />
+                                </Border>
+
+                                <Grid Grid.Row="1" ColumnDefinitions="88,*">
+                                    <Border Grid.Column="0" x:Name="ThemePreviewGutter" Padding="8,6">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock x:Name="ThemePreviewGutterPrimaryText" Text="000080" />
+                                            <TextBlock x:Name="ThemePreviewGutterMutedText" Text="000081" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Grid Grid.Column="1" Margin="8,6" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="4">
+                                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+                                            <TextBlock x:Name="ThemePreviewTextPrimary" Text="Primary text" />
+                                            <TextBlock x:Name="ThemePreviewTextSecondary" Text="Secondary" />
+                                            <TextBlock x:Name="ThemePreviewTextMuted" Text="Muted" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                            <Border x:Name="ThemePreviewSelectionChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewSelectionText" Text="Selection" />
+                                            </Border>
+                                            <Border x:Name="ThemePreviewCursorChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewCursorText" Text="Cursor highlight" />
+                                            </Border>
+                                            <Border x:Name="ThemePreviewCursorBar" Width="3" Height="18" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                                            <Border x:Name="ThemePreviewRowStripeChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewRowStripeText" Text="Row stripe" />
+                                            </Border>
+                                            <Border x:Name="ThemePreviewColumnStripeChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewColumnStripeText" Text="Column stripe" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <Grid Grid.Row="3" ColumnDefinitions="*,8,*" Height="14">
+                                            <Border Grid.Column="0" x:Name="ThemePreviewGridHorizontalLine" BorderThickness="0,0,0,1" />
+                                            <Border Grid.Column="1" x:Name="ThemePreviewGridVerticalLine" BorderThickness="1,0,0,0" />
+                                            <Border Grid.Column="2" x:Name="ThemePreviewGridHorizontalLineRight" BorderThickness="0,0,0,1" />
+                                        </Grid>
+
+                                        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="8">
+                                            <Border x:Name="ThemePreviewMatchChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewMatchText" Text="Match" />
+                                            </Border>
+                                            <Border x:Name="ThemePreviewActiveMatchChip" CornerRadius="2" Padding="6,2">
+                                                <TextBlock x:Name="ThemePreviewActiveMatchText" Text="Active match" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <TextBlock Grid.Row="6" x:Name="ValidationTextBlock"
+                           Foreground="Tomato"
+                           TextWrapping="Wrap" />
+                <TextBlock Grid.Row="7" x:Name="StatusTextBlock"
+                           TextWrapping="Wrap" />
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="1" Grid.ColumnSpan="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8">
+            <Button x:Name="ApplyButton" Content="Apply" MinWidth="92" />
+            <Button x:Name="SaveButton" Content="Save" MinWidth="92" />
+            <Button x:Name="CancelButton" Content="Cancel" MinWidth="92" />
+        </StackPanel>
+    </Grid>
+</Window>

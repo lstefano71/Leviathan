@@ -2,6 +2,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 
 using Leviathan.GUI.Helpers;
+using System.Text.Json;
 
 namespace Leviathan.GUI.Tests;
 
@@ -311,6 +312,62 @@ public sealed class ColorThemeTests
         Assert.Equal(0, bg.Color.B);
     }
 
+    [Fact]
+    public void ToJson_HasExpectedThemeDtoFields()
+    {
+        string json = ColorTheme.GreenPhosphor.ToJson();
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+
+        Assert.Equal("green-phosphor", root.GetProperty("id").GetString());
+        Assert.Equal("Green Phosphor", root.GetProperty("name").GetString());
+        Assert.Equal("dark", root.GetProperty("base").GetString());
+
+        JsonElement colors = root.GetProperty("colors");
+        Assert.Equal("#33FF33", colors.GetProperty("textPrimary").GetString());
+        Assert.Equal("#0A33FF33", colors.GetProperty("rowStripe").GetString());
+        Assert.True(colors.TryGetProperty("columnStripe", out _));
+    }
+
+    [Fact]
+    public void ToJson_RoundTrip_PreservesIdentityAndColors()
+    {
+        string json = ColorTheme.AmberPhosphor.ToJson(indented: false);
+
+        ColorTheme? roundTripped = ColorTheme.LoadFromJson(json);
+        Assert.NotNull(roundTripped);
+        Assert.Equal(ColorTheme.AmberPhosphor.Id, roundTripped.Id);
+        Assert.Equal(ColorTheme.AmberPhosphor.Name, roundTripped.Name);
+        Assert.Equal(ColorTheme.AmberPhosphor.BaseVariant, roundTripped.BaseVariant);
+        AssertBrushColorEqual(ColorTheme.AmberPhosphor.TextPrimary, roundTripped.TextPrimary);
+        AssertBrushColorEqual(ColorTheme.AmberPhosphor.SelectionHighlight, roundTripped.SelectionHighlight);
+        AssertBrushColorEqual(ColorTheme.AmberPhosphor.ActiveMatchHighlight, roundTripped.ActiveMatchHighlight);
+        AssertBrushColorEqual(ColorTheme.AmberPhosphor.RowStripe, roundTripped.RowStripe);
+        AssertBrushColorEqual(ColorTheme.AmberPhosphor.ColumnStripe, roundTripped.ColumnStripe);
+    }
+
+    [Fact]
+    public void SaveToJsonFile_WritesLoadableThemeJson()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "leviathan_theme_export_" + Guid.NewGuid().ToString("N"));
+        string filePath = Path.Combine(tempDir, "exported-theme.json");
+
+        try {
+            ColorTheme.Light.SaveToJsonFile(filePath);
+
+            Assert.True(File.Exists(filePath));
+            string json = File.ReadAllText(filePath);
+            ColorTheme? loaded = ColorTheme.LoadFromJson(json);
+            Assert.NotNull(loaded);
+            Assert.Equal(ColorTheme.Light.Id, loaded.Id);
+            Assert.Equal(ColorTheme.Light.Name, loaded.Name);
+            Assert.Equal(ThemeVariant.Light, loaded.BaseVariant);
+        } finally {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
     // ── User theme loading ───────────────────────────────────────────
 
     [Fact]
@@ -442,5 +499,12 @@ public sealed class ColorThemeTests
         Assert.NotNull(theme.ActiveMatchHighlight);
         Assert.NotNull(theme.GridLinePen);
         Assert.NotNull(theme.GutterPen);
+    }
+
+    private static void AssertBrushColorEqual(IBrush expected, IBrush actual)
+    {
+        Color expectedColor = Assert.IsType<SolidColorBrush>(expected).Color;
+        Color actualColor = Assert.IsType<SolidColorBrush>(actual).Color;
+        Assert.Equal(expectedColor, actualColor);
     }
 }
