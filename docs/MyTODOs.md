@@ -23,7 +23,7 @@ Avalonia Front-end is in src/Leviathan.GUI which depends on src/Leviathan.Core.
 
 [ ] avalonia front-end: it would be nice if I could customize the keyboard shortcuts. Maybe also add some default shortcuts for common actions (like "save", "open", "go to offset", etc)?
 
-[ ] avalonia front-end: themes. maybe there should be an "import/export theme" command?  Maybe there should also be a theme editor within leviathan itself? or is that an overkill?
+[x] avalonia front-end: themes. maybe there should be an "import/export theme" command?  Maybe there should also be a theme editor within leviathan itself? or is that an overkill?
 
 [x] can you make sure the avalonia front-end has its version via GitVersioning like the TUI2, and gets compiled, tested and released by the github action pipelines along with the TUI2? what's the best practice for projects which release multiple different separate artifacts? Also: could you check if the release notes are up to the task? I noticed a sad "click here for full changelog" but maybe a list of main items inlined would help a returning user? Also: I think that a push to a branch different than main should trigger a pre-release instead of a full release. But I might want to test the exes of a pre-release manually. 
 

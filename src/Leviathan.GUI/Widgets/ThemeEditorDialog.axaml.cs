@@ -113,7 +113,7 @@ public sealed partial class ThemeEditorDialog : Window
     {
         foreach (ColorSlotDefinition slot in ColorSlots) {
             Grid rowGrid = new() {
-                ColumnDefinitions = new ColumnDefinitions("170,44,74,180,Auto"),
+                ColumnDefinitions = new ColumnDefinitions("170,52,180,Auto"),
                 ColumnSpacing = 8
             };
 
@@ -124,30 +124,19 @@ public sealed partial class ThemeEditorDialog : Window
             rowGrid.Children.Add(label);
             Grid.SetColumn(label, 0);
 
-            Border swatch = new() {
-                Width = 36,
-                Height = 20,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(2),
-                BorderBrush = Brushes.Gray,
-                Background = Brushes.Transparent,
+            ColorPicker colorPicker = new() {
+                Width = 44,
+                Height = 24,
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
             };
-            rowGrid.Children.Add(swatch);
-            Grid.SetColumn(swatch, 1);
-
-            Button pickButton = new() {
-                Content = "Pick…",
-                MinWidth = 68
-            };
-            pickButton.Click += async (_, _) => await PickColorAsync(slot.Key);
-            rowGrid.Children.Add(pickButton);
-            Grid.SetColumn(pickButton, 2);
+            colorPicker.PropertyChanged += (_, e) => OnColorPickerPropertyChanged(slot.Key, colorPicker, e);
+            rowGrid.Children.Add(colorPicker);
+            Grid.SetColumn(colorPicker, 1);
 
             TextBox valueTextBox = new();
             valueTextBox.TextChanged += (_, _) => OnColorTextChanged(slot.Key, valueTextBox.Text ?? string.Empty);
             rowGrid.Children.Add(valueTextBox);
-            Grid.SetColumn(valueTextBox, 3);
+            Grid.SetColumn(valueTextBox, 2);
 
             Button resetButton = new() {
                 Content = "Reset",
@@ -155,10 +144,10 @@ public sealed partial class ThemeEditorDialog : Window
             };
             resetButton.Click += (_, _) => ResetColor(slot.Key);
             rowGrid.Children.Add(resetButton);
-            Grid.SetColumn(resetButton, 4);
+            Grid.SetColumn(resetButton, 3);
 
             ColorRowsHost.Children.Add(rowGrid);
-            _colorRows[slot.Key] = new ColorRowControls(slot.Key, valueTextBox, swatch);
+            _colorRows[slot.Key] = new ColorRowControls(slot.Key, valueTextBox, colorPicker);
         }
     }
 
@@ -254,21 +243,15 @@ public sealed partial class ThemeEditorDialog : Window
         UpdateActionStates();
     }
 
-    private async Task PickColorAsync(string colorKey)
+    private void OnColorPickerPropertyChanged(string colorKey, ColorPicker picker, AvaloniaPropertyChangedEventArgs e)
     {
-        if (_currentModel is null || !_colorRows.TryGetValue(colorKey, out ColorRowControls? row))
+        if (_isPopulatingUi || _currentModel is null || e.Property != ColorPicker.ColorProperty)
             return;
 
-        Color initialColor = ColorTheme.TryParseColor(row.ValueTextBox.Text ?? string.Empty, out Color parsed)
-            ? parsed
-            : Colors.White;
-
-        ThemeColorPickerDialog picker = new(initialColor);
-        await picker.ShowDialog(this);
-        if (!picker.Applied)
-            return;
-
-        row.ValueTextBox.Text = ColorTheme.FormatColor(picker.SelectedColor);
+        string colorText = ColorTheme.FormatColor(picker.Color);
+        if (_colorRows.TryGetValue(colorKey, out ColorRowControls? row) &&
+            !string.Equals(row.ValueTextBox.Text, colorText, StringComparison.OrdinalIgnoreCase))
+            row.ValueTextBox.Text = colorText;
     }
 
     private void ResetColor(string colorKey)
@@ -589,11 +572,11 @@ public sealed partial class ThemeEditorDialog : Window
     private static void UpdateColorPreview(ColorRowControls row, string value)
     {
         if (ColorTheme.TryParseColor(value, out Color color)) {
-            row.ColorPreview.Background = new SolidColorBrush(color);
-            row.ColorPreview.BorderBrush = Brushes.Gray;
+            if (row.ColorPicker.Color != color)
+                row.ColorPicker.Color = color;
+            row.ValueTextBox.Foreground = null;
         } else {
-            row.ColorPreview.Background = Brushes.Transparent;
-            row.ColorPreview.BorderBrush = Brushes.IndianRed;
+            row.ValueTextBox.Foreground = Brushes.IndianRed;
         }
     }
 
@@ -677,7 +660,7 @@ public sealed partial class ThemeEditorDialog : Window
         }
     }
 
-    private sealed record ColorRowControls(string Key, TextBox ValueTextBox, Border ColorPreview);
+    private sealed record ColorRowControls(string Key, TextBox ValueTextBox, ColorPicker ColorPicker);
 
     private sealed class ThemeIdentityDialog : Window
     {
@@ -801,139 +784,4 @@ public sealed partial class ThemeEditorDialog : Window
         public bool Confirmed { get; private set; }
     }
 
-    private sealed class ThemeColorPickerDialog : Window
-    {
-        private readonly Slider _redSlider;
-        private readonly Slider _greenSlider;
-        private readonly Slider _blueSlider;
-        private readonly Slider _alphaSlider;
-        private readonly TextBlock _redValue;
-        private readonly TextBlock _greenValue;
-        private readonly TextBlock _blueValue;
-        private readonly TextBlock _alphaValue;
-        private readonly Border _preview;
-
-        public ThemeColorPickerDialog(Color initialColor)
-        {
-            Title = "Pick Color";
-            Width = 460;
-            Height = 300;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            CanResize = false;
-
-            Grid root = new() {
-                Margin = new Thickness(16),
-                RowDefinitions = new RowDefinitions("Auto,Auto,Auto,Auto,Auto,Auto"),
-                RowSpacing = 8
-            };
-
-            (_redSlider, _redValue) = AddColorSliderRow(root, row: 0, "Red", initialColor.R);
-            (_greenSlider, _greenValue) = AddColorSliderRow(root, row: 1, "Green", initialColor.G);
-            (_blueSlider, _blueValue) = AddColorSliderRow(root, row: 2, "Blue", initialColor.B);
-            (_alphaSlider, _alphaValue) = AddColorSliderRow(root, row: 3, "Alpha", initialColor.A);
-
-            _preview = new Border {
-                Height = 36,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(3),
-                BorderBrush = Brushes.Gray
-            };
-            root.Children.Add(_preview);
-            Grid.SetRow(_preview, 4);
-
-            StackPanel buttons = new() {
-                Orientation = Avalonia.Layout.Orientation.Horizontal,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                Spacing = 8
-            };
-            Button applyButton = new() { Content = "Apply", MinWidth = 80 };
-            Button cancelButton = new() { Content = "Cancel", MinWidth = 80 };
-            applyButton.Click += (_, _) => ApplyAndClose();
-            cancelButton.Click += (_, _) => Close();
-            buttons.Children.Add(applyButton);
-            buttons.Children.Add(cancelButton);
-            root.Children.Add(buttons);
-            Grid.SetRow(buttons, 5);
-
-            Content = root;
-            WireSliderEvents();
-            UpdatePreview();
-        }
-
-        public bool Applied { get; private set; }
-        public Color SelectedColor { get; private set; }
-
-        private static (Slider Slider, TextBlock ValueText) AddColorSliderRow(Grid root, int row, string labelText, byte initialValue)
-        {
-            Grid rowGrid = new() {
-                ColumnDefinitions = new ColumnDefinitions("56,*,44"),
-                ColumnSpacing = 8
-            };
-
-            rowGrid.Children.Add(new TextBlock {
-                Text = labelText,
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-            });
-            Slider slider = new() {
-                Minimum = 0,
-                Maximum = 255,
-                Value = initialValue
-            };
-            rowGrid.Children.Add(slider);
-            Grid.SetColumn(slider, 1);
-            TextBlock value = new() {
-                Text = initialValue.ToString(),
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
-            };
-            rowGrid.Children.Add(value);
-            Grid.SetColumn(value, 2);
-
-            root.Children.Add(rowGrid);
-            Grid.SetRow(rowGrid, row);
-            return (slider, value);
-        }
-
-        private void WireSliderEvents()
-        {
-            _redSlider.PropertyChanged += (_, _) => UpdatePreview();
-            _greenSlider.PropertyChanged += (_, _) => UpdatePreview();
-            _blueSlider.PropertyChanged += (_, _) => UpdatePreview();
-            _alphaSlider.PropertyChanged += (_, _) => UpdatePreview();
-        }
-
-        private void UpdatePreview()
-        {
-            byte red = ToByte(_redSlider.Value);
-            byte green = ToByte(_greenSlider.Value);
-            byte blue = ToByte(_blueSlider.Value);
-            byte alpha = ToByte(_alphaSlider.Value);
-
-            _redValue.Text = red.ToString();
-            _greenValue.Text = green.ToString();
-            _blueValue.Text = blue.ToString();
-            _alphaValue.Text = alpha.ToString();
-
-            Color color = Color.FromArgb(alpha, red, green, blue);
-            _preview.Background = new SolidColorBrush(color);
-        }
-
-        private static byte ToByte(double value)
-        {
-            int rounded = (int)Math.Round(value);
-            rounded = Math.Clamp(rounded, 0, 255);
-            return (byte)rounded;
-        }
-
-        private void ApplyAndClose()
-        {
-            SelectedColor = Color.FromArgb(
-                ToByte(_alphaSlider.Value),
-                ToByte(_redSlider.Value),
-                ToByte(_greenSlider.Value),
-                ToByte(_blueSlider.Value));
-            Applied = true;
-            Close();
-        }
-    }
 }
