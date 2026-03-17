@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 
+using Leviathan.Core.Indexing;
 using Leviathan.Core.Search;
 using Leviathan.Core.Text;
 using Leviathan.GUI.Helpers;
@@ -1541,12 +1542,16 @@ internal sealed class TextViewControl : Control
     {
         if (_state.Document is null || targetLine <= 1) return _state.BomLength;
 
+        LineIndex? lineIndex = _state.LineIndex;
         int minChar = _state.Decoder.MinCharBytes;
         long newlinesNeeded = targetLine - 1;
         long startOffset = _state.BomLength;
         long newlinesCounted = 0;
 
-        if (_state.LineIndex is { SparseEntryCount: > 0 } index) {
+        if (lineIndex is not null && !lineIndex.IsComplete && newlinesNeeded > lineIndex.TotalLineCount)
+            return EstimateOffsetOfLine(targetLine, lineIndex);
+
+        if (lineIndex is { SparseEntryCount: > 0 } index) {
             int sparseFactor = index.SparseFactor;
             int sparseIdx = (int)(newlinesNeeded / sparseFactor) - 1;
             if (sparseIdx >= index.SparseEntryCount)
@@ -1592,6 +1597,42 @@ internal sealed class TextViewControl : Control
         }
 
         return Math.Min(pos, _state.Document.Length);
+    }
+
+    private long EstimateOffsetOfLine(long targetLine, LineIndex? index)
+    {
+        if (_state.Document is null)
+            return _state.BomLength;
+
+        long docLength = _state.Document.Length;
+        if (docLength <= _state.BomLength)
+            return _state.BomLength;
+
+        int minChar = _state.Decoder.MinCharBytes;
+        long approx = _state.BomLength;
+
+        if (index is { SparseEntryCount: > 0 })
+        {
+            int lastSparseIdx = index.SparseEntryCount - 1;
+            long lastSparseOffset = index.GetSparseOffset(lastSparseIdx);
+            long sampleNewlines = (long)(lastSparseIdx + 1) * index.SparseFactor;
+            if (sampleNewlines > 0 && lastSparseOffset >= _state.BomLength)
+            {
+                double avgBytesPerLine = Math.Max(1.0, (lastSparseOffset - _state.BomLength + minChar) / (double)sampleNewlines);
+                long sampleLine = sampleNewlines + 1;
+                long remainingLines = Math.Max(0, targetLine - sampleLine);
+                approx = lastSparseOffset + minChar + (long)(remainingLines * avgBytesPerLine);
+            }
+        }
+        else
+        {
+            long estimatedLines = Math.Max(targetLine, _state.EstimatedTotalLines);
+            double ratio = (targetLine - 1) / (double)Math.Max(1, estimatedLines);
+            approx = _state.BomLength + (long)((docLength - _state.BomLength) * Math.Clamp(ratio, 0d, 1d));
+        }
+
+        approx = Math.Clamp(approx, _state.BomLength, docLength);
+        return FindLineStart(approx);
     }
 
     /// <summary>Checks if the byte before the given document offset is a newline.</summary>

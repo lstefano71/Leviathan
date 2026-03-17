@@ -72,11 +72,20 @@ public sealed partial class WelcomeScreen : UserControl
         _filteredEntries.Clear();
         _selectedIndex = -1;
 
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         foreach (string path in pinnedFiles)
+        {
+            if (!seen.Add(path))
+                continue;
             _allEntries.Add(new FileEntry(path, isPinned: true));
+        }
 
         foreach (string path in recentFiles)
+        {
+            if (!seen.Add(path))
+                continue;
             _allEntries.Add(new FileEntry(path, isPinned: false));
+        }
 
         ApplyFilter();
         StartMetadataLoading();
@@ -460,9 +469,9 @@ public sealed partial class WelcomeScreen : UserControl
                 _ => 0
             };
 
-            if (digit > 0 && digit <= _allEntries.Count) {
+            if (digit > 0 && digit <= _filteredEntries.Count) {
                 CancelMetadataLoading();
-                FileSelected?.Invoke(_allEntries[digit - 1].FullPath);
+                FileSelected?.Invoke(_filteredEntries[digit - 1].FullPath);
                 e.Handled = true;
             }
         }

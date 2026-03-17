@@ -37,6 +37,10 @@ public sealed partial class MainWindow : Window
     private long _lineEndingCacheLength = -1;
     private string _lineEndingCache = "";
     private readonly BuildIdentity _buildIdentity;
+    private long _lastIndexedLineCount = -1;
+    private bool _lastLineIndexComplete = true;
+    private long _lastIndexedRowCount = -1;
+    private bool _lastRowIndexComplete = true;
 
     public MainWindow()
     {
@@ -1147,12 +1151,43 @@ public sealed partial class MainWindow : Window
 
     private void UpdateIndexingStatus()
     {
+        bool lineIndexChanged = false;
+        bool rowIndexChanged = false;
+
         if (_state.Indexer?.Index is { } lineIndex) {
             long total = lineIndex.TotalLineCount;
             if (total > 0)
                 _state.EstimatedTotalLines = total;
+
+            bool complete = lineIndex.IsComplete;
+            lineIndexChanged = total != _lastIndexedLineCount || complete != _lastLineIndexComplete;
+            _lastIndexedLineCount = total;
+            _lastLineIndexComplete = complete;
+        } else if (_lastIndexedLineCount != -1 || !_lastLineIndexComplete) {
+            _lastIndexedLineCount = -1;
+            _lastLineIndexComplete = true;
+            lineIndexChanged = true;
         }
+
+        if (_state.CsvRowIndex is { } rowIndex) {
+            long totalRows = rowIndex.TotalRowCount;
+            bool complete = rowIndex.IsComplete;
+            rowIndexChanged = totalRows != _lastIndexedRowCount || complete != _lastRowIndexComplete;
+            _lastIndexedRowCount = totalRows;
+            _lastRowIndexComplete = complete;
+        } else if (_lastIndexedRowCount != -1 || !_lastRowIndexComplete) {
+            _lastIndexedRowCount = -1;
+            _lastRowIndexComplete = true;
+            rowIndexChanged = true;
+        }
+
         UpdateStatusBar();
+
+        if (lineIndexChanged && _state.ActiveView == ViewMode.Text)
+            _textView?.InvalidateVisual();
+
+        if (rowIndexChanged && _state.ActiveView == ViewMode.Csv)
+            _csvView?.InvalidateVisual();
     }
 
     private static string FormatFileSize(long bytes)
@@ -1189,7 +1224,30 @@ public sealed partial class MainWindow : Window
 
     private void PopulateWelcomeScreen()
     {
-        WelcomeScreen.Populate(_state.Settings.PinnedFiles, _state.Settings.RecentFiles);
+        (List<string> pinned, List<string> recent) = GetCleanMruLists();
+        WelcomeScreen.Populate(pinned, recent);
+    }
+
+    private (List<string> Pinned, List<string> Recent) GetCleanMruLists()
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> pinned = [];
+        foreach (string path in _state.Settings.PinnedFiles)
+        {
+            if (!seen.Add(path))
+                continue;
+            pinned.Add(path);
+        }
+
+        List<string> recent = [];
+        foreach (string path in _state.Settings.RecentFiles)
+        {
+            if (!seen.Add(path))
+                continue;
+            recent.Add(path);
+        }
+
+        return (pinned, recent);
     }
 
     // ─── File menu MRU ───
@@ -1207,8 +1265,8 @@ public sealed partial class MainWindow : Window
         foreach (Control c in toRemove)
             FileMenu.Items.Remove(c);
 
-        // Combine pinned + recent for the file menu
-        List<string> allFiles = [.. _state.Settings.PinnedFiles, .. _state.Settings.RecentFiles];
+        (List<string> pinned, List<string> recent) = GetCleanMruLists();
+        List<string> allFiles = [.. pinned, .. recent];
 
         if (allFiles.Count == 0) {
             MruSeparator.IsVisible = false;
@@ -1219,7 +1277,7 @@ public sealed partial class MainWindow : Window
                 string path = allFiles[i];
                 string fileName = Path.GetFileName(path);
                 int number = i + 1;
-                bool isPinned = _state.Settings.PinnedFiles.Contains(path);
+                bool isPinned = pinned.Contains(path, StringComparer.OrdinalIgnoreCase);
                 string prefix = isPinned ? "📌 " : "";
                 MenuItem mruItem = new() { Header = $"_{number} {prefix}{fileName}", StaysOpenOnClick = false };
                 string capturedPath = path;
@@ -1537,7 +1595,8 @@ public sealed partial class MainWindow : Window
             searchName: "Record Detail Panel",
             restoreFocusAfterExecute: true);
 
-        foreach (string pinnedPath in _state.Settings.PinnedFiles) {
+        (List<string> pinned, List<string> recent) = GetCleanMruLists();
+        foreach (string pinnedPath in pinned) {
             string capturedPath = pinnedPath;
             string fileName = Path.GetFileName(capturedPath);
             _commandPalette.RegisterCommand(
@@ -1547,7 +1606,7 @@ public sealed partial class MainWindow : Window
                 searchName: $"Open Pinned {fileName}");
         }
 
-        foreach (string recentPath in _state.Settings.RecentFiles.Take(20)) {
+        foreach (string recentPath in recent.Take(20)) {
             string capturedPath = recentPath;
             string fileName = Path.GetFileName(capturedPath);
             _commandPalette.RegisterCommand(
