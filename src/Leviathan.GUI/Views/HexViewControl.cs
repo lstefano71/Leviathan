@@ -66,6 +66,30 @@ internal sealed class HexViewControl : Control
     // Reusable char buffers for row-level text batching
     private char[] _hexRowBuffer = new char[256];
     private char[] _asciiRowBuffer = new char[64];
+
+    // Row-level FormattedText cache — keyed by row content hash (Phase 2)
+    private readonly Dictionary<long, (int contentHash, FormattedText hexText, FormattedText asciiText)> _rowTextCache = new();
+    private IBrush? _rowTextCacheTextBrush;
+    private IBrush? _rowTextCacheAsciiBrush;
+    private Typeface? _rowTextCacheTypeface;
+    private double _rowTextCacheFontSize;
+
+    // Cached header row FormattedText (hex + ASCII header lines)
+    private FormattedText? _cachedHeaderHexLine;
+    private FormattedText? _cachedHeaderAsciiLine;
+    private int _cachedHeaderBytesPerRow;
+    private double _cachedHeaderAddressWidth;
+
+    /// <summary>Pre-computed ASCII lookup table: byte → display char ('.' for non-printable).</summary>
+    private static readonly char[] AsciiLookup = InitAsciiLookup();
+
+    private static char[] InitAsciiLookup()
+    {
+        char[] table = new char[256];
+        for (int i = 0; i < 256; i++)
+            table[i] = i >= 0x20 && i < 0x7F ? (char)i : '.';
+        return table;
+    }
     private bool _isPointerSelectionActive;
     private bool _pointerSelectionExtended;
     private bool _pointerSelectionStartedWithShift;
@@ -322,21 +346,10 @@ internal sealed class HexViewControl : Control
             context.DrawText(offsetLabel, new Point(charWidth, 0));
         }
 
-        // Hex column offsets: 00 01 02 … 0F (matching byte positions)
-        for (int col = 0; col < bytesPerRow; col++) {
-            int groupSep = col / 8;
-            double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
-
-            FormattedText headerHex = _headerHexTextCache![col & 0xFF];
-            context.DrawText(headerHex, new Point(hexX, 0));
-        }
-
-        // ASCII column offsets: 0123456789ABCDEF (single char per column)
-        for (int col = 0; col < bytesPerRow; col++) {
-            double ax = asciiX + col * charWidth;
-            FormattedText headerAscii = _headerAsciiTextCache![col & 0xF];
-            context.DrawText(headerAscii, new Point(ax, 0));
-        }
+        // Hex + ASCII column headers (cached as full-line FormattedText)
+        EnsureHeaderLines(bytesPerRow, addressWidth, asciiX, charWidth, headerTextBrush);
+        context.DrawText(_cachedHeaderHexLine!, new Point(addressWidth, 0));
+        context.DrawText(_cachedHeaderAsciiLine!, new Point(asciiX, 0));
 
         // Header / data separator line
         IPen separatorPen = theme.GridLinePen;
@@ -363,6 +376,10 @@ internal sealed class HexViewControl : Control
         long selEnd = _state.HexSelEnd;
         long hexCursorOffset = _state.HexCursorOffset;
 
+        // Hoisted typeface/fontSize for row text construction
+        Typeface typeface = _state.ContentTypeface;
+        double fontSize = _state.ContentFontSize;
+
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
 
@@ -381,6 +398,16 @@ internal sealed class HexViewControl : Control
             _hexRowBuffer = new char[hexRowChars];
         if (_asciiRowBuffer.Length < bytesPerRow)
             _asciiRowBuffer = new char[bytesPerRow];
+
+        // Invalidate row text cache on brush/font change
+        if (_rowTextCacheTextBrush != textBrush || _rowTextCacheAsciiBrush != asciiBrush
+            || _rowTextCacheTypeface != typeface || _rowTextCacheFontSize != fontSize) {
+            _rowTextCache.Clear();
+            _rowTextCacheTextBrush = textBrush;
+            _rowTextCacheAsciiBrush = asciiBrush;
+            _rowTextCacheTypeface = typeface;
+            _rowTextCacheFontSize = fontSize;
+        }
 
         for (int row = 0; row < visibleRows; row++) {
             long rowOffset = startOffset + (long)row * bytesPerRow;
@@ -493,34 +520,47 @@ internal sealed class HexViewControl : Control
                 context.FillRectangle(selectionBrush, new Rect(sx, y, ex - sx + charWidth, lineHeight));
             }
 
-            // ── Row-level text rendering (2A) ──
-            // Build hex row string: "4F 72 69 67 69 6E 61 6C  20 ..."
-            int hexPos = 0;
-            for (int col = 0; col < rowBytes; col++) {
-                byte b = _readBuffer[rowStart + col];
-                _hexRowBuffer[hexPos++] = (char)HexChars[b >> 4];
-                _hexRowBuffer[hexPos++] = (char)HexChars[b & 0xF];
-                _hexRowBuffer[hexPos++] = ' ';
-                if ((col & 7) == 7 && col < rowBytes - 1)
-                    _hexRowBuffer[hexPos++] = ' '; // group separator
+            // ── Row-level text rendering (cached across frames) ──
+            // Content hash: cheap hash of the row bytes for cache key
+            int contentHash = ComputeRowContentHash(_readBuffer, rowStart, rowBytes);
+
+            if (_rowTextCache.TryGetValue(rowOffset, out var cached) && cached.contentHash == contentHash) {
+                // Cache hit — reuse existing FormattedText objects
+                context.DrawText(cached.hexText, new Point(addressWidth, y));
+                context.DrawText(cached.asciiText, new Point(asciiX, y));
+            } else {
+                // Cache miss — build strings and create FormattedText
+                int hexPos = 0;
+                for (int col = 0; col < rowBytes; col++) {
+                    byte b = _readBuffer[rowStart + col];
+                    _hexRowBuffer[hexPos++] = (char)HexChars[b >> 4];
+                    _hexRowBuffer[hexPos++] = (char)HexChars[b & 0xF];
+                    _hexRowBuffer[hexPos++] = ' ';
+                    if ((col & 7) == 7 && col < rowBytes - 1)
+                        _hexRowBuffer[hexPos++] = ' '; // group separator
+                }
+
+                FormattedText hexRowText = new(new string(_hexRowBuffer, 0, hexPos),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, typeface, fontSize, textBrush);
+                context.DrawText(hexRowText, new Point(addressWidth, y));
+
+                // Build ASCII row string using lookup table
+                for (int col = 0; col < rowBytes; col++)
+                    _asciiRowBuffer[col] = AsciiLookup[_readBuffer[rowStart + col]];
+
+                FormattedText asciiRowText = new(new string(_asciiRowBuffer, 0, rowBytes),
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, typeface, fontSize, asciiBrush);
+                context.DrawText(asciiRowText, new Point(asciiX, y));
+
+                _rowTextCache[rowOffset] = (contentHash, hexRowText, asciiRowText);
             }
-
-            FormattedText hexRowText = new(new string(_hexRowBuffer, 0, hexPos),
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
-            context.DrawText(hexRowText, new Point(addressWidth, y));
-
-            // Build ASCII row string
-            for (int col = 0; col < rowBytes; col++) {
-                byte b = _readBuffer[rowStart + col];
-                _asciiRowBuffer[col] = b >= 0x20 && b < 0x7F ? (char)b : '.';
-            }
-
-            FormattedText asciiRowText = new(new string(_asciiRowBuffer, 0, rowBytes),
-                System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, asciiBrush);
-            context.DrawText(asciiRowText, new Point(asciiX, y));
         }
+
+        // Evict row text cache when it grows too large
+        if (_rowTextCache.Count > Math.Max(256, visibleRows * 4))
+            _rowTextCache.Clear();
 
         QueueScrollBarUpdate();
     }
@@ -560,6 +600,9 @@ internal sealed class HexViewControl : Control
         _cacheAddressBrush = addressBrush;
         _cachedCharWidth = 0;
         _addressTextCache.Clear();
+        _rowTextCache.Clear();
+        _cachedHeaderHexLine = null;
+        _cachedHeaderAsciiLine = null;
 
         _hexByteTextCache = new FormattedText[256];
         _asciiByteTextCache = new FormattedText[256];
@@ -662,6 +705,54 @@ internal sealed class HexViewControl : Control
         double sx = _hexXPositions[startCol];
         double ex = _hexXPositions[endCol - 1];
         context.FillRectangle(brush, new Rect(sx, y, ex - sx + charWidth * 2, lineHeight));
+    }
+
+    /// <summary>Builds and caches full-line header FormattedText for hex and ASCII columns.</summary>
+    private void EnsureHeaderLines(int bytesPerRow, double addressWidth, double asciiX, double charWidth, IBrush headerTextBrush)
+    {
+        if (_cachedHeaderHexLine is not null && _cachedHeaderAsciiLine is not null
+            && _cachedHeaderBytesPerRow == bytesPerRow && _cachedHeaderAddressWidth == addressWidth)
+            return;
+
+        _cachedHeaderBytesPerRow = bytesPerRow;
+        _cachedHeaderAddressWidth = addressWidth;
+
+        // Build hex header: "00 01 02 03 04 05 06 07  08 09 ..."
+        int hexPos = 0;
+        int hexChars = bytesPerRow * 3 + (bytesPerRow + 7) / 8;
+        char[] hexBuf = hexChars <= _hexRowBuffer.Length ? _hexRowBuffer : new char[hexChars];
+        for (int col = 0; col < bytesPerRow; col++) {
+            hexBuf[hexPos++] = (char)HexChars[(col >> 4) & 0xF];
+            hexBuf[hexPos++] = (char)HexChars[col & 0xF];
+            hexBuf[hexPos++] = ' ';
+            if ((col & 7) == 7 && col < bytesPerRow - 1)
+                hexBuf[hexPos++] = ' ';
+        }
+        _cachedHeaderHexLine = new FormattedText(new string(hexBuf, 0, hexPos),
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+
+        // Build ASCII header: "0123456789ABCDEF0123..."
+        char[] asciiBuf = bytesPerRow <= _asciiRowBuffer.Length ? _asciiRowBuffer : new char[bytesPerRow];
+        for (int col = 0; col < bytesPerRow; col++)
+            asciiBuf[col] = (char)HexChars[col & 0xF];
+        _cachedHeaderAsciiLine = new FormattedText(new string(asciiBuf, 0, bytesPerRow),
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+    }
+
+    /// <summary>Computes a fast content hash for a row of bytes in the read buffer.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ComputeRowContentHash(byte[] buffer, int start, int length)
+    {
+        // FNV-1a inspired hash — fast and good distribution for byte sequences
+        uint hash = 2166136261;
+        int end = start + length;
+        for (int i = start; i < end; i++) {
+            hash ^= buffer[i];
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
