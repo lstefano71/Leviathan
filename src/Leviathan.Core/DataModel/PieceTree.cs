@@ -130,7 +130,6 @@ public sealed class PieceTree
         long remaining = length;
         while (remaining > 0) {
             var (node, localOff) = FindByOffset(logicalOffset);
-            long available = node.Piece.Length - localOff;
 
             if (localOff == 0 && remaining >= node.Piece.Length) {
                 // Remove entire node

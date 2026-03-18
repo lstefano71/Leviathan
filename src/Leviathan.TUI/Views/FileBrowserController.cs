@@ -8,7 +8,7 @@ internal sealed class FileBrowserController
 {
     private readonly AppState _state;
     private string _currentDirectory;
-    private List<FileEntry> _allEntries = [];
+    private readonly List<FileEntry> _allEntries = [];
     private List<FileEntry> _filteredEntries = [];
     private int _selectedIndex;
     private int _scrollOffset;

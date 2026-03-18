@@ -625,7 +625,7 @@ internal sealed class TextViewControl : Control
 
             // Phase 2: draw text as a single FormattedText run per line (1A)
             if (runLen > 0) {
-                string lineStr = new string(runBuffer, 0, runLen);
+                string lineStr = new(runBuffer, 0, runLen);
                 FormattedText lineText = new(lineStr,
                     System.Globalization.CultureInfo.InvariantCulture,
                     FlowDirection.LeftToRight, typeface, fontSize, textBrush);

@@ -12,9 +12,9 @@ namespace Leviathan.UI;
 /// Layout: [Offset] [Hex bytes N per row] [ASCII representation]
 /// Zero-allocation in the hot path — works with stack-allocated buffers.
 /// </summary>
-public sealed class HexView
+public sealed class HexView(Document document)
 {
-    private readonly Document _document;
+    private readonly Document _document = document;
 
     private long _baseOffset;       // first visible byte offset
     private int _bytesPerRow = 16;
@@ -67,11 +67,6 @@ public sealed class HexView
         _selectionAnchor = _selectedOffset;
         _nibbleLow = false;
         ScrollTo(offset);
-    }
-
-    public HexView(Document document)
-    {
-        _document = document;
     }
 
     /// <summary>

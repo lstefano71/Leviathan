@@ -2,7 +2,7 @@ namespace Leviathan.Core.Tests;
 
 public class DocumentTests
 {
-    private string CreateTempFile(byte[] content)
+    static private string CreateTempFile(byte[] content)
     {
         var path = Path.GetTempFileName();
         File.WriteAllBytes(path, content);

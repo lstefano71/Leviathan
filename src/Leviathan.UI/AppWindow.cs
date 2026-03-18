@@ -15,13 +15,13 @@ namespace Leviathan.UI;
 /// Manages the application window, OpenGL context, and ImGui lifecycle.
 /// Bridges Silk.NET input events into ImGui IO.
 /// </summary>
-public sealed class AppWindow : IDisposable
+public sealed class AppWindow(Action<float> renderCallback) : IDisposable
 {
     private IWindow _window = null!;
     private GL _gl = null!;
     private IInputContext _input = null!;
     private ImGuiContextPtr _imguiContext;
-    private readonly Action<float> _renderCallback;
+    private readonly Action<float> _renderCallback = renderCallback;
     private bool _disposed;
     private bool _closeConfirmed;
 
@@ -37,11 +37,6 @@ public sealed class AppWindow : IDisposable
     /// The array contains the full paths of the dropped files.
     /// </summary>
     public Action<string[]>? OnFileDrop { get; set; }
-
-    public AppWindow(Action<float> renderCallback)
-    {
-        _renderCallback = renderCallback;
-    }
 
     public void Run()
     {

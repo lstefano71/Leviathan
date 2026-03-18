@@ -149,7 +149,7 @@ public sealed partial class WelcomeScreen : UserControl
         }
     }
 
-    private void UpdateEntryMetadata(FileEntry entry, string? sizeText, string? dateText, bool isUnavailable)
+    static private void UpdateEntryMetadata(FileEntry entry, string? sizeText, string? dateText, bool isUnavailable)
     {
         entry.SizeText = sizeText;
         entry.DateText = dateText;
@@ -556,10 +556,10 @@ public sealed partial class WelcomeScreen : UserControl
     /// Mutable model for a single file entry in the welcome screen.
     /// Updated from background tasks via Dispatcher.
     /// </summary>
-    internal sealed class FileEntry
+    internal sealed class FileEntry(string fullPath, bool isPinned)
     {
-        public string FullPath { get; }
-        public bool IsPinned { get; }
+        public string FullPath { get; } = fullPath;
+        public bool IsPinned { get; } = isPinned;
         public string? SizeText { get; set; }
         public string? DateText { get; set; }
         public bool IsUnavailable { get; set; }
@@ -572,11 +572,5 @@ public sealed partial class WelcomeScreen : UserControl
 
         /// <summary>Reference to the visual row Border for selection highlighting.</summary>
         public Border? VisualRow { get; set; }
-
-        public FileEntry(string fullPath, bool isPinned)
-        {
-            FullPath = fullPath;
-            IsPinned = isPinned;
-        }
     }
 }

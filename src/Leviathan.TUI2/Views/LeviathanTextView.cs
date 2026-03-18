@@ -483,7 +483,7 @@ internal sealed class LeviathanTextView : View
             int endCol = _gutterWidth + (displayCharCount - visibleStart);
             bool cursorInNewlineArea = displayCharCount > 0
                 && _charByteOffsets.Count > 0
-                && _state.TextCursorOffset > lineDocOffset + _charByteOffsets[_charByteOffsets.Count - 1]
+                && _state.TextCursorOffset > lineDocOffset + _charByteOffsets[^1]
                 && _state.TextCursorOffset < endOffset;
             bool cursorAtEnd = (_state.TextCursorOffset == endOffset && !nextLineStartsHere)
                 || cursorInNewlineArea;

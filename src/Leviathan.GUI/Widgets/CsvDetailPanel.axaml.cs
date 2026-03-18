@@ -230,8 +230,6 @@ public sealed partial class CsvDetailPanel : UserControl
 
     private void UpdateHighlight(int activeCol, AppState state)
     {
-        List<SearchResult> matches = state.SearchResults;
-
         for (int i = 0; i < FieldsPanel.Children.Count; i++) {
             if (FieldsPanel.Children[i] is not Border border) continue;
 

@@ -642,16 +642,10 @@ public sealed partial class ThemeEditorDialog : Window
 
     private sealed record ColorSlotDefinition(string Key, string Label);
 
-    private sealed class ThemeListEntry
+    private sealed class ThemeListEntry(ColorTheme theme, bool isBuiltIn)
     {
-        public ThemeListEntry(ColorTheme theme, bool isBuiltIn)
-        {
-            Theme = theme;
-            IsBuiltIn = isBuiltIn;
-        }
-
-        public ColorTheme Theme { get; }
-        public bool IsBuiltIn { get; }
+        public ColorTheme Theme { get; } = theme;
+        public bool IsBuiltIn { get; } = isBuiltIn;
 
         public override string ToString()
         {

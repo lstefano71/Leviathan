@@ -70,7 +70,7 @@ internal sealed class CsvViewControl : Control
     private double _colXCharWidth;
 
     // Reusable char buffer for FormatCellPreview (3F)
-    private char[] _cellPreviewBuffer = new char[256];
+    private readonly char[] _cellPreviewBuffer = new char[256];
 
     // Cell text FormattedText cache — bounded, keyed by cell string (Phase 2)
     private readonly Dictionary<string, FormattedText> _cellTextCache = new();

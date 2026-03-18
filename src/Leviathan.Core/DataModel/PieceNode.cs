@@ -4,21 +4,14 @@ namespace Leviathan.Core.DataModel;
 /// A node in a Red-Black tree that tracks pieces.
 /// Each node caches the subtree size for O(log N) positional lookups.
 /// </summary>
-internal sealed class PieceNode
+internal sealed class PieceNode(Piece piece)
 {
-    public Piece Piece;
-    public long SubtreeLength; // sum of lengths in this subtree
+    public Piece Piece = piece;
+    public long SubtreeLength = piece.Length; // sum of lengths in this subtree
     public PieceNode? Left;
     public PieceNode? Right;
     public PieceNode? Parent;
-    public bool IsRed;
-
-    public PieceNode(Piece piece)
-    {
-        Piece = piece;
-        SubtreeLength = piece.Length;
-        IsRed = true; // new nodes are red
-    }
+    public bool IsRed = true;
 
     /// <summary>
     /// Recalculates the subtree length from children.

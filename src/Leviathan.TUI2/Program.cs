@@ -68,7 +68,7 @@ internal sealed class MainWindow : Window
     private readonly CommandPalettePopover _palettePopover;
     private readonly View _welcomeView;
     private readonly MenuBar _menuBar;
-    private CsvSettingsBar? _csvSettingsBar;
+    private readonly CsvSettingsBar? _csvSettingsBar;
     private MenuItem? _wordWrapItem;
     private CheckBox? _wordWrapCheckBox;
     private MenuItem? _encodingItem;

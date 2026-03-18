@@ -22,7 +22,7 @@ internal sealed class LeviathanCsvView : View
 {
     private readonly AppState _state;
     private byte[] _readBuffer = new byte[64 * 1024];
-    private byte[] _scanBuffer = new byte[64 * 1024];
+    private readonly byte[] _scanBuffer = new byte[64 * 1024];
 
     private const int MinGutterWidth = 8;  // minimum gutter width
     private const int MinColumnWidth = 4;

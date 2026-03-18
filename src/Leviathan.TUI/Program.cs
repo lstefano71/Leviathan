@@ -874,7 +874,7 @@ static bool IsSafeText(string text)
     if (text.Length == 2 && text[0] == '[' && text[1] >= 'A' && text[1] <= 'Z')
         return false;
     // Reject CSI parameter fragments like "[1~", "[15~"
-    if (text.Length >= 2 && text[0] == '[' && text[text.Length - 1] == '~')
+    if (text.Length >= 2 && text[0] == '[' && text[^1] == '~')
         return false;
 
     return true;

@@ -68,7 +68,7 @@ internal sealed class CommandPalettePopover : PopoverImpl
         // Update filtering as user types
         _queryField.TextChanged += (_, _) => {
             string newQuery = _queryField.Text?.ToString() ?? "";
-            bool gotoMode = newQuery.StartsWith(":");
+            bool gotoMode = newQuery.StartsWith(':');
 
             if (gotoMode != _isGotoMode) {
                 _isGotoMode = gotoMode;

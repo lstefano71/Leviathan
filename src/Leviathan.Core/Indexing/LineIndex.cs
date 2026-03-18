@@ -13,13 +13,17 @@ namespace Leviathan.Core.Indexing;
 /// at 2-byte-aligned positions to avoid false positives from 0x0A appearing as the
 /// high byte of unrelated code units.
 /// </summary>
-public sealed class LineIndex
+/// <remarks>
+/// Constructs a line index. The sparse array stores every <paramref name="sparseFactor"/>th newline.
+/// </remarks>
+/// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
+public sealed class LineIndex(int charWidth = 1, int sparseFactor = 1000, int initialCapacity = 65536)
 {
-    private long[] _sparseOffsets; // offset of every Nth newline
+    private long[] _sparseOffsets = new long[initialCapacity]; // offset of every Nth newline
     private long _totalLineCount;
     private volatile bool _isComplete;
-    private readonly int _sparseFactor;
-    private readonly int _charWidth;
+    private readonly int _sparseFactor = sparseFactor;
+    private readonly int _charWidth = charWidth;
     private int _sparseEntryCount;
 
     /// <summary>Total number of hard line breaks found so far.</summary>
@@ -33,17 +37,6 @@ public sealed class LineIndex
 
     /// <summary>The sparse factor (number of newlines between stored entries).</summary>
     public int SparseFactor => _sparseFactor;
-
-    /// <summary>
-    /// Constructs a line index. The sparse array stores every <paramref name="sparseFactor"/>th newline.
-    /// </summary>
-    /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
-    public LineIndex(int charWidth = 1, int sparseFactor = 1000, int initialCapacity = 65536)
-    {
-        _charWidth = charWidth;
-        _sparseFactor = sparseFactor;
-        _sparseOffsets = new long[initialCapacity];
-    }
 
     /// <summary>
     /// Returns the byte offset of the Nth sparse entry (i.e., line <c>index * sparseFactor</c>).

@@ -16,12 +16,12 @@ namespace Leviathan.Core.Csv;
 /// would misidentify row boundaries in UTF-16 files where these byte values can
 /// appear inside multi-byte characters.
 /// </remarks>
-public sealed class CsvRowIndex
+public sealed class CsvRowIndex(int sparseFactor = 1000, int initialCapacity = 65536)
 {
-    private long[] _sparseOffsets;
+    private long[] _sparseOffsets = new long[initialCapacity];
     private long _totalRowCount;
     private volatile bool _isComplete;
-    private readonly int _sparseFactor;
+    private readonly int _sparseFactor = sparseFactor;
     private int _sparseEntryCount;
 
     /// <summary>Total number of CSV records found so far (excluding header if applicable).</summary>
@@ -47,12 +47,6 @@ public sealed class CsvRowIndex
 
     /// <summary>Scanner state carried between chunks.</summary>
     private ScanState _state = ScanState.Normal;
-
-    public CsvRowIndex(int sparseFactor = 1000, int initialCapacity = 65536)
-    {
-        _sparseFactor = sparseFactor;
-        _sparseOffsets = new long[initialCapacity];
-    }
 
     /// <summary>
     /// Returns the byte offset of the Nth sparse entry

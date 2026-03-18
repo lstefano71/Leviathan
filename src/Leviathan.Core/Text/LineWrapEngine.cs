@@ -4,21 +4,14 @@ namespace Leviathan.Core.Text;
 /// A visual line produced by the line-wrap engine.
 /// Describes a contiguous run of bytes from the document that fits on one screen line.
 /// </summary>
-public readonly struct VisualLine
+public readonly struct VisualLine(long docOffset, int byteLength, int columnCount)
 {
     /// <summary>Byte offset within the document where this visual line starts.</summary>
-    public readonly long DocOffset;
+    public readonly long DocOffset = docOffset;
     /// <summary>Number of bytes in this visual line.</summary>
-    public readonly int ByteLength;
+    public readonly int ByteLength = byteLength;
     /// <summary>Number of display columns this visual line occupies.</summary>
-    public readonly int ColumnCount;
-
-    public VisualLine(long docOffset, int byteLength, int columnCount)
-    {
-        DocOffset = docOffset;
-        ByteLength = byteLength;
-        ColumnCount = columnCount;
-    }
+    public readonly int ColumnCount = columnCount;
 }
 
 /// <summary>
@@ -26,14 +19,9 @@ public readonly struct VisualLine
 /// of bytes around the viewport, avoiding full-file pre-processing.
 /// Works entirely on <see cref="ReadOnlySpan{T}"/> with zero heap allocations in the hot path.
 /// </summary>
-public sealed class LineWrapEngine
+public sealed class LineWrapEngine(int tabWidth = 4)
 {
-    private readonly int _tabWidth;
-
-    public LineWrapEngine(int tabWidth = 4)
-    {
-        _tabWidth = tabWidth;
-    }
+    private readonly int _tabWidth = tabWidth;
 
     /// <summary>
     /// Computes visual lines from a chunk of document bytes using the specified text decoder.

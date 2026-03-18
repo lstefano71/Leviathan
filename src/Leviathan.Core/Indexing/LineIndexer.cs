@@ -6,24 +6,17 @@ namespace Leviathan.Core.Indexing;
 /// Manages background scanning of a memory-mapped file to build the <see cref="LineIndex"/>.
 /// Processes the file in large chunks to maximize throughput.
 /// </summary>
-public sealed class LineIndexer : IDisposable
+/// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
+public sealed class LineIndexer(MappedFileSource source, int charWidth = 1, int sparseFactor = 1000) : IDisposable
 {
-    private readonly MappedFileSource _source;
-    private readonly LineIndex _index;
-    private readonly CancellationTokenSource _cts;
+    private readonly MappedFileSource _source = source;
+    private readonly LineIndex _index = new(charWidth, sparseFactor);
+    private readonly CancellationTokenSource _cts = new();
     private Task? _scanTask;
 
     private const int ChunkSize = 4 * 1024 * 1024; // 4 MB chunks
 
     public LineIndex Index => _index;
-
-    /// <param name="charWidth">Minimum character width in bytes (1 for UTF-8/Windows-1252, 2 for UTF-16 LE).</param>
-    public LineIndexer(MappedFileSource source, int charWidth = 1, int sparseFactor = 1000)
-    {
-        _source = source;
-        _index = new LineIndex(charWidth, sparseFactor);
-        _cts = new CancellationTokenSource();
-    }
 
     /// <summary>
     /// Starts scanning the file for newlines on a background thread.

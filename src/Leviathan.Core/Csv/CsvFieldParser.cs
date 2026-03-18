@@ -59,7 +59,6 @@ public static class CsvFieldParser
             if (isQuoted) {
                 int fieldStart = pos;
                 pos++; // skip opening quote
-                int contentStart = pos;
 
                 // Scan to the matching close quote, handling escaped quotes
                 while (pos < record.Length) {

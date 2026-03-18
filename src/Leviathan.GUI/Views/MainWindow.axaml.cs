@@ -32,8 +32,8 @@ public sealed partial class MainWindow : Window
     private CsvDetailPanel? _csvDetailPanel;
     private Grid? _csvOuterGrid;
     private GridSplitter? _csvSplitter;
-    private DispatcherTimer? _indexingTimer;
-    private DispatcherTimer? _searchRestartTimer;
+    private readonly DispatcherTimer? _indexingTimer;
+    private readonly DispatcherTimer? _searchRestartTimer;
     private FindBar? _findBar;
     private GotoBar? _gotoBar;
     private CommandPaletteOverlay? _commandPalette;
@@ -1203,7 +1203,7 @@ public sealed partial class MainWindow : Window
             : linesInfo;
     }
 
-    private string BuildBackgroundStatus(bool lineIndexing, bool csvIndexing, bool searching, bool readOnly)
+    static private string BuildBackgroundStatus(bool lineIndexing, bool csvIndexing, bool searching, bool readOnly)
     {
         List<string> ops = [];
         if (readOnly)

@@ -106,7 +106,7 @@ public class UndoManagerTests
             Assert.Equal(5, doc.Length);
             Span<byte> buf = stackalloc byte[5];
             doc.Read(0, buf);
-            Assert.True(buf.SequenceEqual(new byte[] { 0x41, 0x42, 0x43, 0x44, 0x45 }));
+            Assert.True(buf.SequenceEqual("ABCDE"u8));
             Assert.Equal(1L, cursor!.Value);
         } finally {
             File.Delete(path);
@@ -276,7 +276,7 @@ public class UndoManagerTests
             Assert.Equal(3, doc.Length);
             Span<byte> buf = stackalloc byte[3];
             doc.Read(0, buf);
-            Assert.True(buf.SequenceEqual(new byte[] { 0x41, 0x42, 0x43 }));
+            Assert.True(buf.SequenceEqual("ABC"u8));
         } finally {
             File.Delete(path);
         }

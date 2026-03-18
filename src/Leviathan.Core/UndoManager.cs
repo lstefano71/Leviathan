@@ -7,20 +7,13 @@ namespace Leviathan.Core;
 /// Represents one undoable step: the edit action plus cursor positions
 /// before and after the edit, so the UI can restore the caret on undo/redo.
 /// </summary>
-public sealed class UndoEntry
+public sealed class UndoEntry(EditAction action, long cursorOffsetBefore, long cursorOffsetAfter)
 {
-    public EditAction Action { get; }
-    public long CursorOffsetBefore { get; }
-    public long CursorOffsetAfter { get; internal set; }
+    public EditAction Action { get; } = action;
+    public long CursorOffsetBefore { get; } = cursorOffsetBefore;
+    public long CursorOffsetAfter { get; internal set; } = cursorOffsetAfter;
 
     public long DataBytes => Action.DataBytes;
-
-    public UndoEntry(EditAction action, long cursorOffsetBefore, long cursorOffsetAfter)
-    {
-        Action = action;
-        CursorOffsetBefore = cursorOffsetBefore;
-        CursorOffsetAfter = cursorOffsetAfter;
-    }
 }
 
 /// <summary>
@@ -28,9 +21,9 @@ public sealed class UndoEntry
 /// Supports compound grouping, typing coalescing, a configurable memory
 /// budget, and migration of AppendBuffer references before save.
 /// </summary>
-public sealed class UndoManager
+public sealed class UndoManager(AppendBuffer appendBuffer)
 {
-    private readonly AppendBuffer _appendBuffer;
+    private readonly AppendBuffer _appendBuffer = appendBuffer;
     private readonly List<UndoEntry> _undoStack = new();
     private readonly List<UndoEntry> _redoStack = new();
     private long _totalDataBytes;
@@ -60,11 +53,6 @@ public sealed class UndoManager
 
     /// <summary>Number of entries on the redo stack.</summary>
     public int RedoCount => _redoStack.Count;
-
-    public UndoManager(AppendBuffer appendBuffer)
-    {
-        _appendBuffer = appendBuffer;
-    }
 
     // ─── Push ──────────────────────────────────────────────────────────
 
@@ -120,8 +108,9 @@ public sealed class UndoManager
             topBytes.CopyTo(merged, 0);
             merged[^1] = newByte[0];
 
-            var mergedAction = new InsertAction(topIns.Offset, merged.Length, topIns.AppendBufferOffset);
-            mergedAction.MigratedData = merged;
+            var mergedAction = new InsertAction(topIns.Offset, merged.Length, topIns.AppendBufferOffset) {
+                MigratedData = merged
+            };
 
             _totalDataBytes -= top.DataBytes;
             _undoStack[^1] = new UndoEntry(mergedAction, top.CursorOffsetBefore, cursorAfter);
@@ -223,7 +212,7 @@ public sealed class UndoManager
 
     // ─── Apply helpers ─────────────────────────────────────────────────
 
-    private void ApplyInverse(Document document, EditAction action)
+    static private void ApplyInverse(Document document, EditAction action)
     {
         switch (action) {
             case CompoundAction compound:
@@ -350,9 +339,7 @@ public sealed class UndoManager
                 break;
 
             case InsertAction insert:
-                if (insert.MigratedData is null) {
-                    insert.MigratedData = ReadFromAppendBuffer(insert.AppendBufferOffset, insert.Length);
-                }
+                insert.MigratedData ??= ReadFromAppendBuffer(insert.AppendBufferOffset, insert.Length);
                 break;
         }
     }

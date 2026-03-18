@@ -40,9 +40,9 @@ public sealed class TextView
     private long _estimatedTotalLines;   // from LineIndex or heuristic
 
     // Pre-allocated buffers
-    private byte[] _readBuffer = new byte[128 * 1024]; // 128 KB chunk window
+    private readonly byte[] _readBuffer = new byte[128 * 1024]; // 128 KB chunk window
     private VisualLine[] _visualLines = new VisualLine[2048];
-    private byte[] _countBuffer = new byte[64 * 1024]; // for newline counting
+    private readonly byte[] _countBuffer = new byte[64 * 1024]; // for newline counting
 
     // Cached line number at the current top offset
     private long _cachedTopOffset = -1;
@@ -916,8 +916,8 @@ public sealed class TextView
     {
         // buf = [d d d d d d d d ' ' \0]  (10 bytes)
         buf.Fill((byte)' ');
-        buf[buf.Length - 1] = 0;     // null terminator
-                                     // buf[buf.Length - 2] remains ' ' (separator between numbers and text)
+        buf[^1] = 0;     // null terminator
+                         // buf[buf.Length - 2] remains ' ' (separator between numbers and text)
 
         int pos = buf.Length - 3;    // rightmost digit position
 
