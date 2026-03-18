@@ -8,6 +8,7 @@ using Leviathan.Core.Csv;
 using Leviathan.Core.Search;
 using Leviathan.GUI.Helpers;
 
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -70,6 +71,12 @@ internal sealed class CsvViewControl : Control
 
     // Reusable char buffer for FormatCellPreview (3F)
     private char[] _cellPreviewBuffer = new char[256];
+
+    // Cell text FormattedText cache — bounded, keyed by cell string (Phase 2)
+    private readonly Dictionary<string, FormattedText> _cellTextCache = new();
+    private IBrush? _cellTextCacheBrush;
+    private Typeface _cellTextCacheTypeface;
+    private double _cellTextCacheFontSize;
 
     public CsvViewControl(AppState state)
     {
@@ -405,7 +412,7 @@ internal sealed class CsvViewControl : Control
         _state.VisibleRows = visibleRows;
         CsvDialect dialect = _state.CsvDialect;
 
-        // Brushes
+        // Brushes — hoisted state reads
         IBrush textBrush = theme.TextPrimary;
         IBrush headerBrush = theme.HeaderText;
         IBrush headerBg = theme.HeaderBackground;
@@ -415,10 +422,14 @@ internal sealed class CsvViewControl : Control
         IBrush activeMatchBrush = theme.ActiveMatchHighlight;
         IBrush rowStripeBrush = theme.RowStripe;
         IBrush colStripeBrush = theme.ColumnStripe;
+        IBrush cursorHighlight = theme.CursorHighlight;
+        IBrush textSecondary = theme.TextSecondary;
         IPen gridLinePen = theme.GridLinePen;
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
         HashSet<int> hiddenCols = _state.CsvHiddenColumns;
+        long csvCursorRow = _state.CsvCursorRow;
+        int csvCursorCol = _state.CsvCursorCol;
         UpdateHorizontalScrollMetrics(colWidths, colCount, bounds.Width - gutterWidth, charWidth, hiddenCols);
 
         int hScroll = _state.CsvHorizontalScroll;
@@ -427,11 +438,19 @@ internal sealed class CsvViewControl : Control
         EnsureColumnPositions(colWidths, colCount, hScroll, gutterWidth, charWidth, hiddenCols);
 
         // Ensure row-number cache is valid (3E)
-        if (_rowNumCacheTypeface != typeface || _rowNumCacheFontSize != fontSize || _rowNumCacheBrush != theme.TextSecondary) {
+        if (_rowNumCacheTypeface != typeface || _rowNumCacheFontSize != fontSize || _rowNumCacheBrush != textSecondary) {
             _rowNumberTextCache.Clear();
             _rowNumCacheTypeface = typeface;
             _rowNumCacheFontSize = fontSize;
-            _rowNumCacheBrush = theme.TextSecondary;
+            _rowNumCacheBrush = textSecondary;
+        }
+
+        // Ensure cell text cache is valid (Phase 2 — Todo 1)
+        if (_cellTextCacheBrush != textBrush || _cellTextCacheTypeface != typeface || _cellTextCacheFontSize != fontSize) {
+            _cellTextCache.Clear();
+            _cellTextCacheBrush = textBrush;
+            _cellTextCacheTypeface = typeface;
+            _cellTextCacheFontSize = fontSize;
         }
 
         // Draw column stripes as full-height rectangles once (3D)
@@ -480,112 +499,148 @@ internal sealed class CsvViewControl : Control
         double dataY = dialect.HasHeader ? lineHeight : 0;
         long topRow = _state.CsvTopRowIndex;
         long totalRows = _state.CsvRowIndex.TotalRowCount;
+        long fileLength = _state.FileLength;
 
-        // Selection range
+        // Selection range (using hoisted cursor row)
         long selAnchor = _state.CsvSelectionAnchorRow;
-        long selStart = selAnchor < 0 ? -1 : Math.Min(_state.CsvCursorRow, selAnchor);
-        long selEnd = selAnchor < 0 ? -1 : Math.Max(_state.CsvCursorRow, selAnchor);
+        long selStart = selAnchor < 0 ? -1 : Math.Min(csvCursorRow, selAnchor);
+        long selEnd = selAnchor < 0 ? -1 : Math.Max(csvCursorRow, selAnchor);
 
         // Pre-allocate outside the loop to avoid CA2014 stackalloc-in-loop
         Span<CsvField> fields = stackalloc CsvField[256];
         Span<byte> unescaped = stackalloc byte[1024];
 
-        for (int rowIdx = 0; rowIdx < visibleRows; rowIdx++) {
-            long dataRow = topRow + rowIdx;
-            if (dataRow >= totalRows) break;
+        // Rent char buffer for UTF-8 decoding (Todo 4)
+        char[] rentedChars = ArrayPool<char>.Shared.Rent(1024);
 
-            double y = dataY + rowIdx * lineHeight;
+        // Incremental row offset: compute first via sparse index, then derive subsequent (Todo 2)
+        long rowOffset = topRow < totalRows ? GetRowByteOffset(topRow) : -1;
 
-            // Alternating row stripe (drawn first, behind everything)
-            if (rowIdx % 2 == 0)
-                context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
+        try {
+            for (int rowIdx = 0; rowIdx < visibleRows; rowIdx++) {
+                long dataRow = topRow + rowIdx;
+                if (dataRow >= totalRows) break;
 
-            // Row number in gutter (cached — 3E)
-            if (gutterVisible) {
-                FormattedText rowNumFt = GetOrCreateRowNumberText(dataRow + 1, theme.TextSecondary);
-                string rowNumStr = (dataRow + 1).ToString();
-                double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
-                context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
-            }
+                double y = dataY + rowIdx * lineHeight;
 
-            // Cursor/selection highlight
-            if (dataRow == _state.CsvCursorRow) {
-                context.FillRectangle(cursorBrush, new Rect(0, y, bounds.Width, lineHeight));
-            } else if (selStart >= 0 && dataRow >= selStart && dataRow <= selEnd) {
-                context.FillRectangle(selectionBrush, new Rect(0, y, bounds.Width, lineHeight));
-            }
+                // Alternating row stripe (drawn first, behind everything)
+                if (rowIdx % 2 == 0)
+                    context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
 
-            // Navigate to the row using the correct sparse index lookup
-            long rowOffset = GetRowByteOffset(dataRow);
-            if (rowOffset < 0 || rowOffset >= _state.FileLength) continue;
-
-            int readLen = (int)Math.Min(_readBuffer.Length, _state.FileLength - rowOffset);
-            if (readLen <= 0) continue;
-            _state.Document.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
-
-            // Find end of row
-            int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), dialect);
-            ReadOnlySpan<byte> rowData = _readBuffer.AsSpan(0, rowLen);
-
-            // Parse fields
-            int fieldCount = CsvFieldParser.ParseRecord(rowData, dialect, fields);
-
-            // Find first match overlapping this row for highlight rendering
-            int rowMatchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, rowOffset);
-
-            // Render cells using pre-computed positions
-            int visIdx = 0;
-            for (int c = hScroll; c < colCount; c++) {
-                if (hiddenCols.Contains(c)) continue;
-                if (visIdx >= _colXPositions.Length) break;
-                double cellX = _colXPositions[visIdx];
-                if (cellX >= bounds.Width) break;
-                double cellWidth = _colPixelWidths[visIdx];
-
-                if (c < fieldCount) {
-                    // Search match highlight for this cell
-                    long cellStart = rowOffset + fields[c].Offset;
-                    long cellEnd = cellStart + fields[c].Length - 1;
-                    bool isMatch = false;
-                    bool isActiveMatch = false;
-
-                    int mc = rowMatchCursor;
-                    while (mc < matches.Count) {
-                        long mStart = matches[mc].Offset;
-                        long mEnd = mStart + matches[mc].Length - 1;
-                        if (mStart > cellEnd) break;
-                        if (mEnd >= cellStart) {
-                            isMatch = true;
-                            isActiveMatch = mc == activeMatchIdx;
-                            break;
-                        }
-                        mc++;
-                    }
-
-                    if (isMatch) {
-                        context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
-                            new Rect(cellX, y, cellWidth, lineHeight));
-                    }
-
-                    int written = CsvFieldParser.UnescapeField(rowData, fields[c], dialect, unescaped);
-                    string cellText = FormatCellPreview(Encoding.UTF8.GetString(unescaped[..written]), colWidths[c]);
-
-                    if (dataRow == _state.CsvCursorRow && c == _state.CsvCursorCol) {
-                        context.FillRectangle(theme.CursorHighlight,
-                            new Rect(cellX, y, cellWidth, lineHeight));
-                    }
-
-                    FormattedText ft = CreateFormattedText(cellText, textBrush);
-                    context.DrawText(ft, new Point(cellX + CellPaddingX / 2, GetTextOriginY(y, textBaseline, ft)));
+                // Row number in gutter — avoid ToString for positioning (Todo 3)
+                if (gutterVisible) {
+                    FormattedText rowNumFt = GetOrCreateRowNumberText(dataRow + 1, textSecondary);
+                    int digits = DigitCount(dataRow + 1);
+                    double rowNumX = gutterWidth - (digits + 1) * charWidth;
+                    context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
                 }
 
-                visIdx++;
+                // Cursor/selection highlight (using hoisted locals — Todo 5)
+                if (dataRow == csvCursorRow) {
+                    context.FillRectangle(cursorBrush, new Rect(0, y, bounds.Width, lineHeight));
+                } else if (selStart >= 0 && dataRow >= selStart && dataRow <= selEnd) {
+                    context.FillRectangle(selectionBrush, new Rect(0, y, bounds.Width, lineHeight));
+                }
+
+                // Row offset — incremental (Todo 2)
+                if (rowOffset < 0 || rowOffset >= fileLength) continue;
+
+                int readLen = (int)Math.Min(_readBuffer.Length, fileLength - rowOffset);
+                if (readLen <= 0) continue;
+                _state.Document!.Read(rowOffset, _readBuffer.AsSpan(0, readLen));
+
+                // Find end of row
+                int rowLen = FindRowEnd(_readBuffer.AsSpan(0, readLen), dialect);
+                ReadOnlySpan<byte> rowData = _readBuffer.AsSpan(0, rowLen);
+
+                // Parse fields
+                int fieldCount = CsvFieldParser.ParseRecord(rowData, dialect, fields);
+
+                // Find first match overlapping this row for highlight rendering
+                int rowMatchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, rowOffset);
+
+                // Render cells using pre-computed positions
+                int visIdx = 0;
+                for (int c = hScroll; c < colCount; c++) {
+                    if (hiddenCols.Contains(c)) continue;
+                    if (visIdx >= _colXPositions.Length) break;
+                    double cellX = _colXPositions[visIdx];
+                    if (cellX >= bounds.Width) break;
+                    double cellWidth = _colPixelWidths[visIdx];
+
+                    if (c < fieldCount) {
+                        // Search match highlight for this cell
+                        long cellStart = rowOffset + fields[c].Offset;
+                        long cellEnd = cellStart + fields[c].Length - 1;
+                        bool isMatch = false;
+                        bool isActiveMatch = false;
+
+                        int mc = rowMatchCursor;
+                        while (mc < matches.Count) {
+                            long mStart = matches[mc].Offset;
+                            long mEnd = mStart + matches[mc].Length - 1;
+                            if (mStart > cellEnd) break;
+                            if (mEnd >= cellStart) {
+                                isMatch = true;
+                                isActiveMatch = mc == activeMatchIdx;
+                                break;
+                            }
+                            mc++;
+                        }
+
+                        if (isMatch) {
+                            context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
+                                new Rect(cellX, y, cellWidth, lineHeight));
+                        }
+
+                        // Decode cell text using rented buffer (Todo 4)
+                        int written = CsvFieldParser.UnescapeField(rowData, fields[c], dialect, unescaped);
+                        if (rentedChars.Length < written * 2) {
+                            ArrayPool<char>.Shared.Return(rentedChars);
+                            rentedChars = ArrayPool<char>.Shared.Rent(written * 2);
+                        }
+                        int charCount = Encoding.UTF8.GetChars(unescaped[..written], rentedChars);
+                        string cellText = FormatCellPreview(new string(rentedChars, 0, charCount), colWidths[c]);
+
+                        if (dataRow == csvCursorRow && c == csvCursorCol) {
+                            context.FillRectangle(cursorHighlight,
+                                new Rect(cellX, y, cellWidth, lineHeight));
+                        }
+
+                        // Cell text cache lookup (Todo 1)
+                        FormattedText ft = GetOrCreateCellText(cellText, textBrush);
+                        context.DrawText(ft, new Point(cellX + CellPaddingX / 2, GetTextOriginY(y, textBaseline, ft)));
+                    }
+
+                    visIdx++;
+                }
+
+                // Compute next row offset incrementally (Todo 2)
+                // rowLen is the data length; skip past the newline to get to next row
+                long nextOffset = rowOffset + rowLen;
+                if (nextOffset < fileLength) {
+                    byte nlByte = _readBuffer[rowLen];
+                    if (nlByte == (byte)'\r') {
+                        nextOffset++;
+                        if (nextOffset < fileLength && rowLen + 1 < readLen && _readBuffer[rowLen + 1] == (byte)'\n')
+                            nextOffset++;
+                    } else if (nlByte == (byte)'\n') {
+                        nextOffset++;
+                    }
+                }
+                rowOffset = nextOffset;
             }
+        } finally {
+            ArrayPool<char>.Shared.Return(rentedChars);
         }
 
         // Evict stale row-number cache entries
         if (_rowNumberTextCache.Count > Math.Max(256, visibleRows * 8))
             _rowNumberTextCache.Clear();
+
+        // Evict stale cell text cache entries (Todo 1)
+        if (_cellTextCache.Count > 1024)
+            _cellTextCache.Clear();
 
         QueueScrollBarUpdate();
         QueueHorizontalScrollBarUpdate();
@@ -672,6 +727,37 @@ internal sealed class CsvViewControl : Control
         FormattedText created = CreateFormattedText(rowNumber.ToString(), brush);
         _rowNumberTextCache[rowNumber] = created;
         return created;
+    }
+
+    /// <summary>Returns a cached FormattedText for cell data text, creating if absent.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private FormattedText GetOrCreateCellText(string text, IBrush brush)
+    {
+        if (_cellTextCache.TryGetValue(text, out FormattedText? cached))
+            return cached;
+
+        FormattedText created = CreateFormattedText(text, brush);
+        _cellTextCache[text] = created;
+        return created;
+    }
+
+    /// <summary>Returns the number of decimal digits in a positive value, avoiding ToString allocation.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DigitCount(long value)
+    {
+        if (value < 10L) return 1;
+        if (value < 100L) return 2;
+        if (value < 1_000L) return 3;
+        if (value < 10_000L) return 4;
+        if (value < 100_000L) return 5;
+        if (value < 1_000_000L) return 6;
+        if (value < 10_000_000L) return 7;
+        if (value < 100_000_000L) return 8;
+        if (value < 1_000_000_000L) return 9;
+        if (value < 10_000_000_000L) return 10;
+        if (value < 100_000_000_000L) return 11;
+        if (value < 1_000_000_000_000L) return 12;
+        return (int)Math.Log10(value) + 1;
     }
 
     private void UpdateHorizontalScrollMetrics(
