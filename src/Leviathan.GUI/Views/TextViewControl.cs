@@ -59,6 +59,26 @@ internal sealed class TextViewControl : Control
     private int _horizontalViewportColumns;
     private int _horizontalContentColumns;
 
+    // Cached MeasureCharWidth — invalidated on font/size change
+    private double _cachedCharWidth;
+    private Typeface _cachedTypeface;
+    private double _cachedFontSize;
+
+    // Cached wrap indicator FormattedText — invalidated on font/brush change
+    private FormattedText? _cachedWrapText;
+    private Typeface _cachedWrapTypeface;
+    private double _cachedWrapFontSize;
+    private IBrush? _cachedWrapBrush;
+
+    // Line-number FormattedText cache — keyed by line number
+    private readonly Dictionary<long, FormattedText> _lineNumberTextCache = new();
+    private Typeface _lineNumCacheTypeface;
+    private double _lineNumCacheFontSize;
+    private IBrush? _lineNumCacheBrush;
+
+    // Reusable char buffer for run-based text rendering
+    private char[] _runBuffer = new char[256];
+
     public TextViewControl(AppState state)
     {
         _state = state;
@@ -313,7 +333,7 @@ internal sealed class TextViewControl : Control
         _lastRenderedLineCount = lineCount;
         lineCount = Math.Min(lineCount, visibleRows);
 
-        // Brushes
+        // Brushes — hoisted from inner loops
         IBrush textBrush = theme.TextPrimary;
         IBrush gutterTextBrush = theme.TextSecondary;
         IBrush selectionBrush = theme.SelectionHighlight;
@@ -330,11 +350,47 @@ internal sealed class TextViewControl : Control
         long selStart = _state.TextSelStart;
         long selEnd = _state.TextSelEnd;
 
+        // Hoisted invariants (1E)
+        Typeface typeface = _state.ContentTypeface;
+        double fontSize = _state.ContentFontSize;
+        int tabWidth = _state.TabWidth;
+        long cursorOffset = _state.TextCursorOffset;
+        long bomLength = _state.BomLength;
+
         long currentLineNumber = ComputeLineNumber(topOffset) - 1;
         bool clipToViewport = !_state.WordWrap;
         int horizontalScroll = clipToViewport ? Math.Max(0, _state.TextHorizontalScroll) : 0;
+        int maxVisibleCol = horizontalScroll + textAreaCols;
         bool hasHorizontalOverflow = false;
         int maxRenderedColumns = 0;
+
+        // Hoist bookmarks outside the row loop (1E)
+        IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
+
+        // Ensure line-number cache is valid for current font/brush
+        if (_lineNumCacheTypeface != typeface || _lineNumCacheFontSize != fontSize || _lineNumCacheBrush != gutterTextBrush) {
+            _lineNumberTextCache.Clear();
+            _lineNumCacheTypeface = typeface;
+            _lineNumCacheFontSize = fontSize;
+            _lineNumCacheBrush = gutterTextBrush;
+        }
+
+        // Ensure wrap indicator cache is valid (1D)
+        if (_cachedWrapText is null || _cachedWrapTypeface != typeface || _cachedWrapFontSize != fontSize || _cachedWrapBrush != theme.TextMuted) {
+            _cachedWrapText = new FormattedText("↪",
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, typeface, fontSize, theme.TextMuted);
+            _cachedWrapTypeface = typeface;
+            _cachedWrapFontSize = fontSize;
+            _cachedWrapBrush = theme.TextMuted;
+        }
+
+        // Reusable char buffer for run-based text rendering (1A)
+        char[] runBuffer = _runBuffer;
+        if (runBuffer.Length < textAreaCols + 64) {
+            runBuffer = new char[textAreaCols + 64];
+            _runBuffer = runBuffer;
+        }
 
         for (int row = 0; row < lineCount; row++) {
             VisualLine vl = _visualLines[row];
@@ -344,7 +400,7 @@ internal sealed class TextViewControl : Control
             // Detect hard line start: first row, or preceded by a newline
             bool isHardLine;
             if (row == 0) {
-                isHardLine = topOffset == _state.BomLength || IsNewlineBefore(topOffset);
+                isHardLine = topOffset == bomLength || IsNewlineBefore(topOffset);
             } else {
                 long prevEnd = _visualLines[row - 1].DocOffset + _visualLines[row - 1].ByteLength;
                 isHardLine = vl.DocOffset != prevEnd || IsNewlineBefore(vl.DocOffset);
@@ -353,31 +409,22 @@ internal sealed class TextViewControl : Control
             if (isHardLine)
                 currentLineNumber++;
 
-            // Gutter: show line number on hard lines, wrap indicator on continuations
+            // Gutter: show line number on hard lines, wrap indicator on continuations (1D)
             if (gutterVisible) {
                 if (isHardLine) {
+                    FormattedText lineNumText = GetOrCreateLineNumberText(currentLineNumber, typeface, fontSize, gutterTextBrush);
                     string lineNumStr = currentLineNumber.ToString();
                     double lineNumX = gutterWidth - (lineNumStr.Length + 1) * charWidth;
-
-                    FormattedText lineNumText = new(lineNumStr,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, gutterTextBrush);
                     context.DrawText(lineNumText, new Point(lineNumX, y));
                 } else {
-                    // Wrap continuation: show ↪ indicator
-                    string wrapIndicator = "↪";
-                    FormattedText wrapText = new(wrapIndicator,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, theme.TextMuted);
                     double separatorX = gutterWidth - charWidth;
-                    double wrapX = Math.Max(0, separatorX - wrapText.Width - charWidth * 0.5);
-                    context.DrawText(wrapText, new Point(wrapX, y));
+                    double wrapX = Math.Max(0, separatorX - _cachedWrapText.Width - charWidth * 0.5);
+                    context.DrawText(_cachedWrapText, new Point(wrapX, y));
                 }
 
                 // Bookmark marker: small circle in the gutter
                 long lineStart = vl.DocOffset;
                 long lineEnd = lineStart + vl.ByteLength - 1;
-                IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
                 for (int bi = 0; bi < bookmarks.Count; bi++) {
                     long bmOff = bookmarks[bi].Offset;
                     if (bmOff > lineEnd) break;
@@ -390,15 +437,23 @@ internal sealed class TextViewControl : Control
                 }
             }
 
-            // Render text content
+            // Render text content — run-based batching (1A+1B)
             int localOffset = (int)(vl.DocOffset - topOffset);
             if (localOffset < 0 || localOffset + vl.ByteLength > data.Length) continue;
             ReadOnlySpan<byte> lineData = data.Slice(localOffset, vl.ByteLength);
             double textX = gutterWidth;
 
-            // Decode and render characters
+            // Phase 1: scan characters, build highlight spans, fill run buffer
+            int runLen = 0;
             int charCol = 0;
             int byteIdx = 0;
+
+            // Track contiguous highlight spans for batched FillRectangle
+            int selRunStart = -1;
+            int matchRunStart = -1;
+            IBrush? matchRunBrush = null;
+            int cursorDrawCol = -1;
+
             while (byteIdx < lineData.Length) {
                 (System.Text.Rune rune, int runeBytes) = _state.Decoder.DecodeRune(lineData, byteIdx);
                 if (runeBytes <= 0) { byteIdx++; continue; }
@@ -426,24 +481,53 @@ internal sealed class TextViewControl : Control
                     }
                     break;
                 }
-                if (isMatch) {
-                    int visibleCol = charCol - horizontalScroll;
-                    if (!clipToViewport || (visibleCol >= 0 && visibleCol < textAreaCols)) {
-                        context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
-                            new Rect(textX + visibleCol * charWidth, y, charWidth, lineHeight));
-                    }
-                }
 
                 if (codePoint == '\t') {
-                    int tabStop = _state.TabWidth - (charCol % _state.TabWidth);
+                    int tabStop = tabWidth - (charCol % tabWidth);
+                    // Flush any pending match run before the tab gap
+                    if (isMatch) {
+                        int visibleCol = charCol - horizontalScroll;
+                        if (!clipToViewport || (visibleCol >= 0 && visibleCol < textAreaCols)) {
+                            IBrush mBrush = isActiveMatch ? activeMatchBrush : matchBrush;
+                            if (matchRunStart >= 0 && matchRunBrush == mBrush && visibleCol == matchRunStart + (runLen - matchRunStart)) {
+                                // extend — will be flushed when run ends
+                            } else {
+                                FlushHighlightRun(context, matchRunBrush, textX, y, charWidth, lineHeight, matchRunStart, visibleCol);
+                                matchRunStart = visibleCol;
+                                matchRunBrush = mBrush;
+                            }
+                        }
+                    }
+                    // Fill tab spaces into the run buffer
+                    for (int t = 0; t < tabStop; t++) {
+                        int dc = charCol + t - horizontalScroll;
+                        if (dc >= 0 && dc < runBuffer.Length) {
+                            if (runLen <= dc) {
+                                // Pad with spaces up to dc
+                                while (runLen < dc) { runBuffer[runLen] = ' '; runLen++; }
+                                runBuffer[runLen] = ' ';
+                                runLen++;
+                            } else {
+                                runBuffer[dc] = ' ';
+                            }
+                        }
+                    }
+                    // Track selection for tabs
+                    if (selStart >= 0 && absOffset >= selStart && absOffset <= selEnd) {
+                        int dc = charCol - horizontalScroll;
+                        if (dc >= 0) {
+                            if (selRunStart < 0) selRunStart = dc;
+                            // selRunEnd is tracked implicitly; will flush at next non-selected or end of line
+                        }
+                    }
                     charCol += tabStop;
-                    if (clipToViewport && charCol > horizontalScroll + textAreaCols)
+                    if (clipToViewport && charCol > maxVisibleCol)
                         hasHorizontalOverflow = true;
                     byteIdx += runeBytes;
                     continue;
                 }
 
-                if (clipToViewport && charCol >= horizontalScroll + textAreaCols) {
+                if (clipToViewport && charCol >= maxVisibleCol) {
                     hasHorizontalOverflow = true;
                     charCol++;
                     byteIdx += runeBytes;
@@ -463,35 +547,89 @@ internal sealed class TextViewControl : Control
                     continue;
                 }
 
-                if (selStart >= 0 && absOffset >= selStart && absOffset <= selEnd) {
+                // Selection tracking — batched (1B)
+                bool isSelected = selStart >= 0 && absOffset >= selStart && absOffset <= selEnd;
+                if (isSelected) {
+                    if (selRunStart < 0) selRunStart = drawCol;
+                    // Keep extending — flush when we encounter non-selected or end of line
+                } else if (selRunStart >= 0) {
+                    // Flush selection run
                     context.FillRectangle(selectionBrush,
-                        new Rect(textX + drawCol * charWidth, y, charWidth, lineHeight));
+                        new Rect(textX + selRunStart * charWidth, y, (drawCol - selRunStart) * charWidth, lineHeight));
+                    selRunStart = -1;
                 }
 
-                // Cursor
-                if (absOffset == _state.TextCursorOffset) {
-                    context.FillRectangle(cursorBrush,
-                        new Rect(textX + drawCol * charWidth, y, 2, lineHeight));
+                // Match tracking — batched (1B)
+                if (isMatch) {
+                    IBrush mBrush = isActiveMatch ? activeMatchBrush : matchBrush;
+                    if (matchRunStart < 0) {
+                        matchRunStart = drawCol;
+                        matchRunBrush = mBrush;
+                    } else if (matchRunBrush != mBrush) {
+                        context.FillRectangle(matchRunBrush!, new Rect(textX + matchRunStart * charWidth, y, (drawCol - matchRunStart) * charWidth, lineHeight));
+                        matchRunStart = drawCol;
+                        matchRunBrush = mBrush;
+                    }
+                    // else: extend
+                } else if (matchRunStart >= 0) {
+                    context.FillRectangle(matchRunBrush!, new Rect(textX + matchRunStart * charWidth, y, (drawCol - matchRunStart) * charWidth, lineHeight));
+                    matchRunStart = -1;
+                    matchRunBrush = null;
                 }
 
-                // Character
-                char ch;
+                // Cursor tracking
+                if (absOffset == cursorOffset) {
+                    cursorDrawCol = drawCol;
+                }
+
+                // Character — fill into run buffer (1A)
                 if (codePoint == '\n' || codePoint == '\r') {
                     byteIdx += runeBytes;
                     continue;
-                } else if (codePoint >= 0x20 && codePoint < 0x10000) {
+                }
+
+                char ch;
+                if (codePoint >= 0x20 && codePoint < 0x10000) {
                     ch = (char)codePoint;
                 } else {
                     ch = '.';
                 }
 
-                FormattedText charText = new(ch.ToString(),
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
-                context.DrawText(charText, new Point(textX + drawCol * charWidth, y));
+                // Ensure buffer is filled to drawCol position
+                while (runLen < drawCol) { runBuffer[runLen] = ' '; runLen++; }
+                if (drawCol < runBuffer.Length) {
+                    runBuffer[drawCol] = ch;
+                    if (runLen <= drawCol) runLen = drawCol + 1;
+                }
 
                 charCol++;
                 byteIdx += runeBytes;
+            }
+
+            // Flush any pending highlight runs at end of line
+            if (selRunStart >= 0) {
+                int endCol = Math.Min(runLen, textAreaCols);
+                context.FillRectangle(selectionBrush,
+                    new Rect(textX + selRunStart * charWidth, y, (endCol - selRunStart) * charWidth, lineHeight));
+            }
+            if (matchRunStart >= 0) {
+                int endCol = Math.Min(runLen, textAreaCols);
+                context.FillRectangle(matchRunBrush!, new Rect(textX + matchRunStart * charWidth, y, (endCol - matchRunStart) * charWidth, lineHeight));
+            }
+
+            // Cursor bar
+            if (cursorDrawCol >= 0) {
+                context.FillRectangle(cursorBrush,
+                    new Rect(textX + cursorDrawCol * charWidth, y, 2, lineHeight));
+            }
+
+            // Phase 2: draw text as a single FormattedText run per line (1A)
+            if (runLen > 0) {
+                string lineStr = new string(runBuffer, 0, runLen);
+                FormattedText lineText = new(lineStr,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, typeface, fontSize, textBrush);
+                context.DrawText(lineText, new Point(textX, y));
             }
 
             maxRenderedColumns = Math.Max(maxRenderedColumns, charCol);
@@ -503,6 +641,10 @@ internal sealed class TextViewControl : Control
             ? Math.Max(textAreaCols + 1, maxRenderedColumns)
             : maxRenderedColumns;
 
+        // Evict stale line-number cache entries
+        if (_lineNumberTextCache.Count > Math.Max(256, visibleRows * 8))
+            _lineNumberTextCache.Clear();
+
         QueueScrollBarUpdate();
         QueueHorizontalScrollBarUpdate();
     }
@@ -510,9 +652,45 @@ internal sealed class TextViewControl : Control
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private double MeasureCharWidth()
     {
+        Typeface typeface = _state.ContentTypeface;
+        double fontSize = _state.ContentFontSize;
+        if (_cachedCharWidth > 0 && typeface == _cachedTypeface && fontSize == _cachedFontSize)
+            return _cachedCharWidth;
+
         FormattedText measurement = new("0", System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, Brushes.White);
-        return measurement.Width;
+            FlowDirection.LeftToRight, typeface, fontSize, Brushes.White);
+        _cachedCharWidth = measurement.Width;
+        _cachedTypeface = typeface;
+        _cachedFontSize = fontSize;
+        return _cachedCharWidth;
+    }
+
+    /// <summary>
+    /// Returns a cached <see cref="FormattedText"/> for the given line number,
+    /// creating and caching it if necessary.
+    /// </summary>
+    private FormattedText GetOrCreateLineNumberText(long lineNumber, Typeface typeface, double fontSize, IBrush brush)
+    {
+        if (_lineNumberTextCache.TryGetValue(lineNumber, out FormattedText? cached))
+            return cached;
+
+        FormattedText created = new(lineNumber.ToString(),
+            System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, typeface, fontSize, brush);
+        _lineNumberTextCache[lineNumber] = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Flushes a pending highlight run by drawing a filled rectangle, if the run is active.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FlushHighlightRun(DrawingContext context, IBrush? brush,
+        double textX, double y, double charWidth, double lineHeight, int runStart, int runEnd)
+    {
+        if (runStart >= 0 && brush is not null && runEnd > runStart) {
+            context.FillRectangle(brush, new Rect(textX + runStart * charWidth, y, (runEnd - runStart) * charWidth, lineHeight));
+        }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

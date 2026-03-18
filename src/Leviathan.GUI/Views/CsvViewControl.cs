@@ -41,6 +41,36 @@ internal sealed class CsvViewControl : Control
     private int _horizontalViewportColumns = 1;
     private int _horizontalMaxStartColumn;
 
+    // Cached measurement (3A)
+    private double _cachedCsvCharWidth;
+    private double _cachedCsvBaseline;
+    private double _cachedCsvMeasurementHeight;
+    private Typeface _cachedCsvTypeface;
+    private double _cachedCsvFontSize;
+
+    // Cached header FormattedText (3B)
+    private FormattedText[]? _cachedHeaderTexts;
+    private string[]? _cachedHeaderNames;
+    private int[]? _cachedHeaderColWidths;
+    private IBrush? _cachedHeaderBrush;
+
+    // Cached row-number FormattedText (3E)
+    private readonly Dictionary<long, FormattedText> _rowNumberTextCache = new();
+    private Typeface _rowNumCacheTypeface;
+    private double _rowNumCacheFontSize;
+    private IBrush? _rowNumCacheBrush;
+
+    // Pre-computed column pixel positions and widths (3C)
+    private double[] _colXPositions = [];
+    private double[] _colPixelWidths = [];
+    private int _colXHScroll = -1;
+    private int _colXCount;
+    private double _colXGutterWidth;
+    private double _colXCharWidth;
+
+    // Reusable char buffer for FormatCellPreview (3F)
+    private char[] _cellPreviewBuffer = new char[256];
+
     public CsvViewControl(AppState state)
     {
         _state = state;
@@ -330,10 +360,29 @@ internal sealed class CsvViewControl : Control
         // Paint control background
         context.FillRectangle(theme.Background, bounds);
 
-        FormattedText measurement = CreateFormattedText("0", Brushes.White);
-        double charWidth = measurement.Width;
-        double lineHeight = _state.ContentFontSize + LinePadding;
-        double textBaseline = Math.Max(0, (lineHeight - measurement.Height) / 2) + measurement.Baseline;
+        // Cached measurement (3A)
+        Typeface typeface = _state.ContentTypeface;
+        double fontSize = _state.ContentFontSize;
+        double charWidth;
+        double textBaseline;
+        double measureHeight;
+        if (_cachedCsvCharWidth > 0 && _cachedCsvTypeface == typeface && _cachedCsvFontSize == fontSize) {
+            charWidth = _cachedCsvCharWidth;
+            textBaseline = _cachedCsvBaseline;
+            measureHeight = _cachedCsvMeasurementHeight;
+        } else {
+            FormattedText measurement = CreateFormattedText("0", Brushes.White);
+            charWidth = measurement.Width;
+            measureHeight = measurement.Height;
+            textBaseline = measurement.Baseline;
+            _cachedCsvCharWidth = charWidth;
+            _cachedCsvMeasurementHeight = measureHeight;
+            _cachedCsvBaseline = textBaseline;
+            _cachedCsvTypeface = typeface;
+            _cachedCsvFontSize = fontSize;
+        }
+        double lineHeight = fontSize + LinePadding;
+        textBaseline = Math.Max(0, (lineHeight - measureHeight) / 2) + textBaseline;
 
         // Row number gutter
         bool gutterVisible = _state.GutterVisible;
@@ -374,28 +423,53 @@ internal sealed class CsvViewControl : Control
 
         int hScroll = _state.CsvHorizontalScroll;
 
+        // Pre-compute column X positions and pixel widths (3C)
+        EnsureColumnPositions(colWidths, colCount, hScroll, gutterWidth, charWidth, hiddenCols);
+
+        // Ensure row-number cache is valid (3E)
+        if (_rowNumCacheTypeface != typeface || _rowNumCacheFontSize != fontSize || _rowNumCacheBrush != theme.TextSecondary) {
+            _rowNumberTextCache.Clear();
+            _rowNumCacheTypeface = typeface;
+            _rowNumCacheFontSize = fontSize;
+            _rowNumCacheBrush = theme.TextSecondary;
+        }
+
+        // Draw column stripes as full-height rectangles once (3D)
+        {
+            int visIdx = 0;
+            for (int c = hScroll; c < colCount; c++) {
+                if (hiddenCols.Contains(c)) continue;
+                if (visIdx >= _colPixelWidths.Length) break;
+                double cx = _colXPositions[visIdx];
+                if (cx >= bounds.Width) break;
+                double cw = _colPixelWidths[visIdx];
+                if (c % 2 == 0)
+                    context.FillRectangle(colStripeBrush, new Rect(cx, 0, cw, bounds.Height));
+                // Grid line
+                context.DrawLine(gridLinePen, new Point(cx + cw, 0), new Point(cx + cw, bounds.Height));
+                visIdx++;
+            }
+        }
+
         // Draw header row
         if (dialect.HasHeader && _state.CsvHeaderNames.Length > 0) {
             context.FillRectangle(headerBg, new Rect(0, 0, bounds.Width, lineHeight));
 
-            double hx = gutterWidth;
-            for (int c = hScroll; c < colCount && hx < bounds.Width; c++) {
+            // Ensure header text cache (3B)
+            EnsureHeaderTextCache(colWidths, colCount, hScroll, headerBrush, hiddenCols);
+
+            int visIdx = 0;
+            for (int c = hScroll; c < colCount; c++) {
                 if (hiddenCols.Contains(c)) continue;
-                double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
+                if (visIdx >= _colXPositions.Length) break;
+                double hx = _colXPositions[visIdx];
+                if (hx >= bounds.Width) break;
 
-                // Column stripe on header too
-                if (c % 2 == 0)
-                    context.FillRectangle(colStripeBrush, new Rect(hx, 0, cellWidth, lineHeight));
-
-                string headerText = c < _state.CsvHeaderNames.Length ? _state.CsvHeaderNames[c] : $"Col {c + 1}";
-                if (headerText.Length > colWidths[c])
-                    headerText = headerText[..colWidths[c]];
-
-                FormattedText ft = CreateFormattedText(headerText, headerBrush);
-                context.DrawText(ft, new Point(hx + CellPaddingX / 2, GetTextOriginY(0, textBaseline, ft)));
-
-                hx += cellWidth;
-                context.DrawLine(gridLinePen, new Point(hx, 0), new Point(hx, bounds.Height));
+                if (_cachedHeaderTexts is not null && visIdx < _cachedHeaderTexts.Length) {
+                    FormattedText ft = _cachedHeaderTexts[visIdx];
+                    context.DrawText(ft, new Point(hx + CellPaddingX / 2, GetTextOriginY(0, textBaseline, ft)));
+                }
+                visIdx++;
             }
 
             // Header separator
@@ -426,11 +500,11 @@ internal sealed class CsvViewControl : Control
             if (rowIdx % 2 == 0)
                 context.FillRectangle(rowStripeBrush, new Rect(gutterWidth, y, bounds.Width - gutterWidth, lineHeight));
 
-            // Row number in gutter
+            // Row number in gutter (cached — 3E)
             if (gutterVisible) {
+                FormattedText rowNumFt = GetOrCreateRowNumberText(dataRow + 1, theme.TextSecondary);
                 string rowNumStr = (dataRow + 1).ToString();
                 double rowNumX = gutterWidth - (rowNumStr.Length + 1) * charWidth;
-                FormattedText rowNumFt = CreateFormattedText(rowNumStr, theme.TextSecondary);
                 context.DrawText(rowNumFt, new Point(rowNumX, GetTextOriginY(y, textBaseline, rowNumFt)));
             }
 
@@ -459,15 +533,14 @@ internal sealed class CsvViewControl : Control
             // Find first match overlapping this row for highlight rendering
             int rowMatchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, rowOffset);
 
-            // Render cells
-            double cellX = gutterWidth;
-            for (int c = hScroll; c < colCount && cellX < bounds.Width; c++) {
+            // Render cells using pre-computed positions
+            int visIdx = 0;
+            for (int c = hScroll; c < colCount; c++) {
                 if (hiddenCols.Contains(c)) continue;
-                double cellWidth = (colWidths[c] + 2) * charWidth + CellPaddingX;
-
-                // Column stripe
-                if (c % 2 == 0)
-                    context.FillRectangle(colStripeBrush, new Rect(cellX, y, cellWidth, lineHeight));
+                if (visIdx >= _colXPositions.Length) break;
+                double cellX = _colXPositions[visIdx];
+                if (cellX >= bounds.Width) break;
+                double cellWidth = _colPixelWidths[visIdx];
 
                 if (c < fieldCount) {
                     // Search match highlight for this cell
@@ -506,9 +579,13 @@ internal sealed class CsvViewControl : Control
                     context.DrawText(ft, new Point(cellX + CellPaddingX / 2, GetTextOriginY(y, textBaseline, ft)));
                 }
 
-                cellX += cellWidth;
+                visIdx++;
             }
         }
+
+        // Evict stale row-number cache entries
+        if (_rowNumberTextCache.Count > Math.Max(256, visibleRows * 8))
+            _rowNumberTextCache.Clear();
 
         QueueScrollBarUpdate();
         QueueHorizontalScrollBarUpdate();
@@ -527,6 +604,75 @@ internal sealed class CsvViewControl : Control
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double GetTextOriginY(double rowY, double baseline, FormattedText text) =>
         rowY + baseline - text.Baseline;
+
+    /// <summary>Pre-computes column X positions and pixel widths for visible columns.</summary>
+    private void EnsureColumnPositions(int[] colWidths, int colCount, int hScroll, double gutterWidth, double charWidth, HashSet<int> hiddenCols)
+    {
+        if (_colXHScroll == hScroll && _colXCount == colCount && _colXGutterWidth == gutterWidth && _colXCharWidth == charWidth)
+            return;
+
+        _colXHScroll = hScroll;
+        _colXCount = colCount;
+        _colXGutterWidth = gutterWidth;
+        _colXCharWidth = charWidth;
+
+        int maxVisible = colCount - hScroll;
+        if (_colXPositions.Length < maxVisible) {
+            _colXPositions = new double[maxVisible];
+            _colPixelWidths = new double[maxVisible];
+        }
+
+        double x = gutterWidth;
+        int idx = 0;
+        for (int c = hScroll; c < colCount; c++) {
+            if (hiddenCols.Contains(c)) continue;
+            double cw = (colWidths[c] + 2) * charWidth + CellPaddingX;
+            _colXPositions[idx] = x;
+            _colPixelWidths[idx] = cw;
+            x += cw;
+            idx++;
+        }
+    }
+
+    /// <summary>Caches FormattedText for header cells; invalidated on header name, width, or brush change.</summary>
+    private void EnsureHeaderTextCache(int[] colWidths, int colCount, int hScroll, IBrush headerBrush, HashSet<int> hiddenCols)
+    {
+        bool needsRebuild = _cachedHeaderTexts is null || _cachedHeaderBrush != headerBrush
+            || _cachedHeaderNames != _state.CsvHeaderNames || _cachedHeaderColWidths != colWidths;
+
+        if (!needsRebuild) return;
+
+        _cachedHeaderBrush = headerBrush;
+        _cachedHeaderNames = _state.CsvHeaderNames;
+        _cachedHeaderColWidths = colWidths;
+
+        int maxVisible = colCount - hScroll;
+        _cachedHeaderTexts = new FormattedText[maxVisible];
+
+        int idx = 0;
+        for (int c = hScroll; c < colCount; c++) {
+            if (hiddenCols.Contains(c)) continue;
+            if (idx >= maxVisible) break;
+
+            string headerText = c < _state.CsvHeaderNames.Length ? _state.CsvHeaderNames[c] : $"Col {c + 1}";
+            if (headerText.Length > colWidths[c])
+                headerText = headerText[..colWidths[c]];
+
+            _cachedHeaderTexts[idx] = CreateFormattedText(headerText, headerBrush);
+            idx++;
+        }
+    }
+
+    /// <summary>Returns a cached FormattedText for the given row number.</summary>
+    private FormattedText GetOrCreateRowNumberText(long rowNumber, IBrush brush)
+    {
+        if (_rowNumberTextCache.TryGetValue(rowNumber, out FormattedText? cached))
+            return cached;
+
+        FormattedText created = CreateFormattedText(rowNumber.ToString(), brush);
+        _rowNumberTextCache[rowNumber] = created;
+        return created;
+    }
 
     private void UpdateHorizontalScrollMetrics(
         int[] colWidths,
@@ -897,6 +1043,24 @@ internal sealed class CsvViewControl : Control
         if (string.IsNullOrEmpty(value) || maxWidth <= 0)
             return string.Empty;
 
+        // Fast path: if value fits and has no control chars, return as-is
+        if (value.Length <= maxWidth) {
+            bool hasSpecial = false;
+            for (int i = 0; i < value.Length; i++) {
+                char c = value[i];
+                if (c == '\r' || c == '\n' || char.IsControl(c)) {
+                    hasSpecial = true;
+                    break;
+                }
+            }
+            if (!hasSpecial) return value;
+        }
+
+        return FormatCellPreviewSlow(value, maxWidth);
+    }
+
+    private static string FormatCellPreviewSlow(string value, int maxWidth)
+    {
         StringBuilder preview = new(Math.Min(value.Length, maxWidth + 1));
         for (int i = 0; i < value.Length && preview.Length < maxWidth + 1; i++) {
             char current = value[i];

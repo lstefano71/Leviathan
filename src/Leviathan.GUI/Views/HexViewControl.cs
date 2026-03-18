@@ -49,6 +49,23 @@ internal sealed class HexViewControl : Control
     private bool _addressCacheDecimal;
     private int _addressCacheDigits;
     private double _cachedCharWidth;
+
+    // Cached "Offset" header label — invalidated on font/brush/format change
+    private FormattedText? _cachedOffsetLabel;
+    private bool _cachedOffsetLabelDecimal;
+    private IBrush? _cachedOffsetLabelBrush;
+
+    // Pre-computed hex/ascii X position arrays
+    private double[] _hexXPositions = [];
+    private double[] _asciiXPositions = [];
+    private int _xPositionsBytesPerRow;
+    private double _xPositionsAddressWidth;
+    private double _xPositionsAsciiX;
+    private double _xPositionsCharWidth;
+
+    // Reusable char buffers for row-level text batching
+    private char[] _hexRowBuffer = new char[256];
+    private char[] _asciiRowBuffer = new char[64];
     private bool _isPointerSelectionActive;
     private bool _pointerSelectionExtended;
     private bool _pointerSelectionStartedWithShift;
@@ -299,11 +316,9 @@ internal sealed class HexViewControl : Control
 
         context.FillRectangle(headerBgBrush, new Rect(0, 0, bounds.Width, headerHeight));
 
-        // "Offset" label in address column
+        // "Offset" label in address column (cached)
         if (gutterVisible) {
-            string offsetLabelText = decimalOffset ? "Offset (dec)" : "Offset";
-            FormattedText offsetLabel = new(offsetLabelText, System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+            FormattedText offsetLabel = GetOffsetLabel(decimalOffset, headerTextBrush);
             context.DrawText(offsetLabel, new Point(charWidth, 0));
         }
 
@@ -346,12 +361,26 @@ internal sealed class HexViewControl : Control
         // Selection range
         long selStart = _state.HexSelStart;
         long selEnd = _state.HexSelEnd;
+        long hexCursorOffset = _state.HexCursorOffset;
 
         List<SearchResult> matches = _state.SearchResults;
         int activeMatchIdx = _state.CurrentMatchIndex;
 
         // Binary-search for the first match visible in or after the viewport
         int matchCursor = SearchHighlightHelper.BinarySearchFirstMatch(matches, startOffset);
+
+        // Hoist bookmarks outside the row loop (2C)
+        IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
+
+        // Pre-compute hex/ascii X position arrays (2E)
+        EnsureXPositions(bytesPerRow, addressWidth, asciiX, charWidth);
+
+        // Ensure row buffers are large enough
+        int hexRowChars = bytesPerRow * 3 + (bytesPerRow + 7) / 8;
+        if (_hexRowBuffer.Length < hexRowChars)
+            _hexRowBuffer = new char[hexRowChars];
+        if (_asciiRowBuffer.Length < bytesPerRow)
+            _asciiRowBuffer = new char[bytesPerRow];
 
         for (int row = 0; row < visibleRows; row++) {
             long rowOffset = startOffset + (long)row * bytesPerRow;
@@ -369,7 +398,6 @@ internal sealed class HexViewControl : Control
 
                 // Bookmark marker: small circle in the gutter
                 long rowEnd = rowOffset + bytesPerRow - 1;
-                IReadOnlyList<Leviathan.Core.DataModel.Bookmark> bookmarks = _state.Bookmarks.GetAll();
                 for (int bi = 0; bi < bookmarks.Count; bi++) {
                     long bmOff = bookmarks[bi].Offset;
                     if (bmOff > rowEnd) break;
@@ -382,16 +410,20 @@ internal sealed class HexViewControl : Control
                 }
             }
 
-            // Hex bytes
+            // ── Hex + ASCII: background highlights (batched per run) ──
+            int hexSelRunStart = -1;
+            int asciiSelRunStart = -1;
+            int hexMatchRunStart = -1;
+            IBrush? hexMatchRunBrush = null;
+
             for (int col = 0; col < rowBytes; col++) {
-                byte b = _readBuffer[rowStart + col];
                 long byteOffset = rowOffset + col;
-                int groupSep = col / 8;
-                double hexX = addressWidth + (col * 3 + groupSep) * charWidth;
+                double hexX = _hexXPositions[col];
+                double ax = _asciiXPositions[col];
 
                 // Match highlight (sliding cursor — O(1) amortized per byte)
-                bool isActiveMatch = false;
                 bool isMatch = false;
+                bool isActiveMatch = false;
                 while (matchCursor < matches.Count) {
                     long mStart = matches[matchCursor].Offset;
                     long mEnd = mStart + matches[matchCursor].Length - 1;
@@ -405,42 +437,89 @@ internal sealed class HexViewControl : Control
                     }
                     break;
                 }
+
+                // Match rects — merge adjacent (2B)
                 if (isMatch) {
-                    context.FillRectangle(isActiveMatch ? activeMatchBrush : matchBrush,
-                        new Rect(hexX, y, charWidth * 2, lineHeight));
+                    IBrush mBrush = isActiveMatch ? activeMatchBrush : matchBrush;
+                    if (hexMatchRunStart < 0) {
+                        hexMatchRunStart = col;
+                        hexMatchRunBrush = mBrush;
+                    } else if (hexMatchRunBrush != mBrush) {
+                        FlushHexMatchRun(context, hexMatchRunBrush!, y, lineHeight, charWidth, hexMatchRunStart, col);
+                        hexMatchRunStart = col;
+                        hexMatchRunBrush = mBrush;
+                    }
+                } else if (hexMatchRunStart >= 0) {
+                    FlushHexMatchRun(context, hexMatchRunBrush!, y, lineHeight, charWidth, hexMatchRunStart, col);
+                    hexMatchRunStart = -1;
+                    hexMatchRunBrush = null;
                 }
 
-                // Selection/cursor highlight
-                if (byteOffset == _state.HexCursorOffset) {
-                    context.FillRectangle(cursorBrush,
-                        new Rect(hexX, y, charWidth * 2, lineHeight));
+                // Cursor highlight (always per-cell — a single byte)
+                if (byteOffset == hexCursorOffset) {
+                    context.FillRectangle(cursorBrush, new Rect(hexX, y, charWidth * 2, lineHeight));
+                    context.FillRectangle(cursorBrush, new Rect(ax, y, charWidth, lineHeight));
                 } else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd) {
-                    context.FillRectangle(selectionBrush,
-                        new Rect(hexX, y, charWidth * 2, lineHeight));
+                    // Selection rects — merge adjacent (2B)
+                    if (hexSelRunStart < 0) hexSelRunStart = col;
+                    if (asciiSelRunStart < 0) asciiSelRunStart = col;
+                } else {
+                    // Flush selection runs
+                    if (hexSelRunStart >= 0) {
+                        double sx = _hexXPositions[hexSelRunStart];
+                        double ex = hexX; // current col start = end of selection
+                        context.FillRectangle(selectionBrush, new Rect(sx, y, ex - sx + charWidth * 2, lineHeight));
+                        hexSelRunStart = -1;
+                    }
+                    if (asciiSelRunStart >= 0) {
+                        double sx = _asciiXPositions[asciiSelRunStart];
+                        context.FillRectangle(selectionBrush, new Rect(sx, y, ax - sx + charWidth, lineHeight));
+                        asciiSelRunStart = -1;
+                    }
                 }
-
-                FormattedText hexText = _hexByteTextCache![b];
-                context.DrawText(hexText, new Point(hexX, y));
             }
 
-            // ASCII column
+            // Flush any pending runs at end of row
+            if (hexMatchRunStart >= 0)
+                FlushHexMatchRun(context, hexMatchRunBrush!, y, lineHeight, charWidth, hexMatchRunStart, rowBytes);
+            if (hexSelRunStart >= 0) {
+                double sx = _hexXPositions[hexSelRunStart];
+                double ex = _hexXPositions[rowBytes - 1];
+                context.FillRectangle(selectionBrush, new Rect(sx, y, ex - sx + charWidth * 2, lineHeight));
+            }
+            if (asciiSelRunStart >= 0) {
+                double sx = _asciiXPositions[asciiSelRunStart];
+                double ex = _asciiXPositions[rowBytes - 1];
+                context.FillRectangle(selectionBrush, new Rect(sx, y, ex - sx + charWidth, lineHeight));
+            }
+
+            // ── Row-level text rendering (2A) ──
+            // Build hex row string: "4F 72 69 67 69 6E 61 6C  20 ..."
+            int hexPos = 0;
             for (int col = 0; col < rowBytes; col++) {
                 byte b = _readBuffer[rowStart + col];
-                long byteOffset = rowOffset + col;
-                double ax = asciiX + col * charWidth;
-
-                // Selection/cursor highlight in ASCII
-                if (byteOffset == _state.HexCursorOffset) {
-                    context.FillRectangle(cursorBrush,
-                        new Rect(ax, y, charWidth, lineHeight));
-                } else if (selStart >= 0 && byteOffset >= selStart && byteOffset <= selEnd) {
-                    context.FillRectangle(selectionBrush,
-                        new Rect(ax, y, charWidth, lineHeight));
-                }
-
-                FormattedText asciiText = _asciiByteTextCache![b];
-                context.DrawText(asciiText, new Point(ax, y));
+                _hexRowBuffer[hexPos++] = (char)HexChars[b >> 4];
+                _hexRowBuffer[hexPos++] = (char)HexChars[b & 0xF];
+                _hexRowBuffer[hexPos++] = ' ';
+                if ((col & 7) == 7 && col < rowBytes - 1)
+                    _hexRowBuffer[hexPos++] = ' '; // group separator
             }
+
+            FormattedText hexRowText = new(new string(_hexRowBuffer, 0, hexPos),
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, textBrush);
+            context.DrawText(hexRowText, new Point(addressWidth, y));
+
+            // Build ASCII row string
+            for (int col = 0; col < rowBytes; col++) {
+                byte b = _readBuffer[rowStart + col];
+                _asciiRowBuffer[col] = b >= 0x20 && b < 0x7F ? (char)b : '.';
+            }
+
+            FormattedText asciiRowText = new(new string(_asciiRowBuffer, 0, rowBytes),
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, asciiBrush);
+            context.DrawText(asciiRowText, new Point(asciiX, y));
         }
 
         QueueScrollBarUpdate();
@@ -536,6 +615,53 @@ internal sealed class HexViewControl : Control
             _addressTextCache.Clear();
 
         return created;
+    }
+
+    /// <summary>Returns a cached FormattedText for the "Offset" / "Offset (dec)" header label.</summary>
+    private FormattedText GetOffsetLabel(bool decimalOffset, IBrush headerTextBrush)
+    {
+        if (_cachedOffsetLabel is not null && _cachedOffsetLabelDecimal == decimalOffset && _cachedOffsetLabelBrush == headerTextBrush)
+            return _cachedOffsetLabel;
+
+        string text = decimalOffset ? "Offset (dec)" : "Offset";
+        _cachedOffsetLabel = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, _state.ContentTypeface, _state.ContentFontSize, headerTextBrush);
+        _cachedOffsetLabelDecimal = decimalOffset;
+        _cachedOffsetLabelBrush = headerTextBrush;
+        return _cachedOffsetLabel;
+    }
+
+    /// <summary>Pre-computes hex and ASCII X position arrays to avoid per-byte arithmetic.</summary>
+    private void EnsureXPositions(int bytesPerRow, double addressWidth, double asciiX, double charWidth)
+    {
+        if (_xPositionsBytesPerRow == bytesPerRow && _xPositionsAddressWidth == addressWidth
+            && _xPositionsAsciiX == asciiX && _xPositionsCharWidth == charWidth)
+            return;
+
+        _xPositionsBytesPerRow = bytesPerRow;
+        _xPositionsAddressWidth = addressWidth;
+        _xPositionsAsciiX = asciiX;
+        _xPositionsCharWidth = charWidth;
+
+        if (_hexXPositions.Length < bytesPerRow)
+            _hexXPositions = new double[bytesPerRow];
+        if (_asciiXPositions.Length < bytesPerRow)
+            _asciiXPositions = new double[bytesPerRow];
+
+        for (int col = 0; col < bytesPerRow; col++) {
+            int groupSep = col / 8;
+            _hexXPositions[col] = addressWidth + (col * 3 + groupSep) * charWidth;
+            _asciiXPositions[col] = asciiX + col * charWidth;
+        }
+    }
+
+    /// <summary>Flushes a contiguous match-highlight run in the hex column.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void FlushHexMatchRun(DrawingContext context, IBrush brush, double y, double lineHeight, double charWidth, int startCol, int endCol)
+    {
+        double sx = _hexXPositions[startCol];
+        double ex = _hexXPositions[endCol - 1];
+        context.FillRectangle(brush, new Rect(sx, y, ex - sx + charWidth * 2, lineHeight));
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
