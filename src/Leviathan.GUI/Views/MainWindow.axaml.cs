@@ -174,7 +174,10 @@ public sealed partial class MainWindow : Window
         MenuDeleteRows.Click += (_, _) => DoDeleteCsvRows();
         MenuReadOnlyMode.Click += (_, _) => ToggleReadOnlyMode();
         MenuStartReadOnly.Click += (_, _) => ToggleStartReadOnly();
-        MenuSelectFont.Click += (_, _) => ShowFontPicker();
+        MenuSelectFont.Click += async (_, _) => {
+            SuppressNextMenuFocusRestore();
+            await ShowFontPickerDialog();
+        };
         MenuFontSizeUp.Click += (_, _) => AdjustFontSize(+1);
         MenuFontSizeDown.Click += (_, _) => AdjustFontSize(-1);
     }
@@ -710,73 +713,47 @@ public sealed partial class MainWindow : Window
         MenuTheme.Items.Add(themeEditorItem);
     }
 
-    private void ShowFontPicker()
+    private async Task ShowFontPickerDialog()
     {
-        // Build a list of monospace font families
         List<string> monoFonts = GetMonospaceFonts();
-        string currentFont = _state.Settings.FontFamily;
+        string originalFontFamily = _state.Settings.FontFamily;
+        double originalFontSize = _state.ContentFontSize;
 
-        // Create a simple selection window
-        Window fontWindow = new() {
-            Title = "Select Font",
-            Width = 450,
-            Height = 500,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner
-        };
+        FontPickerDialog dialog = new(
+            monoFonts,
+            originalFontFamily,
+            originalFontSize,
+            (fontFamily, fontSize) => ApplyFont(fontFamily, fontSize, persistSettings: false, refreshPalette: false));
 
-        DockPanel panel = new();
+        await dialog.ShowDialog(this);
 
-        // Preview text
-        TextBlock preview = new() {
-            Text = "AaBbCcDdEe 0123456789 {}[]|\\",
-            FontFamily = new FontFamily(currentFont),
-            FontSize = _state.ContentFontSize,
-            Margin = new Thickness(16, 8),
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
-        };
-        DockPanel.SetDock(preview, Avalonia.Controls.Dock.Bottom);
-        panel.Children.Add(preview);
-
-        // Font list
-        ListBox fontList = new();
-        foreach (string name in monoFonts) {
-            ListBoxItem item = new() {
-                Content = name,
-                Tag = name
-            };
-            fontList.Items.Add(item);
-            if (string.Equals(name, currentFont, StringComparison.OrdinalIgnoreCase))
-                fontList.SelectedItem = item;
+        if (dialog.Applied) {
+            ApplyFont(dialog.SelectedFontFamily, dialog.SelectedFontSize);
+        } else {
+            // Cancel/Escape should revert any live preview changes.
+            ApplyFont(originalFontFamily, originalFontSize, persistSettings: false);
         }
 
-        fontList.SelectionChanged += (_, _) => {
-            if (fontList.SelectedItem is ListBoxItem { Tag: string fontName }) {
-                preview.FontFamily = new FontFamily(fontName);
-                ApplyFont(fontName, _state.ContentFontSize);
-            }
-        };
-
-        fontList.DoubleTapped += (_, _) => fontWindow.Close();
-
-        panel.Children.Add(fontList);
-        fontWindow.Content = panel;
-        fontWindow.ShowDialog(this);
+        FocusActiveViewAsync();
     }
 
-    private void ApplyFont(string fontFamily, double fontSize)
+    private void ApplyFont(string fontFamily, double fontSize, bool persistSettings = true, bool refreshPalette = true)
     {
         fontSize = Math.Clamp(fontSize, 8, 72);
         _state.ContentTypeface = new Typeface($"{fontFamily}, Consolas, Courier New, monospace");
         _state.ContentFontSize = fontSize;
-        _state.Settings.FontFamily = fontFamily;
-        _state.Settings.FontSize = (int)fontSize;
-        _state.Settings.Save();
+        if (persistSettings) {
+            _state.Settings.FontFamily = fontFamily;
+            _state.Settings.FontSize = (int)fontSize;
+            _state.Settings.Save();
+        }
 
         _hexView?.ApplyThemeAndFont();
         _textView?.ApplyThemeAndFont();
         _csvView?.ApplyThemeAndFont();
 
-        RefreshCommandPaletteCommands();
+        if (refreshPalette)
+            RefreshCommandPaletteCommands();
     }
 
     private void AdjustFontSize(int delta)
@@ -1851,7 +1828,7 @@ public sealed partial class MainWindow : Window
         }
 
         // Font commands
-        _commandPalette.RegisterCommand("Change Font", "Select content font family", ShowFontPicker);
+        _commandPalette.RegisterCommand("Change Font", "Select content font family", () => _ = ShowFontPickerDialog());
         _commandPalette.RegisterCommand(
             () => $"Font Size: {_state.ContentFontSize:0}",
             "Current font size (use + and - to adjust)",

@@ -1,0 +1,96 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Leviathan.GUI.Widgets.FontPickerDialog"
+        x:CompileBindings="True"
+        Title="Select Font"
+        Width="940"
+        Height="620"
+        MinWidth="760"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid Margin="12"
+          ColumnDefinitions="300,*"
+          RowDefinitions="*,Auto"
+          ColumnSpacing="12"
+          RowSpacing="10">
+        <Border Grid.Row="0"
+                Grid.Column="0"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                CornerRadius="6"
+                Padding="10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+                    <TextBox x:Name="SearchBox"
+                             Watermark="Type to search fonts..." />
+                </StackPanel>
+                <ListBox x:Name="FontListBox" />
+            </DockPanel>
+        </Border>
+
+        <Border Grid.Row="0"
+                Grid.Column="1"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                CornerRadius="6"
+                Padding="12">
+            <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
+                <TextBlock Grid.Row="0" Text="Preview" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1"
+                           x:Name="SelectedFontTextBlock"
+                           FontSize="16"
+                           FontWeight="SemiBold" />
+                <TextBlock Grid.Row="2"
+                           Text="Sample text shown at the current editor font size."
+                           Opacity="0.7" />
+
+                <Border Grid.Row="3"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                        CornerRadius="4"
+                        Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="PreviewSampleLine1"
+                                   Text="AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPp"
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="PreviewSampleLine2"
+                                   Text="0123456789  !@#$%^&amp;*()  []{}&lt;&gt;|\\"
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="PreviewSampleLine3"
+                                   Text="The quick brown fox jumps over the lazy dog."
+                                   TextWrapping="Wrap" />
+                        <TextBlock x:Name="PreviewSampleLine4"
+                                   Text="00000080  48 65 6C 6C 6F 2C 20 4C 65 76 69 61 74 68 61 6E"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1"
+              Grid.ColumnSpan="2"
+              ColumnDefinitions="Auto,*"
+              ColumnSpacing="12">
+            <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,70,Auto" ColumnSpacing="6" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0"
+                           Text="Size"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="1" x:Name="DecreaseSizeButton" Content="-" Width="28" Height="28" />
+                <TextBox Grid.Column="2"
+                         x:Name="FontSizeTextBox"
+                         HorizontalContentAlignment="Center"
+                         VerticalContentAlignment="Center" />
+                <Button Grid.Column="3" x:Name="IncreaseSizeButton" Content="+" Width="28" Height="28" />
+            </Grid>
+
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button x:Name="ApplyButton" Content="Apply" MinWidth="92" />
+                <Button x:Name="CancelButton" Content="Cancel" MinWidth="92" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
