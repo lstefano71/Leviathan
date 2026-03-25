@@ -29,4 +29,39 @@ internal static class SearchHighlightHelper
         }
         return result;
     }
+
+    /// <summary>
+    /// Finds the index of the match whose start offset is closest to <paramref name="anchorOffset"/>.
+    /// When two candidates are equidistant, the forward (higher offset) match is preferred.
+    /// Returns <c>-1</c> when <paramref name="matches"/> is empty.
+    /// </summary>
+    internal static int FindClosestMatchIndexByOffset(List<SearchResult> matches, long anchorOffset)
+    {
+        if (matches.Count == 0)
+            return -1;
+
+        int lo = 0, hi = matches.Count - 1;
+        int firstAtOrAfter = matches.Count;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            long midOffset = matches[mid].Offset;
+            if (midOffset >= anchorOffset) {
+                firstAtOrAfter = mid;
+                hi = mid - 1;
+            } else {
+                lo = mid + 1;
+            }
+        }
+
+        if (firstAtOrAfter <= 0)
+            return 0;
+        if (firstAtOrAfter >= matches.Count)
+            return matches.Count - 1;
+
+        int previous = firstAtOrAfter - 1;
+        int next = firstAtOrAfter;
+        long previousDistance = Math.Abs(anchorOffset - matches[previous].Offset);
+        long nextDistance = Math.Abs(matches[next].Offset - anchorOffset);
+        return nextDistance <= previousDistance ? next : previous;
+    }
 }

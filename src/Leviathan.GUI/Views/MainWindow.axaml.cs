@@ -1897,6 +1897,11 @@ public sealed partial class MainWindow : Window
         if (_state.Document is null || string.IsNullOrWhiteSpace(_state.FindInput))
             return;
 
+        long searchAnchorOffset = _state.CurrentCursorOffset;
+        if (searchAnchorOffset < 0)
+            searchAnchorOffset = _state.BomLength;
+        searchAnchorOffset = Math.Clamp(searchAnchorOffset, 0, _state.Document.Length);
+
         _searchRestartTimer?.Stop();
         _state.CancelSearch();
         _state.SearchResults = [];
@@ -1964,10 +1969,6 @@ public sealed partial class MainWindow : Window
 
                         _state.SearchResults.AddRange(toPost);
                         _state.SearchStatus = $"{_state.SearchResults.Count} matches (searching...)";
-                        if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
-                            _state.CurrentMatchIndex = 0;
-                            NavigateToMatch(0);
-                        }
                         _findBar?.UpdateMatchStatus();
                         _hexView?.InvalidateVisual();
                         _textView?.InvalidateVisual();
@@ -1986,8 +1987,8 @@ public sealed partial class MainWindow : Window
 
                 _state.IsSearching = false;
                 if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
-                    _state.CurrentMatchIndex = 0;
-                    NavigateToMatch(0);
+                    _state.CurrentMatchIndex = SearchHighlightHelper.FindClosestMatchIndexByOffset(_state.SearchResults, searchAnchorOffset);
+                    NavigateToMatch(_state.CurrentMatchIndex);
                 }
                 _state.SearchStatus = _state.SearchResults.Count > 0
                     ? $"{_state.SearchResults.Count} matches"
