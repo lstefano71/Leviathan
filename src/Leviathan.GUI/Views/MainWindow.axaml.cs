@@ -1915,6 +1915,7 @@ public sealed partial class MainWindow : Window
 
         CancellationTokenSource cts = new();
         _state.SearchCts = cts;
+        bool autoJumped = false;
 
         bool isRegex = _state.FindRegexMode && !_state.FindHexMode;
         bool isHex = _state.FindHexMode;
@@ -1968,6 +1969,14 @@ public sealed partial class MainWindow : Window
                         if (_state.SearchCts != cts) return;
 
                         _state.SearchResults.AddRange(toPost);
+                        if (!autoJumped && _state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
+                            int forwardIndex = SearchHighlightHelper.FindFirstMatchAtOrAfterOffset(_state.SearchResults, searchAnchorOffset);
+                            if (forwardIndex >= 0) {
+                                _state.CurrentMatchIndex = forwardIndex;
+                                NavigateToMatch(_state.CurrentMatchIndex);
+                                autoJumped = true;
+                            }
+                        }
                         _state.SearchStatus = $"{_state.SearchResults.Count} matches (searching...)";
                         _findBar?.UpdateMatchStatus();
                         _hexView?.InvalidateVisual();
@@ -1987,7 +1996,8 @@ public sealed partial class MainWindow : Window
 
                 _state.IsSearching = false;
                 if (_state.CurrentMatchIndex < 0 && _state.SearchResults.Count > 0) {
-                    _state.CurrentMatchIndex = SearchHighlightHelper.FindClosestMatchIndexByOffset(_state.SearchResults, searchAnchorOffset);
+                    // No forward match was found while streaming: wrap to start.
+                    _state.CurrentMatchIndex = 0;
                     NavigateToMatch(_state.CurrentMatchIndex);
                 }
                 _state.SearchStatus = _state.SearchResults.Count > 0

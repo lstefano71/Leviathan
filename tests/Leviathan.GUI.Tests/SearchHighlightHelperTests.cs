@@ -9,6 +9,45 @@ namespace Leviathan.GUI.Tests;
 public sealed class SearchHighlightHelperTests
 {
     [Fact]
+    public void FindFirstMatchAtOrAfterOffset_AnchorBeforeAll_ReturnsFirst()
+    {
+        List<SearchResult> matches = [
+            new SearchResult(100, 2),
+            new SearchResult(250, 2),
+            new SearchResult(400, 2)
+        ];
+
+        int index = SearchHighlightHelper.FindFirstMatchAtOrAfterOffset(matches, 50);
+        Assert.Equal(0, index);
+    }
+
+    [Fact]
+    public void FindFirstMatchAtOrAfterOffset_AnchorBetweenMatches_ReturnsFirstAtOrAfter()
+    {
+        List<SearchResult> matches = [
+            new SearchResult(100, 2),
+            new SearchResult(250, 2),
+            new SearchResult(400, 2)
+        ];
+
+        int index = SearchHighlightHelper.FindFirstMatchAtOrAfterOffset(matches, 251);
+        Assert.Equal(2, index);
+    }
+
+    [Fact]
+    public void FindFirstMatchAtOrAfterOffset_AnchorAfterAll_ReturnsMinusOne()
+    {
+        List<SearchResult> matches = [
+            new SearchResult(100, 2),
+            new SearchResult(250, 2),
+            new SearchResult(400, 2)
+        ];
+
+        int index = SearchHighlightHelper.FindFirstMatchAtOrAfterOffset(matches, 401);
+        Assert.Equal(-1, index);
+    }
+
+    [Fact]
     public void FindClosestMatchIndexByOffset_EmptyList_ReturnsMinusOne()
     {
         List<SearchResult> matches = [];

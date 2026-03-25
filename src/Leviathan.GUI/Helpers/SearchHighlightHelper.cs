@@ -31,6 +31,27 @@ internal static class SearchHighlightHelper
     }
 
     /// <summary>
+    /// Returns the index of the first match whose start offset is at or after <paramref name="anchorOffset"/>.
+    /// Returns <c>-1</c> when no such match exists.
+    /// </summary>
+    internal static int FindFirstMatchAtOrAfterOffset(List<SearchResult> matches, long anchorOffset)
+    {
+        int lo = 0, hi = matches.Count - 1;
+        int result = -1;
+        while (lo <= hi) {
+            int mid = lo + (hi - lo) / 2;
+            long midOffset = matches[mid].Offset;
+            if (midOffset >= anchorOffset) {
+                result = mid;
+                hi = mid - 1;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Finds the index of the match whose start offset is closest to <paramref name="anchorOffset"/>.
     /// When two candidates are equidistant, the forward (higher offset) match is preferred.
     /// Returns <c>-1</c> when <paramref name="matches"/> is empty.
