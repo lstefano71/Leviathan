@@ -9,6 +9,7 @@ namespace Leviathan.Core.IO;
 /// </summary>
 public sealed class MappedFileSource : IDisposable
 {
+    private readonly FileStream _stream;
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly unsafe byte* _pointer;
@@ -31,18 +32,26 @@ public sealed class MappedFileSource : IDisposable
 
         if (Length == 0) {
             // Empty file — no mapping needed, keep pointer null.
+            _stream = null!;
             _mmf = null!;
             _accessor = null!;
             _pointer = null;
             return;
         }
 
-        _mmf = MemoryMappedFile.CreateFromFile(
+        _stream = new FileStream(
             filePath,
             FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        _mmf = MemoryMappedFile.CreateFromFile(
+            _stream,
             mapName: null,
             capacity: 0,
-            MemoryMappedFileAccess.Read);
+            MemoryMappedFileAccess.Read,
+            HandleInheritability.None,
+            leaveOpen: true);
 
         _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
 
@@ -93,5 +102,6 @@ public sealed class MappedFileSource : IDisposable
 
         _accessor?.Dispose();
         _mmf?.Dispose();
+        _stream?.Dispose();
     }
 }

@@ -309,4 +309,33 @@ public class DocumentTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void OpenFile_AllowsExternalAppendWhileDocumentIsOpen()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        byte[] data = [1, 2, 3, 4];
+        string path = CreateTempFile(data);
+
+        try {
+            using var doc = new Document(path);
+
+            Exception? appendException = Record.Exception(() => {
+                using var appendStream = new FileStream(
+                    path,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
+                appendStream.WriteByte(0x7E);
+                appendStream.Flush(flushToDisk: true);
+            });
+
+            Assert.Null(appendException);
+            Assert.Equal(data.Length + 1, new FileInfo(path).Length);
+        } finally {
+            File.Delete(path);
+        }
+    }
 }
